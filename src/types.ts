@@ -1,0 +1,185 @@
+export type Timeframe = 'M15' | 'H1' | 'H4' | 'D1';
+export type Trend = 'haussier' | 'baissier' | 'neutre';
+export type Signal = 'acheter' | 'vendre' | 'attendre';
+export type AiProvider = 'claude' | 'gemini';
+
+export interface Candle {
+  t: number;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+}
+
+export interface PairMeta {
+  id: string;
+  label: string;
+  decimals: number;
+  pipSize: number;
+}
+
+export interface Status {
+  dataSource: string;
+  providers: AiProvider[];
+  defaultProvider: AiProvider | null;
+  models: { claude: string; gemini: string };
+  mcpEnabled?: boolean;
+  pairs: PairMeta[];
+}
+
+export interface Quote {
+  price?: number;
+  time?: number;
+  changePct?: number | null;
+  stale?: boolean;
+  source?: string;
+  error?: string;
+}
+
+export interface StructureEvent {
+  kind: 'BOS' | 'CHoCH';
+  dir: 'bull' | 'bear';
+  level: number;
+  t: number;
+}
+
+export interface TfSummary {
+  tf: Timeframe;
+  trend: Trend;
+  lastEvent: StructureEvent | null;
+  swingHigh: number | null;
+  swingLow: number | null;
+  ema50: number | null;
+  ema200: number | null;
+  rsi14: number | null;
+  atr14: number;
+  lastClose: number;
+  lastTime: number;
+}
+
+export interface Zone {
+  id: string;
+  tf: Timeframe;
+  kind: 'FVG' | 'OB';
+  dir: 'bull' | 'bear';
+  top: number;
+  bottom: number;
+  t: number;
+  touched: boolean;
+}
+
+export interface LiquidityLevel {
+  id: string;
+  label: string;
+  price: number;
+  side: 'buy' | 'sell';
+  swept: boolean;
+  sweptAt?: number;
+}
+
+export interface Setup {
+  direction: 'acheter' | 'vendre';
+  entryType: 'marché' | 'limite';
+  entry: number;
+  sl: number;
+  tp1: number;
+  tp2: number | null;
+  tp1Label: string;
+  tp2Label: string | null;
+  rr1: number;
+  rr2: number | null;
+  zoneId: string;
+  zoneLabel: string;
+}
+
+export interface CheckItem {
+  key: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+  core: boolean;
+}
+
+export interface EngineResult {
+  price: number;
+  priceTime: number;
+  timeframes: Record<Timeframe, TfSummary>;
+  bias: Trend;
+  biasDetail: string;
+  session: { name: string; killzone: boolean; detail: string };
+  dealingRange: { high: number; low: number; position: number; label: string } | null;
+  liquidity: LiquidityLevel[];
+  zones: Zone[];
+  setup: Setup | null;
+  alternatives: Setup[];
+  checklist: CheckItem[];
+  score: number;
+  signal: Signal;
+  waitCondition: string | null;
+}
+
+export interface AiReview {
+  engine: string;
+  verdict: 'VALIDÉ' | 'REJETÉ';
+  signal: Signal;
+  resume: string;
+  contexte: string;
+  liquidite: string;
+  zones: string;
+  plan: string;
+  gestion: string;
+  invalidation: string;
+  lecture_capture: string | null;
+  niveaux: { entree: number | null; stop_loss: number | null; tp1: number | null; tp2: number | null };
+}
+
+export interface FinalPlan {
+  direction: 'acheter' | 'vendre';
+  entryType: 'marché' | 'limite';
+  entry: number;
+  sl: number;
+  tp1: number;
+  tp2: number | null;
+  rr1: number;
+  rr2: number | null;
+  origin: string;
+}
+
+export interface AnalysisResponse {
+  pair: string;
+  label: string;
+  decimals: number;
+  pipSize: number;
+  generatedAt: number;
+  source: string;
+  warnings: string[];
+  engine: EngineResult;
+  ai: AiReview | null;
+  aiError: string | null;
+  final: { signal: Signal; plan: FinalPlan | null; notes: string[] };
+}
+
+export interface RiskSettings {
+  capital: number;
+  riskPct: number;
+  dailyLossPct: number;
+  aiProvider: AiProvider | 'none' | 'auto';
+}
+
+export type TradeResult = 'en_cours' | 'gagne' | 'perdu' | 'breakeven' | 'non_pris';
+
+export interface JournalEntry {
+  id: string;
+  createdAt: number;
+  pair: string;
+  direction: 'acheter' | 'vendre';
+  entry: number;
+  sl: number;
+  tp: number;
+  rrPlanned: number;
+  riskPct: number;
+  lots: number | null;
+  result: TradeResult;
+  rMultiple: number | null; // résultat réel en R (ex : +2, -1)
+  note: string;
+}
