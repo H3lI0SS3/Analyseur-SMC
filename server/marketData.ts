@@ -4,7 +4,7 @@
 // H4 et D1 sont reconstruits à partir du H1 avec la frontière forex de 17h00 New York,
 // comme les graphiques MT5 des brokers. Aucune donnée n'est inventée.
 
-import { HOUR, tradingDayStart } from './time';
+import { HOUR, marketClosed, tradingDayStart } from './time';
 
 export interface Candle {
   t: number; // timestamp d'ouverture (ms, UTC)
@@ -177,11 +177,12 @@ async function fetchYahoo(pair: PairInfo, tf: 'M15' | 'H1'): Promise<Candle[]> {
   return clean(out);
 }
 
-/** Bougies valides, triées, sans doublon. */
+/** Bougies valides, triées, sans doublon, hors week-end (certaines sources publient des bougies plates quand le marché est fermé). */
 function clean(list: Candle[]): Candle[] {
   const ok = list.filter(
     c =>
       Number.isFinite(c.t) &&
+      !marketClosed(c.t) &&
       [c.o, c.h, c.l, c.c].every(v => typeof v === 'number' && Number.isFinite(v) && v > 0) &&
       c.h >= Math.max(c.o, c.c) &&
       c.l <= Math.min(c.o, c.c)
@@ -240,7 +241,7 @@ export async function getQuotes(): Promise<Record<string, QuoteInfo>> {
           price: Number(last.c.toFixed(PAIRS[id].decimals)),
           time: last.t,
           changePct: prevClose ? Number((((last.c - prevClose) / prevClose) * 100).toFixed(2)) : null,
-          stale: Date.now() - last.t > 20 * 60_000,
+          stale: marketClosed(Date.now()) || Date.now() - last.t > 20 * 60_000,
           source: m15.source,
           futuresProxy: m15.futuresProxy,
         };
