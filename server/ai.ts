@@ -8,7 +8,11 @@ import type { EngineResult } from './smc';
 export type AiProvider = 'claude' | 'gemini';
 
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+// Si un modèle est retiré par Google, on essaie automatiquement le suivant.
+const GEMINI_FALLBACKS = [...new Set([GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-flash-latest'])];
+let geminiWorking: string | null = null;
+const isModelGone = (e: any) => /\b404\b|not found|no longer available|is not supported/i.test(String(e?.message || e));
 
 export function availableProviders(): AiProvider[] {
   const out: AiProvider[] = [];
@@ -146,8 +150,8 @@ async function reviewGemini(text: string, image?: { base64: string; mediaType: s
   parts.push({ text });
   const str = (d: string) => ({ type: Type.STRING, description: d });
   const num = { type: Type.NUMBER, nullable: true };
-  const res = await ai.models.generateContent({
-    model: GEMINI_MODEL,
+  const call = (model: string) => ai.models.generateContent({
+    model,
     contents: [{ role: 'user', parts }],
     config: {
       systemInstruction: SYSTEM,
@@ -176,6 +180,21 @@ async function reviewGemini(text: string, image?: { base64: string; mediaType: s
       },
     },
   });
+  let res: any = null;
+  let used = '';
+  let lastErr: any = null;
+  for (const model of geminiWorking ? [geminiWorking, ...GEMINI_FALLBACKS.filter(m => m !== geminiWorking)] : GEMINI_FALLBACKS) {
+    try {
+      res = await call(model);
+      used = model;
+      geminiWorking = model;
+      break;
+    } catch (e) {
+      lastErr = e;
+      if (!isModelGone(e)) throw e; // autre erreur (quota, réseau) : on ne masque rien
+    }
+  }
+  if (!res) throw lastErr;
   const raw = res.text || '';
   let parsed: any;
   try {
@@ -185,7 +204,7 @@ async function reviewGemini(text: string, image?: { base64: string; mediaType: s
     if (!m) throw new Error('Réponse Gemini illisible.');
     parsed = JSON.parse(m[0]);
   }
-  return normalize(parsed, `Gemini (${GEMINI_MODEL})`);
+  return normalize(parsed, `Gemini (${used})`);
 }
 
 function normalize(p: any, engine: string): AiReview {

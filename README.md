@@ -22,7 +22,7 @@ Outil d'aide à la décision SMC/ICT pour EUR/USD et XAU/USD. **Aucune exécutio
 | `ANTHROPIC_API_KEY` | Facultative. Active Claude (prioritaire en mode Auto). |
 | `TWELVE_DATA_API_KEY` | Facultative, recommandée : cotations spot. Sans elle, l'or vient des futures COMEX (GC=F). |
 | `MCP_TOKEN` | Facultative. Active le connecteur Claude sur `/mcp` (16 caractères minimum). |
-| `CLAUDE_MODEL` / `GEMINI_MODEL` | Facultatifs (par défaut `claude-sonnet-5-5` / `gemini-2.5-flash`). |
+| `CLAUDE_MODEL` / `GEMINI_MODEL` | Facultatifs (par défaut `claude-sonnet-5-5` / `gemini-3.8-flash`). |
 
 ## Connecteur Claude (MCP)
 
