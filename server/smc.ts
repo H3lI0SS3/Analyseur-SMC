@@ -456,7 +456,8 @@ export interface SweepInfo {
 export function findSweeps(m15: Candle[], levels: LiquidityLevel[], h1: Candle[], h1Swings: Swing[], lookback = 32): SweepInfo[] {
   const recent = m15.slice(-lookback);
   const cands: { side: 'buy' | 'sell'; label: string; price: number; since: number }[] = [
-    ...levels.map(l => ({ side: l.side, label: l.label, price: l.price, since: 0 })),
+    // un chiffre rond est une cible, pas un réservoir de stops : il ne compte pas comme balayage
+    ...levels.filter(l => !l.id.startsWith('RN')).map(l => ({ side: l.side, label: l.label, price: l.price, since: 0 })),
     ...h1Swings
       .filter(s => s.idx >= h1.length - 120)
       .map(s => ({
@@ -642,7 +643,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     roundStep: decimals >= 4 ? 0.005 : 50,
   }).map(l => ({ ...l, price: r(l.price) }));
   const sweeps = findSweeps(m15, liquidity, h1, raw.H1.swings);
-  const amd = amdPhase(m15, raw.M15.events, now, decimals);
+  // marché fermé : on décrit le cycle de la dernière séance, pas une séance qui n'existe pas
+  const amdRef = marketClosed(now) ? lastM15.t + TF_MS.M15 : now;
+  const amd = amdPhase(m15, raw.M15.events, amdRef, decimals);
   const strictSweep = opts.strictSweep ?? true;
 
   // Zones H1 + M15 non invalidées, proches du prix
