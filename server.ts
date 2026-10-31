@@ -88,9 +88,15 @@ app.post('/api/backtest', (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
-app.get('/api/backtest', (req, res) => {
+app.get('/api/backtest', async (req, res) => {
   // chaque consultation fait avancer le calcul ~2,5 s (Cloud Run ne donne du CPU que pendant les requêtes)
-  res.json(getJob(String(req.query.pair || 'EUR/USD'), 2500) || { status: 'aucun' });
+  const pair = String(req.query.pair || 'EUR/USD');
+  let job = getJob(pair, 2500);
+  if (job?.status === 'en cours' && job.phase?.startsWith('Téléchargement')) {
+    await new Promise(r => setTimeout(r, 2500)); // laisse le téléchargement avancer pendant la requête
+    job = getJob(pair, 0);
+  }
+  res.json(job || { status: 'aucun' });
 });
 
 // ---------- Connecteur MCP (pour piloter l'app depuis Claude) ----------

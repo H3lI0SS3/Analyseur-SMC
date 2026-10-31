@@ -188,6 +188,17 @@ function buildServer() {
         if (job.status === 'erreur') return fail(`Backtest ${actif} en erreur (serveur ${job.instance}) : ${job.error}`);
         return text(`Backtest ${actif} lancé (serveur ${job.instance}) : ${job.phase}. Rappelle l’outil pour le faire avancer.`);
       }
+      if (job.status === 'en cours' && job.phase?.startsWith('Téléchargement')) {
+        // Cloud Run ne donne du CPU que pendant une requête : on garde celle-ci ouverte pour que
+        // le téléchargement (réseau + limiteur de débit) progresse vraiment.
+        for (let i = 0; i < 10; i++) {
+          await new Promise(r => setTimeout(r, 2_500));
+          const j = getJob(actif, 0);
+          if (j && (j.status !== 'en cours' || !j.phase?.startsWith('Téléchargement'))) break;
+        }
+        job = getJob(actif, 15_000)!;
+      }
+      if (job.status === 'erreur') return fail(`Backtest ${actif} en erreur (serveur ${job.instance}) : ${job.error}`);
       if (job.status === 'en cours') return text(`Backtest ${actif} en cours (serveur ${job.instance}) : ${job.phase}. Rappelle l’outil pour continuer le calcul.`);
       const r = job.result!;
       return text({
