@@ -1,5 +1,6 @@
 // Tests du simulateur et du backtest : npx tsx server/backtest.test.ts
-import { simulate, runBacktest, BacktestRun, similarHistory, type BtTrade, type SetupFeatures } from './backtest';
+import { simulate, runBacktest, BacktestRun, similarHistory, normCdf, type BtTrade, type SetupFeatures } from './backtest';
+import { exportTrades, importTrades } from './historySnapshot';
 import type { Candle } from './marketData';
 import type { Setup } from './smc';
 import { nyParts } from './time';
@@ -157,6 +158,25 @@ const setup = (p: Partial<Setup>): Setup => ({
   ok('Moins de 30 setups au total : on utilise tous les signaux', few.matched.length === 0 && few.trades === 10);
   ok('Moins de 30 trades : aucun verdict', few.verdict === 'non démontré');
   ok('Les ordres expirés ne comptent pas comme trades', similarHistory([...trades, mk({}, null, 999)], f, { from: 0, to: 1 })!.trades === 40);
+}
+
+// 9. Viabilité et export compact
+{
+  ok('normCdf(0) = 0,5', Math.abs(normCdf(0) - 0.5) < 1e-7);
+  ok('normCdf(1,036) ≈ 0,85', Math.abs(normCdf(1.036) - 0.85) < 0.001, `${normCdf(1.036).toFixed(4)}`);
+  ok('normCdf(-1,96) ≈ 0,025', Math.abs(normCdf(-1.96) - 0.025) < 0.001);
+  const f: SetupFeatures = { direction: 'vendre', zoneKind: 'OB', zoneTf: 'M15', session: 'Kill zone de Londres', sweep: true, amd: false, premiumDiscount: true, entryType: 'limite' };
+  const mk = (r: number | null, i: number): BtTrade => ({ variant: 'souple', signalAt: i, filledAt: r === null ? null : i, exitAt: i, direction: 'vendre', entry: 1, sl: 1, tp1: 1, tp2: null, plannedRR: 2, outcome: r === null ? 'expiré' : r > 0 ? 'gagné' : 'perdu', r, session: '', amdPhase: '', features: f });
+  const strong = Array.from({ length: 100 }, (_, i) => mk(i % 2 ? 2.5 : -1, i)); // moyenne +0,75 R
+  const weak = Array.from({ length: 100 }, (_, i) => mk(i % 4 ? -1 : 3, i)); // moyenne 0 R
+  const hs = similarHistory(strong, f, { from: 0, to: 1 })!;
+  const hw = similarHistory(weak, f, { from: 0, to: 1 })!;
+  ok('Viabilité élevée pour un setup nettement rentable', (hs.viability ?? 0) >= 99, `${hs.viability} %`);
+  ok('Viabilité ≈ 50 % pour un setup à espérance nulle', Math.abs((hw.viability ?? 0) - 50) <= 2, `${hw.viability} %`);
+  ok('Pas de viabilité sous 30 trades', similarHistory(strong.slice(0, 10), f, { from: 0, to: 1 })!.viability === null);
+  const round = importTrades(exportTrades([...strong, mk(null, 999)]));
+  const hr = similarHistory(round, f, { from: 0, to: 1 })!;
+  ok('Export / import compact sans perte', hr.trades === hs.trades && hr.avgR === hs.avgR && hr.viability === hs.viability && round.length === 101);
 }
 
 if (failed) {

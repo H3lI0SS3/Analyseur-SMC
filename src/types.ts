@@ -230,6 +230,7 @@ export type SignalHistory =
       profitFactor: number | null;
       fillRate: number | null;
       verdict: 'favorable' | 'défavorable' | 'non démontré';
+      viability: number | null;
       message: string;
       period: { from: number; to: number };
       rulesVersion: string;
@@ -237,7 +238,17 @@ export type SignalHistory =
   | { status: 'en préparation'; message: string; progress: number }
   | { status: 'indisponible'; message: string };
 
+export interface Verdict {
+  action: 'ACHETER' | 'VENDRE' | 'ATTENDRE';
+  viability: number | null;
+  threshold: number;
+  summary: string;
+  pour: string[];
+  contre: string[];
+}
+
 export interface AnalysisResponse {
+  verdict?: Verdict;
   history?: SignalHistory | null;
   pair: string;
   label: string;

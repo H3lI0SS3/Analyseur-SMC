@@ -157,6 +157,8 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
 
   return (
     <div className="space-y-3">
+      {a.verdict && <VerdictCard v={a.verdict} />}
+
       {/* Verdict */}
       <section
         className={cx(
@@ -167,7 +169,7 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="label">Décision</div>
+            <div className="label">Signal technique du moteur</div>
             <div
               className={cx(
                 'mt-1 text-3xl font-extrabold tracking-tight',
@@ -398,6 +400,54 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
         Outil d’aide à la décision, pas un conseil en investissement. Le trading avec effet de levier peut faire perdre plus que la mise : teste d’abord en démo.
       </p>
     </div>
+  );
+}
+
+function VerdictCard({ v }: { v: NonNullable<AnalysisResponse['verdict']> }) {
+  const take = v.action !== 'ATTENDRE';
+  const pct = v.viability;
+  return (
+    <section className={cx('card border-2 p-4', v.action === 'ACHETER' ? 'border-up' : v.action === 'VENDRE' ? 'border-down' : 'border-warn/60')}>
+      <div className="label">Verdict</div>
+      <div className={cx('mt-1 text-3xl font-extrabold tracking-tight', v.action === 'ACHETER' ? 'text-up' : v.action === 'VENDRE' ? 'text-down' : 'text-warn')}>
+        {v.action}
+      </div>
+      <div className="mt-3">
+        <div className="flex items-end justify-between">
+          <span className="text-xs text-mute">Viabilité (rentabilité prouvée sur 2 ans)</span>
+          <span className={cx('num text-2xl font-bold', pct !== null && pct >= v.threshold ? 'text-up' : 'text-ink')}>{pct === null ? '—' : `${pct} %`}</span>
+        </div>
+        <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-full bg-card2">
+          <div className={cx('h-full', pct !== null && pct >= v.threshold ? 'bg-up' : 'bg-warn')} style={{ width: `${pct ?? 0}%` }} />
+          <div className="absolute inset-y-0 w-0.5 bg-ink" style={{ left: `${v.threshold}%` }} />
+        </div>
+        <div className="mt-0.5 text-right text-[10px] text-mute">seuil {v.threshold} %</div>
+      </div>
+      <p className="mt-2 text-sm leading-snug">{v.summary}</p>
+      {v.pour.length > 0 && (
+        <details className="mt-3 rounded-lg bg-card2 px-3 py-2" open={take}>
+          <summary className="cursor-pointer text-xs font-semibold text-up">Pour ({v.pour.length})</summary>
+          <ul className="mt-1.5 space-y-1 text-[12px] leading-snug">
+            {v.pour.map(x => (
+              <li key={x}>✓ {x}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {v.contre.length > 0 && (
+        <details className="mt-2 rounded-lg bg-card2 px-3 py-2" open={!take}>
+          <summary className="cursor-pointer text-xs font-semibold text-down">Contre ({v.contre.length})</summary>
+          <ul className="mt-1.5 space-y-1 text-[12px] leading-snug">
+            {v.contre.map(x => (
+              <li key={x}>✗ {x}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <p className="mt-3 text-[10px] leading-snug text-mute">
+        La viabilité n’est pas la chance de gagner CE trade (25 à 40 % pour ce type de stratégie) : c’est la probabilité, mesurée sur les vrais résultats passés, que ce type de setup rapporte sur la durée. Outil d’aide à la décision, pas un conseil en investissement.
+      </p>
+    </section>
   );
 }
 

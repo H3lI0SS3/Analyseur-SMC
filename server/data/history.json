@@ -1,0 +1,5 @@
+{
+  "note": "Historique pré-calculé des setups du moteur (backtest M15 réel). Généré depuis l'outil backtest du connecteur ; rechargé au démarrage pour que la viabilité soit disponible immédiatement.",
+  "rulesVersion": "3.2",
+  "pairs": {}
+}

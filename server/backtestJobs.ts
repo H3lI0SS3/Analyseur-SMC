@@ -7,6 +7,7 @@ import { PAIRS, getHistory } from './marketData';
 /** Identifiant de ce serveur : si deux appels n'ont pas le même, l'hébergeur a lancé plusieurs serveurs. */
 export const INSTANCE_ID = crypto.randomBytes(3).toString('hex');
 import { BacktestRun, similarHistory, type BacktestResult, type BtTrade, type SetupFeatures, type SimilarHistory } from './backtest';
+import { bundledSnapshot, importTrades } from './historySnapshot';
 
 export interface JobView {
   instance?: string;
@@ -26,6 +27,7 @@ interface Job extends JobView {
 }
 
 const jobs = new Map<string, Job>();
+const bundledCache = new Map<string, BtTrade[]>();
 /** Un historique de plus de 7 jours est recalculé à la prochaine analyse. */
 const MAX_AGE = 7 * 24 * 3_600_000;
 
@@ -115,7 +117,9 @@ export type HistoryForSignal =
 export function historyForSignal(pair: string, features: SetupFeatures | null): HistoryForSignal | null {
   let job = jobs.get(pair);
   const stale = job?.status === 'terminé' && Date.now() - (job.finishedAt || 0) > MAX_AGE;
-  if (!job || job.status === 'erreur' || stale) {
+  const bundled = bundledSnapshot(pair);
+  const snapFresh = !!bundled && Date.now() - bundled.generatedAt < 2 * MAX_AGE;
+  if ((!job && !snapFresh) || job?.status === 'erreur' || stale) {
     try {
       startBacktest(pair);
     } catch {
@@ -128,10 +132,24 @@ export function historyForSignal(pair: string, features: SetupFeatures | null): 
     const h = similarHistory(job.trades, features, { from: job.result.from, to: job.result.to });
     return h ?? { status: 'indisponible', message: 'Aucun setup comparable dans l’historique.' };
   }
+  // En attendant un calcul frais : historique embarqué dans l'app (même moteur, mêmes règles)
+  const snap = bundledSnapshot(pair);
+  if (snap) {
+    let trades = bundledCache.get(pair);
+    if (!trades) bundledCache.set(pair, (trades = importTrades(snap.rows)));
+    const h = similarHistory(trades, features, { from: snap.from, to: snap.to });
+    if (h) return h;
+  }
   if (job?.status === 'erreur') return { status: 'indisponible', message: `Historique indisponible : ${job.error}` };
   return {
     status: 'en préparation',
     message: `Historique en cours de calcul (${job?.phase ?? 'démarrage'}). Le résultat passé de ce type de setup s’affichera à la prochaine analyse.`,
     progress: job?.progress ?? 0,
   };
+}
+
+/** Trades du dernier backtest terminé (pour l'export compact). */
+export function finishedTrades(pair: string): BtTrade[] | null {
+  const j = jobs.get(pair);
+  return j?.status === 'terminé' && j.trades ? j.trades : null;
 }

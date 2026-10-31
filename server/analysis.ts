@@ -239,7 +239,10 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     engine.alternatives = [];
   }
   warnings.unshift(...blockers);
+  const verdict = buildVerdict(engine, final, history, ai, blockers);
+
   return {
+    verdict,
     pair,
     label: info.label,
     decimals: info.decimals,
@@ -256,4 +259,67 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     final,
     history,
   };
+}
+
+// ---------- Verdict final : une action claire, un pourcentage, des justificatifs ----------
+export const VIABILITY_THRESHOLD = 85;
+
+export interface Verdict {
+  action: 'ACHETER' | 'VENDRE' | 'ATTENDRE';
+  /** probabilité (0-100) que ce type de setup soit rentable sur la durée ; null si non calculable */
+  viability: number | null;
+  threshold: number;
+  summary: string;
+  pour: string[];
+  contre: string[];
+}
+
+function buildVerdict(
+  engine: EngineResult,
+  final: { signal: 'acheter' | 'vendre' | 'attendre'; plan: FinalPlan | null; notes: string[] },
+  history: ReturnType<typeof historyForSignal>,
+  ai: AiReview | null,
+  blockers: string[]
+): Verdict {
+  const pour: string[] = [];
+  const contre: string[] = [];
+  for (const c of engine.checklist) {
+    if (c.ok) pour.push(`${c.label} — ${c.detail}`);
+    else contre.push(`${c.label}${c.core ? ' (obligatoire)' : ''} — ${c.detail}`);
+  }
+  for (const b of blockers) contre.unshift(b);
+
+  let viability: number | null = null;
+  if (history && history.status === 'disponible') {
+    viability = history.viability;
+    const line = `Historique : ${history.trades} setups comparables (${history.criteria}), ${history.winRate} % gagnants, ${history.avgR >= 0 ? '+' : ''}${history.avgR} R en moyenne par trade.`;
+    if (viability !== null && viability >= VIABILITY_THRESHOLD) pour.unshift(line);
+    else contre.unshift(line);
+  } else if (history) {
+    contre.unshift(history.message);
+  } else if (engine.setup) {
+    contre.unshift('Historique des setups indisponible : viabilité non mesurable.');
+  }
+  if (ai) {
+    const l = `Relecture IA (${ai.engine}) : ${ai.verdict}. ${ai.resume}`;
+    (ai.verdict === 'VALIDÉ' ? pour : contre).push(l);
+  }
+
+  const direction = final.plan?.direction ?? null;
+  const signalOk = final.signal !== 'attendre' && !!final.plan;
+  const viable = viability !== null && viability >= VIABILITY_THRESHOLD;
+  const take = signalOk && viable;
+
+  let summary: string;
+  if (take) {
+    summary = `${direction === 'acheter' ? 'Achat' : 'Vente'} validé${direction === 'acheter' ? '' : 'e'} : toutes les conditions du moteur sont réunies et ce type de setup a ${viability} % de chances d’être rentable sur la durée (seuil ${VIABILITY_THRESHOLD} %).`;
+  } else if (!signalOk) {
+    summary = `On attend : ${final.notes.find(n => !n.startsWith('Attention')) || engine.waitCondition || 'les conditions du moteur ne sont pas réunies.'}`;
+  } else if (viability === null) {
+    summary = 'On attend : le setup est valide techniquement, mais sa rentabilité passée ne peut pas être mesurée.';
+  } else {
+    summary = `On attend : setup techniquement valide, mais sa viabilité est de ${viability} %, sous ton seuil de ${VIABILITY_THRESHOLD} %. Rien ne prouve que ce type de setup rapporte sur la durée.`;
+  }
+  const action: Verdict['action'] = !take ? 'ATTENDRE' : direction === 'acheter' ? 'ACHETER' : 'VENDRE';
+  return { action, viability, threshold: VIABILITY_THRESHOLD, summary, pour, contre };
 }

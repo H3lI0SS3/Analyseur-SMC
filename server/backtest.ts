@@ -464,9 +464,22 @@ export interface SimilarHistory {
   profitFactor: number | null;
   fillRate: number | null; // ordres limite réellement exécutés
   verdict: 'favorable' | 'défavorable' | 'non démontré';
+  /**
+   * Viabilité (0-100) : probabilité statistique que ce type de setup soit rentable sur la durée
+   * (espérance > 0), calculée sur ses trades réels. null si moins de 30 trades.
+   */
+  viability: number | null;
   message: string;
   period: { from: number; to: number };
   rulesVersion: string;
+}
+
+/** Fonction de répartition de la loi normale (approximation d'Abramowitz-Stegun, erreur < 1e-7). */
+export function normCdf(z: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989422804014327 * Math.exp((-z * z) / 2);
+  const p = d * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  return z >= 0 ? 1 - p : p;
 }
 
 const LABELS: Record<keyof SetupFeatures, (f: SetupFeatures) => string> = {
@@ -510,6 +523,8 @@ export function similarHistory(trades: BtTrade[], f: SetupFeatures, period: { fr
     const limits = same.filter(t => t.features.entryType === 'limite');
     // en dessous de 30 trades, aucun verdict : l'échantillon est trop petit
     const verdict: SimilarHistory['verdict'] = n < minTrades ? 'non démontré' : mean - half > 0 ? 'favorable' : mean + half < 0 ? 'défavorable' : 'non démontré';
+    const se = sd / Math.sqrt(n);
+    const viability = n < minTrades ? null : Math.round(100 * (se > 0 ? normCdf(mean / se) : mean > 0 ? 1 : 0));
     const r2 = (x: number) => Number(x.toFixed(2));
     const matched = keys.map(k => LABELS[k](f));
     const crit = matched.length ? matched.join(' · ') : 'tous les signaux du moteur';
@@ -533,6 +548,7 @@ export function similarHistory(trades: BtTrade[], f: SetupFeatures, period: { fr
       profitFactor: loss > 0 ? r2(gain / loss) : null,
       fillRate: limits.length ? Math.round((limits.filter(t => t.filledAt !== null).length / limits.length) * 100) : null,
       verdict,
+      viability,
       message,
       period,
       rulesVersion: RULES_VERSION,

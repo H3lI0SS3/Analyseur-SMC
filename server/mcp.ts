@@ -10,7 +10,8 @@ import { z } from 'zod';
 import { PAIRS, getSeries, getQuotes, dataSourceName, type Timeframe } from './marketData';
 import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './ai';
 import { runAnalysis, AnalysisError } from './analysis';
-import { getJob, startBacktest } from './backtestJobs';
+import { finishedTrades, getJob, startBacktest } from './backtestJobs';
+import { exportTrades } from './historySnapshot';
 import { describe as describeBt } from './backtest';
 import { maDateTime } from './time';
 
@@ -118,6 +119,7 @@ function buildServer() {
         const p = a.final.plan;
         const risk = risque_pct ?? 1;
         return text({
+          verdict_final: a.verdict,
           actif: a.label,
           genere_a_utc: new Date(a.generatedAt).toISOString(),
           source: a.source,
@@ -228,6 +230,7 @@ function buildServer() {
           })),
         },
         hypotheses: r.assumptions,
+        export_compact: { from: r.from, to: r.to, generatedAt: Date.now(), rulesVersion: r.rulesVersion, rows: exportTrades(finishedTrades(actif) ?? []) },
         derniers_trades: r.lastTrades.map(t => ({
           variante: t.variant,
           signal: maDateTime(t.signalAt),
