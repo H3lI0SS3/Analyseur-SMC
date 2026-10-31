@@ -16,6 +16,8 @@ export interface PairMeta {
   label: string;
   decimals: number;
   pipSize: number;
+  contract?: number;
+  defaultSpread?: number;
 }
 
 export interface Status {
@@ -24,6 +26,7 @@ export interface Status {
   defaultProvider: AiProvider | null;
   models: { claude: string; gemini: string };
   mcpEnabled?: boolean;
+  accessRequired?: boolean;
   pairs: PairMeta[];
 }
 
@@ -33,6 +36,7 @@ export interface Quote {
   changePct?: number | null;
   stale?: boolean;
   source?: string;
+  futuresProxy?: boolean;
   error?: string;
 }
 
@@ -116,6 +120,8 @@ export interface EngineResult {
   score: number;
   signal: Signal;
   waitCondition: string | null;
+  nextNews: { t: number; currency: string; title: string } | null;
+  newsAvailable: boolean;
 }
 
 export interface AiReview {
@@ -150,8 +156,11 @@ export interface AnalysisResponse {
   label: string;
   decimals: number;
   pipSize: number;
+  contract: number;
+  costs: { spread: number; commissionPerLot: number; contract: number };
   generatedAt: number;
   source: string;
+  futuresProxy: boolean;
   warnings: string[];
   engine: EngineResult;
   ai: AiReview | null;
@@ -164,6 +173,12 @@ export interface RiskSettings {
   riskPct: number;
   dailyLossPct: number;
   aiProvider: AiProvider | 'none' | 'auto';
+  /** spread EUR/USD en pips */
+  spreadEurPips: number;
+  /** spread de l'or en $ */
+  spreadGold: number;
+  /** commission aller-retour par lot, en $ */
+  commissionPerLot: number;
 }
 
 export type TradeResult = 'en_cours' | 'gagne' | 'perdu' | 'breakeven' | 'non_pris';

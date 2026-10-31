@@ -24,7 +24,7 @@ const text = (obj: unknown) => ({ content: [{ type: 'text' as const, text: typeo
 const fail = (msg: string) => ({ content: [{ type: 'text' as const, text: msg }], isError: true });
 
 function buildServer() {
-  const server = new McpServer({ name: 'analyseur-smc', version: '2.1.0' });
+  const server = new McpServer({ name: 'analyseur-smc', version: '2.2.0' });
   const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
 
   server.registerTool(
@@ -85,7 +85,7 @@ function buildServer() {
         const rows = s.candles
           .slice(-(nombre || 50))
           .map(c => `${new Date(c.t).toISOString().slice(0, 16).replace('T', ' ')} | O ${c.o.toFixed(dec)} H ${c.h.toFixed(dec)} L ${c.l.toFixed(dec)} C ${c.c.toFixed(dec)}`);
-        return text(`${actif} ${unite_de_temps} — source ${s.source}${s.note ? ` (${s.note})` : ''}\nheure UTC | open high low close\n${rows.join('\n')}`);
+        return text(`${actif} ${unite_de_temps} — source ${s.source}${s.futuresProxy ? ' (futures or COMEX : écart possible de 10 à 40 $ avec le spot)' : ''}\nheure UTC | open high low close\n${rows.join('\n')}`);
       } catch (err: any) {
         return fail(`Données indisponibles : ${err.message}`);
       }
@@ -159,40 +159,64 @@ function buildServer() {
   return server;
 }
 
-/** Vérifie le secret : en-tête "Authorization: Bearer <MCP_TOKEN>" (recommandé) ou ?token=<MCP_TOKEN>. */
+/**
+ * Vérifie le secret, accepté sous 4 formes :
+ *  - dans l'adresse : /mcp/<MCP_TOKEN>   (le plus fiable avec les connecteurs Claude)
+ *  - en-tête "Authorization: Bearer <MCP_TOKEN>" ou "X-API-Key: <MCP_TOKEN>"
+ *  - paramètre ?token=<MCP_TOKEN>
+ */
 function auth(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.MCP_TOKEN;
   if (!expected || expected.length < 16) {
     return res.status(503).json({ error: 'Connecteur désactivé : définis un secret MCP_TOKEN (16 caractères minimum) dans AI Studio.' });
   }
   const header = String(req.headers.authorization || '');
-  const given = header.startsWith('Bearer ') ? header.slice(7).trim() : String(req.query.token || '');
-  const a = Buffer.from(given);
+  const candidates = [
+    String(req.params.token || ''),
+    header.startsWith('Bearer ') ? header.slice(7).trim() : '',
+    String(req.headers['x-api-key'] || ''),
+    String(req.query.token || ''),
+  ].filter(Boolean);
   const b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return res.status(401).json({ error: 'Non autorisé.' });
-  }
+  const ok = candidates.some(c => {
+    const a = Buffer.from(c);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  });
+  if (!ok) return res.status(401).json({ error: 'Non autorisé.' });
   next();
 }
 
-export function mountMcp(app: Express) {
-  app.post('/mcp', auth, async (req, res) => {
-    // Mode sans session : un serveur neuf par requête (adapté à Cloud Run).
-    const server = buildServer();
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    res.on('close', () => {
-      transport.close();
-      server.close();
-    });
-    try {
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-    } catch (err: any) {
-      if (!res.headersSent) {
-        res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Erreur interne' }, id: null });
-      }
-    }
+async function handleMcp(req: Request, res: Response) {
+  // Mode sans session : un serveur neuf par requête (adapté à Cloud Run).
+  const server = buildServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  res.on('close', () => {
+    transport.close();
+    server.close();
   });
-  app.get('/mcp', auth, (_req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Utilise POST.' }));
-  app.delete('/mcp', auth, (_req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Pas de session.' }));
+  try {
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (err: any) {
+    console.error('[MCP] erreur', err?.message);
+    if (!res.headersSent) {
+      res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Erreur interne' }, id: null });
+    }
+  }
+}
+
+export function mountMcp(app: Express) {
+  const paths = ['/mcp', '/mcp/:token'];
+  // Journal minimal pour diagnostiquer les connexions (sans jamais afficher le secret).
+  app.use(['/mcp', '/.well-known'], (req, _res, next) => {
+    // jamais le jeton : tout ce qui suit /mcp est masqué, la query string n'est pas journalisée
+    const shown = req.baseUrl === '/mcp' ? (req.path === '/' ? '/mcp' : '/mcp/***') : `${req.baseUrl}${req.path}`;
+    console.log(`[MCP] ${req.method} ${shown} — ${req.headers['user-agent'] || ''}`);
+    next();
+  });
+  app.post(paths, auth, handleMcp);
+  app.get(paths, auth, (_req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Utilise POST.' }));
+  app.delete(paths, auth, (_req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Pas de session.' }));
+  // Pas d'OAuth : on répond clairement 404 en JSON (sinon le site renverrait la page HTML de l'app).
+  app.all('/.well-known/*', (_req, res) => res.status(404).json({ error: 'Pas de découverte OAuth : authentification par jeton.' }));
 }

@@ -1,6 +1,8 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Analyseur SMC – EUR/USD & Or",
+  "description": "Analyse SMC/ICT multi-unités de temps sur vraies données de marché (EUR/USD, XAU/USD), relue par Claude ou Gemini. Aucune exécution d'ordres.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResponse, RiskSettings, Status, Timeframe } from '../types';
-import { cx, distanceLabel, fmt, localDateTime, localTime, lotSize } from '../lib/utils';
+import { api, costsFor, cx, distanceLabel, fmt, localDateTime, localTime, lotSize, realRiskUsd } from '../lib/utils';
 
 interface Props {
   pair: string;
@@ -58,12 +58,13 @@ export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, o
     setAdded(false);
     try {
       const provider = settings.aiProvider === 'auto' ? undefined : settings.aiProvider;
-      const r = await fetch('/api/analyze', {
+      const r = await api('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pair,
           provider,
+          ...costsFor(pair, settings),
           note: note.trim() || undefined,
           image: image ? { base64: image.base64, mediaType: image.mediaType } : undefined,
         }),
@@ -149,8 +150,9 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
   const plan = final.plan;
   const go = final.signal !== 'attendre';
   const okCount = e.checklist.filter(c => c.ok).length;
-  const lots = plan ? lotSize(a.pair, settings.capital, settings.riskPct, plan.entry, plan.sl) : null;
-  const riskUsd = (settings.capital * settings.riskPct) / 100;
+  const comm = a.costs?.commissionPerLot ?? 0;
+  const lots = plan ? lotSize(a.pair, settings.capital, settings.riskPct, plan.entry, plan.sl, comm) : null;
+  const riskUsd = plan && lots ? realRiskUsd(a.pair, lots, plan.entry, plan.sl, comm) : (settings.capital * settings.riskPct) / 100;
   const tfs: Timeframe[] = ['D1', 'H4', 'H1', 'M15'];
 
   return (
@@ -193,6 +195,11 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
           <span>{e.session.name}</span>
           <span>Source : {a.source}</span>
         </div>
+        {e.nextNews && (
+          <p className="mt-2 text-[11px] text-mute">
+            Prochaine annonce forte : <span className="text-ink">{e.nextNews.title}</span> ({e.nextNews.currency}), {localDateTime(e.nextNews.t)}
+          </p>
+        )}
         {a.warnings.map(w => (
           <p key={w} className="mt-2 flex gap-1.5 text-[11px] leading-snug text-warn">
             <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" /> {w}
@@ -219,8 +226,11 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
               <span className="num font-semibold">{lots === null ? '—' : `${lots.toFixed(2)} lot`}</span>
             </div>
             <div className="mt-1 flex justify-between">
-              <span className="text-mute">Perte max si SL touché</span>
+              <span className="text-mute">Perte réelle si SL touché</span>
               <span className="num">≈ {riskUsd.toFixed(0)} $</span>
+            </div>
+            <div className="mt-1 text-[10px] text-mute">
+              R:R nets : spread {a.pair === 'XAU/USD' ? `${a.costs.spread.toFixed(2)} $` : `${(a.costs.spread / 0.0001).toFixed(1)} pip`} et commission {comm} $/lot inclus.
             </div>
             {lots === 0 && <p className="mt-1 text-warn">Stop trop large pour ton capital : taille inférieure à 0,01 lot.</p>}
           </div>

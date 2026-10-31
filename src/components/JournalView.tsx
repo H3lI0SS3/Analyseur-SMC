@@ -26,6 +26,7 @@ export function JournalView({ journal, setJournal }: Props) {
   const update = (id: string, patch: Partial<JournalEntry>) => setJournal(journal.map(j => (j.id === id ? { ...j, ...patch } : j)));
 
   const setResult = (j: JournalEntry, r: TradeResult) => {
+    // Valeur proposée, à corriger avec le R réel (sortie partielle, slippage…)
     const rMultiple = r === 'gagne' ? j.rrPlanned : r === 'perdu' ? -1 : r === 'breakeven' ? 0 : null;
     update(j.id, { result: r, rMultiple });
   };
@@ -130,9 +131,9 @@ export function JournalView({ journal, setJournal }: Props) {
                     {r.label}
                   </button>
                 ))}
-                {j.result === 'gagne' && (
+                {(j.result === 'gagne' || j.result === 'perdu') && (
                   <label className="flex items-center gap-1 text-[11px] text-mute">
-                    R obtenu
+                    R réel
                     <input
                       type="number"
                       step="0.1"

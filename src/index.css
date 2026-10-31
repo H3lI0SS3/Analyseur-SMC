@@ -1,1 +1,51 @@
 @import "tailwindcss";
+
+@theme {
+  --color-bg: #0e1217;
+  --color-card: #151a21;
+  --color-card2: #1b2129;
+  --color-line: #262d37;
+  --color-ink: #e7e4dd;
+  --color-mute: #8b93a1;
+  --color-gold: #d99a3d;
+  --color-up: #3fb68b;
+  --color-down: #e5534b;
+  --color-warn: #e0b341;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-mute);
+  font-weight: 600;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}

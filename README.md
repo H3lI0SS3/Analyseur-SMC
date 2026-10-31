@@ -22,7 +22,7 @@ Outil d'aide à la décision SMC/ICT pour EUR/USD et XAU/USD. **Aucune exécutio
 | `ANTHROPIC_API_KEY` | Facultative. Active Claude (prioritaire en mode Auto). |
 | `TWELVE_DATA_API_KEY` | Facultative, recommandée : cotations spot. Sans elle, l'or vient des futures COMEX (GC=F). |
 | `MCP_TOKEN` | Facultative. Active le connecteur Claude sur `/mcp` (16 caractères minimum). |
-| `CLAUDE_MODEL` / `GEMINI_MODEL` | Facultatifs (par défaut `claude-sonnet-5-5` / `gemini-flash-latest`). |
+| `CLAUDE_MODEL` / `GEMINI_MODEL` | Facultatifs (par défaut `claude-sonnet-5-5` / `gemini-2.5-flash`). |
 
 ## Connecteur Claude (MCP)
 
@@ -30,9 +30,10 @@ L'app expose un serveur MCP sur `https://<ton-app>/mcp` (lecture seule) avec 4 o
 
 1. Dans AI Studio → Secrets, crée `MCP_TOKEN` avec un code long et aléatoire, puis publie l'app.
 2. Dans Claude → Personnaliser → Connecteurs → Ajouter → Connecteur personnalisé :
-   - URL : `https://<ton-app>/mcp`
-   - Authentification : « Pas de connexion », puis en-tête de requête `Authorization` = `Bearer <ton MCP_TOKEN>`.
-   - Si les en-têtes ne sont pas proposés, utilise l'URL `https://<ton-app>/mcp?token=<ton MCP_TOKEN>` (moins sûr : ne la partage pas).
+   - URL : `https://<ton-app>/mcp/<ton MCP_TOKEN>` (méthode recommandée)
+   - Authentification : « Pas de connexion ».
+   - Autres formes acceptées : en-tête `Authorization: Bearer <token>`, en-tête `X-API-Key`, ou `?token=<token>`.
+3. Les journaux du serveur (AI Studio) affichent chaque appel `[MCP]` pour diagnostiquer, sans jamais afficher le secret.
 
 ## Lancer en local
 

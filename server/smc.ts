@@ -1,7 +1,8 @@
 // Moteur d'analyse technique SMC/ICT calculé à partir des vraies bougies.
 // Tout ce qui sort d'ici est déterministe et vérifiable : mêmes bougies => même résultat.
 
-import type { Candle, Timeframe } from './marketData';
+import { TF_MS, type Candle, type Timeframe } from './marketData';
+import { HOUR, marketClosed, maDateTime, maTime, nyParts, nyToUtc, tradingDayStart, tradingWeekStart } from './time';
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -95,6 +96,21 @@ export interface EngineResult {
   score: number; // 0-100, score de confluence (pas une probabilité)
   signal: 'acheter' | 'vendre' | 'attendre';
   waitCondition: string | null;
+  nextNews: { t: number; currency: string; title: string } | null;
+  newsAvailable: boolean;
+}
+
+export interface AnalyzeOptions {
+  /** instant de l'analyse (par défaut maintenant) : permet de rejouer le passé */
+  now?: number;
+  /** spread en prix (ex. 0.0001 = 1 pip EUR/USD, 0.30 $ sur l'or) */
+  spread?: number;
+  /** commission aller-retour par lot, en $ */
+  commissionPerLot?: number;
+  /** taille d'un lot (100 000 EUR/USD, 100 oz or) */
+  contract?: number;
+  news?: { available: boolean; events: { t: number; currency: string; title: string }[] };
+  newsCurrencies?: string[];
 }
 
 // ---------------- Indicateurs ----------------
@@ -206,9 +222,12 @@ function brokenAfter(c: Candle[], s: Swing): boolean {
 export function findFVGs(c: Candle[], tf: Timeframe, atrVal: number, lookback = 120): Zone[] {
   const out: Zone[] = [];
   const start = Math.max(2, c.length - lookback);
+  const period = TF_MS[tf];
   for (let i = start; i < c.length; i++) {
     const a = c[i - 2];
     const b = c[i];
+    // un trou de cotation (week-end, pause) n'est pas un Fair Value Gap
+    if (b.t - a.t > 2.5 * period) continue;
     if (b.l > a.h && b.l - a.h >= 0.15 * atrVal) {
       const z: Zone = { id: `${tf}-FVG-${c[i - 1].t}`, tf, kind: 'FVG', dir: 'bull', top: b.l, bottom: a.h, t: c[i - 1].t, touched: false };
       if (updateMitigation(c, i + 1, z)) out.push(z);
@@ -271,12 +290,6 @@ function updateMitigation(c: Candle[], from: number, z: Zone, touchFrom = from):
 }
 
 // ---------------- Liquidité ----------------
-const DAY = 86_400_000;
-
-function dayStart(t: number) {
-  return Math.floor(t / DAY) * DAY;
-}
-
 export function buildLiquidity(
   d1: Candle[],
   h1: Candle[],
@@ -287,32 +300,29 @@ export function buildLiquidity(
 ): LiquidityLevel[] {
   const levels: LiquidityLevel[] = [];
   const now = m15[m15.length - 1].t;
-  const today = dayStart(now);
+  const today = tradingDayStart(now); // jour de trading : depuis 17h00 New York
 
-  // Veille (PDH/PDL) : dernière bougie journalière terminée
-  const prevDay = [...d1].reverse().find(c => dayStart(c.t) < today);
+  // Veille (PDH/PDL) : jour de trading précédent
+  const prevDay = [...d1].reverse().find(c => c.t < today);
   if (prevDay) {
     levels.push(mkLevel('PDH', 'Plus haut de la veille (PDH)', prevDay.h, 'buy', m15, today));
     levels.push(mkLevel('PDL', 'Plus bas de la veille (PDL)', prevDay.l, 'sell', m15, today));
   }
 
-  // Semaine précédente (PWH/PWL)
-  const weekStart = (t: number) => {
-    const d = new Date(t);
-    const dow = (d.getUTCDay() + 6) % 7; // lundi = 0
-    return dayStart(t) - dow * DAY;
-  };
-  const thisWeek = weekStart(now);
-  const prevWeek = d1.filter(c => weekStart(c.t) === thisWeek - 7 * DAY);
-  if (prevWeek.length) {
-    levels.push(mkLevel('PWH', 'Plus haut semaine précédente (PWH)', Math.max(...prevWeek.map(c => c.h)), 'buy', m15, thisWeek));
-    levels.push(mkLevel('PWL', 'Plus bas semaine précédente (PWL)', Math.min(...prevWeek.map(c => c.l)), 'sell', m15, thisWeek));
+  // Semaine précédente (PWH/PWL), semaine démarrant le dimanche 17h00 New York
+  const thisWeek = tradingWeekStart(now);
+  const prevWeekStart = tradingWeekStart(thisWeek - 1);
+  const pw = d1.filter(c => tradingWeekStart(c.t) === prevWeekStart);
+  if (pw.length) {
+    levels.push(mkLevel('PWH', 'Plus haut semaine précédente (PWH)', Math.max(...pw.map(c => c.h)), 'buy', m15, thisWeek));
+    levels.push(mkLevel('PWL', 'Plus bas semaine précédente (PWL)', Math.min(...pw.map(c => c.l)), 'sell', m15, thisWeek));
   }
 
-  // Range asiatique du jour (00h-07h UTC)
-  const asia = m15.filter(c => c.t >= today && c.t < today + 7 * 3600_000);
-  if (asia.length >= 8 && now >= today + 7 * 3600_000) {
-    const asiaEnd = today + 7 * 3600_000;
+  // Range asiatique : 20h00 - 00h00 New York (dans le jour de trading en cours)
+  const asiaStart = today + 3 * HOUR;
+  const asiaEnd = today + 7 * HOUR;
+  const asia = m15.filter(c => c.t >= asiaStart && c.t < asiaEnd);
+  if (asia.length >= 8 && now >= asiaEnd) {
     levels.push(mkLevel('ASH', 'Haut du range asiatique', Math.max(...asia.map(c => c.h)), 'buy', m15, asiaEnd));
     levels.push(mkLevel('ASL', 'Bas du range asiatique', Math.min(...asia.map(c => c.l)), 'sell', m15, asiaEnd));
   }
@@ -383,19 +393,22 @@ export function recentSweep(m15: Candle[], levels: LiquidityLevel[], lookback = 
   return found;
 }
 
-// ---------------- Session ----------------
+// ---------------- Session (heure de New York, affichée en heure du Maroc) ----------------
 export function sessionInfo(t: number): { name: string; killzone: boolean; detail: string } {
-  const d = new Date(t);
-  const h = d.getUTCHours() + d.getUTCMinutes() / 60;
-  const dow = d.getUTCDay();
-  if (dow === 6 || (dow === 0 && h < 21) || (dow === 5 && h >= 21)) {
-    return { name: 'Marché fermé (week-end)', killzone: false, detail: 'Pas de cotation le week-end.' };
+  if (marketClosed(t)) {
+    return { name: 'Marché fermé (week-end)', killzone: false, detail: 'Réouverture le dimanche à 17h00 New York.' };
   }
-  if (h >= 7 && h < 10) return { name: 'Ouverture de Londres', killzone: true, detail: 'Kill zone de Londres (≈ 7h-10h UTC).' };
-  if (h >= 12 && h < 15) return { name: 'Ouverture de New York', killzone: true, detail: 'Kill zone de New York (≈ 12h-15h UTC).' };
-  if (h >= 10 && h < 12) return { name: 'Londres (milieu de séance)', killzone: false, detail: 'Hors kill zone.' };
-  if (h >= 15 && h < 21) return { name: 'New York (après-midi)', killzone: false, detail: 'Liquidité en baisse en fin de séance.' };
-  return { name: 'Session asiatique', killzone: false, detail: 'Volatilité souvent faible, range en formation.' };
+  const p = nyParts(t);
+  const h = p.h + p.mi / 60;
+  const ma = (hNy: number) => maTime(nyToUtc(p.y, p.m, p.d, hNy));
+  const kzLondon = `02h-05h New York, soit ${ma(2)}-${ma(5)} au Maroc`;
+  const kzNy = `07h-10h New York, soit ${ma(7)}-${ma(10)} au Maroc`;
+  if (h >= 2 && h < 5) return { name: 'Kill zone de Londres', killzone: true, detail: `Kill zone de Londres (${kzLondon}).` };
+  if (h >= 7 && h < 10) return { name: 'Kill zone de New York', killzone: true, detail: `Kill zone de New York (${kzNy}).` };
+  if (h >= 5 && h < 7) return { name: 'Londres (avant New York)', killzone: false, detail: `Hors kill zone. Prochaine : New York (${kzNy}).` };
+  if (h >= 10 && h < 17) return { name: 'New York (après la kill zone)', killzone: false, detail: 'Hors kill zone : liquidité en baisse.' };
+  if (h >= 17 && h < 20) return { name: 'Ouverture du jour (faible liquidité)', killzone: false, detail: 'Spreads souvent larges à cette heure.' };
+  return { name: 'Session asiatique', killzone: false, detail: `Range en formation. Prochaine : Londres (${kzLondon}).` };
 }
 
 // ---------------- Résumé par unité de temps ----------------
@@ -424,19 +437,30 @@ export function summarize(tf: Timeframe, c: Candle[]): { summary: TfSummary; swi
 }
 
 // ---------------- Moteur principal ----------------
-export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): EngineResult {
+export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, opts: AnalyzeOptions = {}): EngineResult {
   const r = (x: number) => Number(x.toFixed(decimals));
+  const now = opts.now ?? Date.now();
+  // Le prix actuel vient de la dernière bougie M15, même non clôturée...
+  const lastM15 = series.M15[series.M15.length - 1];
+  const price = lastM15.c;
+  const priceTime = lastM15.t;
+  // ...mais tous les calculs (structure, zones, indicateurs) n'utilisent que des bougies CLÔTURÉES.
+  const closed = {} as Record<Timeframe, Candle[]>;
+  for (const tf of ['D1', 'H4', 'H1', 'M15'] as Timeframe[]) {
+    closed[tf] = series[tf].filter(c => c.t + TF_MS[tf] <= now);
+    if (closed[tf].length < 30) throw new Error(`Pas assez de bougies clôturées en ${tf}.`);
+  }
   const s: any = {};
   const raw: any = {};
   for (const tf of ['D1', 'H4', 'H1', 'M15'] as Timeframe[]) {
-    raw[tf] = summarize(tf, series[tf]);
+    raw[tf] = summarize(tf, closed[tf]);
     s[tf] = raw[tf].summary;
   }
   const timeframes = s as Record<Timeframe, TfSummary>;
-  const m15 = series.M15;
-  const h1 = series.H1;
-  const price = m15[m15.length - 1].c;
-  const priceTime = m15[m15.length - 1].t;
+  const m15 = closed.M15;
+  const h1 = closed.H1;
+  const spread = Math.max(0, opts.spread ?? 0);
+  const commUnit = Math.max(0, opts.commissionPerLot ?? 0) / (opts.contract || 1);
   const atrH1 = timeframes.H1.atr14;
   const atrM15 = timeframes.M15.atr14;
 
@@ -473,7 +497,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
     }
   }
 
-  const liquidity = buildLiquidity(series.D1, h1, m15, raw.H1.swings, atrH1, price).map(l => ({ ...l, price: r(l.price) }));
+  const liquidity = buildLiquidity(closed.D1, h1, m15, raw.H1.swings, atrH1, price).map(l => ({ ...l, price: r(l.price) }));
   const sweep = recentSweep(m15, liquidity);
 
   // Zones H1 + M15 non invalidées, proches du prix
@@ -486,7 +510,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
     .filter(z => Math.abs((z.top + z.bottom) / 2 - price) <= 4 * atrH1)
     .map(z => ({ ...z, top: r(z.top), bottom: r(z.bottom) }));
 
-  const session = sessionInfo(Date.now());
+  const session = sessionInfo(now);
 
   // ----- Construction des plans possibles -----
   const buildSetup = (z: Zone): Setup | null => {
@@ -501,28 +525,32 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
     const protect = long
       ? Math.min(z.bottom, ...(timeframes.M15.swingLow && timeframes.M15.swingLow < entry && entry - timeframes.M15.swingLow < 1.5 * atrH1 ? [timeframes.M15.swingLow] : []))
       : Math.max(z.top, ...(timeframes.M15.swingHigh && timeframes.M15.swingHigh > entry && timeframes.M15.swingHigh - entry < 1.5 * atrH1 ? [timeframes.M15.swingHigh] : []));
-    let sl = long ? protect - buffer : protect + buffer;
-    // stop jamais plus serré que 0,3 ATR H1 (sinon il saute sur le simple bruit / spread)
-    const minRisk = 0.3 * atrH1;
+    // Graphique en prix bid : le stop d'une vente se déclenche sur l'ask, on lui ajoute le spread.
+    let sl = long ? protect - buffer : protect + buffer + spread;
+    // stop jamais plus serré que 0,3 ATR H1 ni que 4 spreads (sinon il saute sur le simple bruit)
+    const minRisk = Math.max(0.3 * atrH1, 4 * spread);
     if (Math.abs(entry - sl) < minRisk) sl = long ? entry - minRisk : entry + minRisk;
     const risk = Math.abs(entry - sl);
     if (risk <= 0 || risk > 2.5 * atrH1) return null;
-    // Cibles = liquidité opposée non prise, au-delà d'1R
+    // Objectif placé un spread AVANT la liquidité (pour être servi), R:R NET de commission.
+    const tpOf = (lvl: number) => (long ? lvl - spread : lvl + spread);
+    const rrNet = (lvl: number) => (Math.abs(tpOf(lvl) - entry) - commUnit) / (risk + commUnit);
+    // Cibles = liquidité opposée non prise, au-delà d'1R net
     const targets = liquidity
-      .filter(l => !l.swept && (long ? l.side === 'buy' && l.price > entry + risk : l.side === 'sell' && l.price < entry - risk))
+      .filter(l => !l.swept && (long ? l.side === 'buy' && l.price > entry : l.side === 'sell' && l.price < entry) && rrNet(l.price) >= 1)
       .sort((a, b) => (long ? a.price - b.price : b.price - a.price));
     if (!targets.length) return null;
     const t1 = targets[0];
-    const t2 = targets.find(t => Math.abs(t.price - entry) / risk >= 2 && t !== t1) || null;
-    const rr1 = Math.abs(t1.price - entry) / risk;
-    const rr2 = t2 ? Math.abs(t2.price - entry) / risk : null;
+    const t2 = targets.find(t => rrNet(t.price) >= 2 && t !== t1) || null;
+    const rr1 = rrNet(t1.price);
+    const rr2 = t2 ? rrNet(t2.price) : null;
     return {
       direction: long ? 'acheter' : 'vendre',
       entryType: inside ? 'marché' : 'limite',
       entry: r(entry),
       sl: r(sl),
-      tp1: r(t1.price),
-      tp2: t2 ? r(t2.price) : null,
+      tp1: r(tpOf(t1.price)),
+      tp2: t2 ? r(tpOf(t2.price)) : null,
       tp1Label: t1.label,
       tp2Label: t2?.label ?? null,
       rr1: Number(rr1.toFixed(2)),
@@ -532,19 +560,32 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
     };
   };
 
+  // Zones jamais testées d'abord, puis la plus proche du prix.
+  const touchedById = new Map(zones.map(z => [z.id, z.touched]));
   const candidates = zones
     .map(buildSetup)
     .filter((x): x is Setup => !!x)
-    .sort((a, b) => {
-      const ra = a.rr2 ?? a.rr1;
-      const rb = b.rr2 ?? b.rr1;
-      return Math.abs(a.entry - price) - Math.abs(b.entry - price) || rb - ra;
-    });
+    .sort((a, b) => Number(touchedById.get(a.zoneId)) - Number(touchedById.get(b.zoneId)) || Math.abs(a.entry - price) - Math.abs(b.entry - price));
 
   const wantDir = bias === 'haussier' ? 'acheter' : bias === 'baissier' ? 'vendre' : null;
   const aligned = wantDir ? candidates.filter(c => c.direction === wantDir) : [];
   const setup = aligned.find(c => (c.rr2 ?? c.rr1) >= 2) || aligned[0] || null;
   const alternatives = candidates.filter(c => c !== setup).slice(0, 3);
+
+  // ----- Annonces économiques -----
+  const curr = opts.newsCurrencies ?? ['USD'];
+  const relevant = (opts.news?.events ?? []).filter(e => curr.includes(e.currency));
+  const blocking = relevant.find(e => Math.abs(e.t - now) <= 30 * 60_000) || null;
+  const nextNews = relevant.find(e => e.t >= now - 30 * 60_000) || null;
+  const newsAvailable = !!opts.news?.available;
+  const newsOk = newsAvailable && !blocking;
+  const newsDetail = !newsAvailable
+    ? 'Calendrier économique indisponible : vérifie les annonces toi-même avant d’entrer.'
+    : blocking
+    ? `${blocking.title} (${blocking.currency}) à ${maTime(blocking.t)} : pas d’entrée entre ${maTime(blocking.t - 30 * 60_000)} et ${maTime(blocking.t + 30 * 60_000)}.`
+    : nextNews
+    ? `Prochaine annonce forte : ${nextNews.title} (${nextNews.currency}), ${maDateTime(nextNews.t)}.`
+    : 'Aucune autre annonce forte cette semaine.';
 
   // ----- Checklist -----
   const finalRR = setup ? setup.rr2 ?? setup.rr1 : 0;
@@ -566,9 +607,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
     },
     {
       key: 'rr',
-      label: 'Ratio risque/rendement ≥ 1:2',
+      label: 'Ratio risque/rendement net ≥ 1:2',
       ok: finalRR >= 2,
-      detail: setup ? `R:R calculé 1:${finalRR.toFixed(2)} (TP1 1:${setup.rr1.toFixed(2)})` : 'Pas de plan.',
+      detail: setup ? `R:R net (spread et commission compris) 1:${finalRR.toFixed(2)} (TP1 1:${setup.rr1.toFixed(2)})` : 'Pas de plan.',
       core: true,
     },
     {
@@ -576,7 +617,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
       label: 'Balayage de liquidité récent dans le bon sens',
       ok: !!setup && !!sweep && sweep.side === (isLong ? 'sell' : 'buy'),
       detail: sweep
-        ? `${sweep.level.label} balayé à ${new Date(sweep.t).toISOString().slice(11, 16)} UTC.`
+        ? `${sweep.level.label} balayé à ${maTime(sweep.t)} (heure du Maroc).`
         : 'Aucun sweep net dans les 6 dernières heures (M15).',
       core: false,
     },
@@ -595,6 +636,13 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
       core: false,
     },
     {
+      key: 'news',
+      label: 'Pas d’annonce à fort impact (±30 min)',
+      ok: newsOk,
+      detail: newsDetail,
+      core: true,
+    },
+    {
       key: 'session',
       label: 'Pendant une kill zone (Londres / New York)',
       ok: session.killzone,
@@ -608,7 +656,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
   const score = Math.round((okCount / checklist.length) * 100);
   let signal: EngineResult['signal'] = 'attendre';
   let waitCondition: string | null = null;
-  if (coreOk && okCount >= 5 && setup) {
+  // 4 conditions obligatoires + au moins 2 des 4 conditions de confluence
+  if (coreOk && okCount >= 6 && setup) {
     signal = setup.direction;
   } else {
     const missing = checklist.filter(c => !c.ok).map(c => c.label.toLowerCase());
@@ -618,9 +667,13 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
       ? 'Attendre une structure H4 claire (cassure confirmée) avant de chercher une entrée.'
       : `Attendre un retour du prix dans une zone ${bias === 'haussier' ? 'haussière (discount)' : 'baissière (premium)'} avec de la place jusqu'à la prochaine liquidité.`;
   }
-  if (session.name.startsWith('Marché fermé')) {
+  if (blocking && signal !== 'attendre') {
     signal = 'attendre';
-    waitCondition = 'Marché fermé : analyse à revoir à la réouverture.';
+    waitCondition = `Annonce à fort impact : ${blocking.title} à ${maTime(blocking.t)}. On attend la fin de la fenêtre de 30 minutes.`;
+  }
+  if (marketClosed(now)) {
+    signal = 'attendre';
+    waitCondition = 'Marché fermé : analyse à revoir à la réouverture (dimanche 17h00 New York).';
   }
 
   return {
@@ -639,5 +692,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number): 
     score,
     signal,
     waitCondition,
+    nextNews,
+    newsAvailable,
   };
 }

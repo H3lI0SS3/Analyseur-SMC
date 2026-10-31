@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { AnalysisResponse, Candle, Timeframe } from '../types';
-import { cx, fmt, localDateTime } from '../lib/utils';
+import { api, cx, fmt, localDateTime } from '../lib/utils';
 
 interface Props {
   pair: string;
+  reload?: number;
   decimals: number;
   analysis: AnalysisResponse | null;
 }
@@ -12,7 +13,7 @@ interface Props {
 const TFS: Timeframe[] = ['M15', 'H1', 'H4', 'D1'];
 const TF_MS: Record<Timeframe, number> = { M15: 900e3, H1: 3600e3, H4: 4 * 3600e3, D1: 86400e3 };
 
-export function CandleChart({ pair, decimals, analysis }: Props) {
+export function CandleChart({ pair, decimals, analysis, reload }: Props) {
   const [tf, setTf] = useState<Timeframe>('H1');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [meta, setMeta] = useState<{ source?: string; fetchedAt?: number }>({});
@@ -33,7 +34,7 @@ export function CandleChart({ pair, decimals, analysis }: Props) {
   const load = async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/candles?pair=${encodeURIComponent(pair)}&tf=${tf}`);
+      const r = await api(`/api/candles?pair=${encodeURIComponent(pair)}&tf=${tf}`);
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Erreur');
       setCandles(j.candles);
@@ -52,7 +53,7 @@ export function CandleChart({ pair, decimals, analysis }: Props) {
     const id = setInterval(load, 60_000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pair, tf]);
+  }, [pair, tf, reload]);
 
   const showAnalysis = overlays && analysis && analysis.pair === pair ? analysis : null;
   const H = 300;
@@ -223,8 +224,8 @@ export function CandleChart({ pair, decimals, analysis }: Props) {
               i % Math.ceil(view.length / 4) === 0 ? (
                 <text key={'t' + c.t} x={i * geom.step} y={H - 6} fontSize="10" fill="#6b7380">
                   {tf === 'D1' || tf === 'H4'
-                    ? new Date(c.t).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
-                    : new Date(c.t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    ? new Date(c.t).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'Africa/Casablanca' })
+                    : new Date(c.t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Casablanca' })}
                 </text>
               ) : null
             )}
@@ -234,7 +235,7 @@ export function CandleChart({ pair, decimals, analysis }: Props) {
       <div className="mt-1 text-[10px] text-mute">
         {meta.source ? `Source : ${meta.source}` : ''}
         {meta.fetchedAt ? ` · mis à jour ${localDateTime(meta.fetchedAt)}` : ''}
-        {' · heures locales'}
+        {' · heure du Maroc'}
       </div>
     </section>
   );

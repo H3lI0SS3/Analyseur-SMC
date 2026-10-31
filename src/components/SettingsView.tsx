@@ -22,8 +22,15 @@ export function SettingsView({ settings, setSettings, status }: Props) {
       <section className="card space-y-4 p-4">
         <div className="label">Gestion du risque</div>
         <Field label="Capital du compte ($)" value={settings.capital} step={100} min={100} onChange={v => set({ capital: v })} />
-        <Field label="Risque par trade (%)" value={settings.riskPct} step={0.25} min={0.1} max={5} onChange={v => set({ riskPct: v })} hint="Recommandé : 0,5 à 1 %." />
-        <Field label="Perte max par jour (%)" value={settings.dailyLossPct} step={0.5} min={0.5} max={10} onChange={v => set({ dailyLossPct: v })} hint="Au-delà, l’app bloque l’ajout de nouveaux trades au journal pour la journée." />
+        <Field label="Risque par trade (%)" value={settings.riskPct} step={0.25} min={0.1} max={2} onChange={v => set({ riskPct: Math.min(2, v) })} hint="Recommandé : 0,5 à 1 %. Plafonné à 2 %." />
+        <Field label="Perte max par jour (%)" value={settings.dailyLossPct} step={0.5} min={0.5} max={10} onChange={v => set({ dailyLossPct: v })} hint="Compte les pertes du jour + le risque des trades encore ouverts. Au-delà, plus de nouveau trade au journal." />
+      </section>
+
+      <section className="card space-y-4 p-4">
+        <div className="label">Coûts de ton broker</div>
+        <Field label="Spread EUR/USD (pips)" value={settings.spreadEurPips} step={0.1} min={0} max={10} onChange={v => set({ spreadEurPips: v })} />
+        <Field label="Spread or ($)" value={settings.spreadGold} step={0.05} min={0} max={5} onChange={v => set({ spreadGold: v })} />
+        <Field label="Commission aller-retour par lot ($)" value={settings.commissionPerLot} step={0.5} min={0} max={50} onChange={v => set({ commissionPerLot: v })} hint="Pris en compte dans le stop, les objectifs, le R:R net et la taille de lot." allowZero />
       </section>
 
       <section className="card space-y-3 p-4">
@@ -66,6 +73,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
         <div className="label">Connecteur Claude (MCP)</div>
         <ul className="space-y-1 text-xs">
           <KeyRow name="MCP_TOKEN" ok={!!status?.mcpEnabled} desc="Secret d’accès au connecteur (16 caractères minimum)" optional />
+          <KeyRow name="APP_ACCESS_CODE" ok={!!status?.accessRequired} desc="Code pour ouvrir l’app et protéger tes crédits IA (recommandé)" optional />
         </ul>
         <p className="text-[11px] leading-relaxed text-mute">
           Une fois l’app publiée, ajoute dans Claude un connecteur personnalisé avec l’adresse
@@ -77,7 +85,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
   );
 }
 
-function Field({ label, value, onChange, step, min, max, hint }: { label: string; value: number; onChange: (v: number) => void; step: number; min?: number; max?: number; hint?: string }) {
+function Field({ label, value, onChange, step, min, max, hint, allowZero }: { label: string; value: number; onChange: (v: number) => void; step: number; min?: number; max?: number; hint?: string; allowZero?: boolean }) {
   return (
     <label className="block">
       <span className="text-sm">{label}</span>
@@ -90,7 +98,7 @@ function Field({ label, value, onChange, step, min, max, hint }: { label: string
         max={max}
         onChange={e => {
           const v = Number(e.target.value);
-          if (Number.isFinite(v) && v > 0) onChange(v);
+          if (Number.isFinite(v) && (v > 0 || (allowZero && v === 0))) onChange(v);
         }}
         className="num mt-1 w-full rounded-lg border border-line bg-card2 px-3 py-2.5 text-base text-ink focus:border-gold focus:outline-none"
       />

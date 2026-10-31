@@ -1,5 +1,7 @@
 // Logique d'analyse partagée entre l'interface web (/api/analyze) et le connecteur MCP.
 import { PAIRS, TIMEFRAMES, getSeries, type Timeframe, type Candle } from './marketData';
+import { getNews, NEWS_CURRENCIES } from './news';
+import { marketClosed, maTime } from './time';
 import { analyze, type EngineResult } from './smc';
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
 
@@ -21,7 +23,13 @@ export interface FinalPlan {
   origin: 'moteur' | 'ajusté par l’IA';
 }
 
-export function reconcile(eng: EngineResult, ai: AiReview | null, dec: number) {
+export interface Costs {
+  spread: number;
+  commissionPerLot: number;
+  contract: number;
+}
+
+export function reconcile(eng: EngineResult, ai: AiReview | null, dec: number, costs: Costs) {
   const notes: string[] = [];
   let signal = eng.signal;
   let plan: FinalPlan | null = eng.setup
@@ -53,17 +61,27 @@ export function reconcile(eng: EngineResult, ai: AiReview | null, dec: number) {
       const long = plan.direction === 'acheter';
       const atrH1 = eng.timeframes.H1.atr14;
       const risk = Math.abs(n.entree - n.stop_loss);
+      const engineRisk = Math.abs(plan.entry - plan.sl);
+      const commUnit = costs.commissionPerLot / costs.contract;
       const ordered = long
         ? n.stop_loss < n.entree && n.entree < n.tp1 && (!n.tp2 || n.tp2 > n.tp1)
         : n.stop_loss > n.entree && n.entree > n.tp1 && (!n.tp2 || n.tp2 < n.tp1);
-      const rr1 = Math.abs(n.tp1 - n.entree) / risk;
-      const rr2 = n.tp2 ? Math.abs(n.tp2 - n.entree) / risk : null;
+      // Le stop de l'IA ne peut pas être plus serré que celui du moteur (sinon la taille de lot grossit).
+      const stopNotTighter = risk >= engineRisk - 1e-9;
+      // Chaque objectif doit tomber sur un niveau de liquidité connu (tolérance 0,1 ATR H1 + spread).
+      const tol = 0.1 * atrH1 + costs.spread;
+      const onLiquidity = (p: number) => eng.liquidity.some(l => Math.abs(l.price - p) <= tol);
+      const targetsOk = onLiquidity(n.tp1) && (!n.tp2 || onLiquidity(n.tp2));
+      const rrNet = (tp: number) => (Math.abs(tp - n.entree!) - commUnit) / (risk + commUnit);
+      const rr1 = rrNet(n.tp1);
+      const rr2 = n.tp2 ? rrNet(n.tp2) : null;
       const changed = n.entree !== plan.entry || n.stop_loss !== plan.sl || n.tp1 !== plan.tp1 || (n.tp2 ?? null) !== plan.tp2;
       if (changed) {
         if (
           ordered &&
+          stopNotTighter &&
+          targetsOk &&
           Math.abs(n.entree - plan.entry) <= atrH1 &&
-          risk >= 0.3 * atrH1 &&
           risk <= 2.5 * atrH1 &&
           (rr2 ?? rr1) >= 2
         ) {
@@ -80,16 +98,20 @@ export function reconcile(eng: EngineResult, ai: AiReview | null, dec: number) {
             entryType: inside ? 'marché' : 'limite',
             origin: 'ajusté par l’IA',
           };
-          notes.push('Niveaux affinés par l’IA, vérifiés par le moteur (ordre cohérent, stop réaliste, R:R ≥ 1:2).');
+          notes.push('Niveaux affinés par l’IA, vérifiés par le moteur (stop pas plus serré, objectifs sur la liquidité, R:R net ≥ 1:2).');
         } else {
-          notes.push('L’IA a proposé d’autres niveaux, refusés car incohérents ou R:R < 1:2. Niveaux du moteur conservés.');
+          const why = !stopNotTighter
+            ? 'stop plus serré que celui du moteur'
+            : !targetsOk
+            ? 'objectif hors des niveaux de liquidité'
+            : 'niveaux incohérents ou R:R net < 1:2';
+          notes.push(`L’IA a proposé d’autres niveaux, refusés (${why}). Niveaux du moteur conservés.`);
         }
       }
     }
   }
   return { signal, plan, notes };
 }
-
 
 export class AnalysisError extends Error {
   constructor(message: string, public status: number) {
@@ -102,34 +124,66 @@ export interface AnalysisOptions {
   provider?: AiProvider | 'none' | 'auto';
   image?: { base64: string; mediaType: string };
   note?: string;
+  spread?: number;
+  commissionPerLot?: number;
 }
 
-export async function runAnalysis({ pair, provider, image, note }: AnalysisOptions) {
+const DEFAULT_COMMISSION = 7; // $ aller-retour par lot
+
+export async function runAnalysis({ pair, provider, image, note, spread, commissionPerLot }: AnalysisOptions) {
   const info = PAIRS[pair];
   if (!info) throw new AnalysisError('Actif non supporté (EUR/USD ou XAU/USD).', 400);
+  const now = Date.now();
+  const costs: Costs = {
+    spread: Number.isFinite(spread) && spread! >= 0 && spread! < 50 * info.pipSize ? spread! : info.defaultSpread,
+    commissionPerLot: Number.isFinite(commissionPerLot) && commissionPerLot! >= 0 && commissionPerLot! <= 100 ? commissionPerLot! : DEFAULT_COMMISSION,
+    contract: info.contract,
+  };
 
   let series: Record<Timeframe, Candle[]>;
-  let source = '';
-  let sourceNote: string | undefined;
+  let results;
   try {
-    const results = await Promise.all(TIMEFRAMES.map(tf => getSeries(pair, tf)));
+    results = await Promise.all(TIMEFRAMES.map(tf => getSeries(pair, tf)));
     series = Object.fromEntries(results.map(r => [r.tf, r.candles])) as Record<Timeframe, Candle[]>;
-    source = results[0].source;
-    sourceNote = results[0].note;
   } catch (err: any) {
     throw new AnalysisError(
       `Impossible de récupérer les données de marché réelles (${err.message}). Aucune analyse n'est produite sans vraies données.`,
       502
     );
   }
+  const source = results[0].source;
+  const futuresProxy = results.some(r => r.futuresProxy);
+  const fromStaleCache = results.some(r => r.fromStaleCache);
+  const news = await getNews();
 
-  const engine = analyze(series, info.decimals);
-  const warnings: string[] = [];
-  if (sourceNote) warnings.push(sourceNote);
-  const lastT = series.M15[series.M15.length - 1].t;
-  if (Date.now() - lastT > 45 * 60_000) {
-    warnings.push(`Dernière bougie reçue à ${new Date(lastT).toISOString().slice(11, 16)} UTC : données en retard ou marché fermé.`);
+  let engine: EngineResult;
+  try {
+    engine = analyze(series, info.decimals, {
+      now,
+      spread: costs.spread,
+      commissionPerLot: costs.commissionPerLot,
+      contract: costs.contract,
+      news,
+      newsCurrencies: NEWS_CURRENCIES[pair],
+    });
+  } catch (err: any) {
+    throw new AnalysisError(`Analyse impossible : ${err.message}`, 502);
   }
+
+  // ----- Garde-fous données -----
+  const warnings: string[] = [];
+  const blockers: string[] = [];
+  const lastT = series.M15[series.M15.length - 1].t;
+  const marketIsClosed = marketClosed(now);
+  if (futuresProxy) {
+    blockers.push('Prix de l’or issu des futures (écart de 10 à 40 $ avec ton broker) : niveaux masqués. Ajoute la clé TWELVE_DATA_API_KEY pour le prix spot.');
+  }
+  if (fromStaleCache) blockers.push('La source de données ne répond plus : données des dernières minutes seulement, pas de signal.');
+  if (!marketIsClosed && now - lastT > 20 * 60_000) {
+    blockers.push(`Données en retard : dernière bougie à ${maTime(lastT)} (heure du Maroc). Pas de signal tant qu’elles ne sont pas à jour.`);
+  }
+  if (marketIsClosed) warnings.push('Marché fermé : réouverture le dimanche à 17h00 New York.');
+  if (!engine.newsAvailable) warnings.push('Calendrier économique indisponible : vérifie les annonces toi-même.');
 
   let ai: AiReview | null = null;
   let aiError: string | null = null;
@@ -161,14 +215,28 @@ export async function runAnalysis({ pair, provider, image, note }: AnalysisOptio
     aiError = 'Aucune clé IA configurée : résultat basé uniquement sur les calculs du moteur.';
   }
 
-  const final = reconcile(engine, ai, info.decimals);
+  const final = reconcile(engine, ai, info.decimals, costs);
+  if (blockers.length || marketIsClosed) {
+    final.signal = 'attendre';
+    final.plan = futuresProxy ? null : final.plan;
+    final.notes.unshift(...blockers);
+  }
+  if (futuresProxy) {
+    // aucun niveau en prix futures ne doit sortir de l'app
+    engine.setup = null;
+    engine.alternatives = [];
+  }
+  warnings.unshift(...blockers);
   return {
     pair,
     label: info.label,
     decimals: info.decimals,
     pipSize: info.pipSize,
-    generatedAt: Date.now(),
+    contract: info.contract,
+    costs,
+    generatedAt: now,
     source,
+    futuresProxy,
     warnings,
     engine,
     ai,

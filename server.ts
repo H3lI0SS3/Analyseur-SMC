@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
@@ -13,6 +14,25 @@ const app = express();
 const PORT = 3000;
 app.use(express.json({ limit: '12mb' }));
 
+// ---------- Code d'accès (protège tes crédits IA et données) ----------
+// Si APP_ACCESS_CODE est défini, toutes les routes /api/* (sauf /api/status) exigent l'en-tête X-Access-Code.
+const accessCode = () => (process.env.APP_ACCESS_CODE || '').trim();
+const failures = new Map<string, number[]>();
+app.use('/api', (req, res, next) => {
+  const code = accessCode();
+  if (!code || req.path === '/status') return next();
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const now = Date.now();
+  const recent = (failures.get(ip) || []).filter(t => now - t < 60_000);
+  if (recent.length >= 10) return res.status(429).json({ error: 'Trop de tentatives, réessaie dans une minute.' });
+  const given = Buffer.from(String(req.headers['x-access-code'] || ''));
+  const want = Buffer.from(code);
+  if (given.length === want.length && crypto.timingSafeEqual(given, want)) return next();
+  recent.push(now);
+  failures.set(ip, recent);
+  res.status(401).json({ error: 'Code d’accès requis.', accessRequired: true });
+});
+
 // ---------- Statut ----------
 app.get('/api/status', (_req, res) => {
   const providers = availableProviders();
@@ -22,7 +42,8 @@ app.get('/api/status', (_req, res) => {
     defaultProvider: providers.includes('claude') ? 'claude' : providers[0] || null,
     models: { claude: CLAUDE_MODEL, gemini: GEMINI_MODEL },
     mcpEnabled: (process.env.MCP_TOKEN || '').length >= 16,
-    pairs: Object.values(PAIRS).map(p => ({ id: p.id, label: p.label, decimals: p.decimals, pipSize: p.pipSize })),
+    accessRequired: accessCode().length > 0,
+    pairs: Object.values(PAIRS).map(p => ({ id: p.id, label: p.label, decimals: p.decimals, pipSize: p.pipSize, contract: p.contract, defaultSpread: p.defaultSpread })),
   });
 });
 
@@ -33,7 +54,7 @@ app.get('/api/candles', async (req, res) => {
   if (!TIMEFRAMES.includes(tf)) return res.status(400).json({ error: 'Unité de temps invalide.' });
   try {
     const s = await getSeries(pair, tf);
-    res.json({ pair, tf, candles: s.candles.slice(-150), source: s.source, note: s.note, fetchedAt: s.fetchedAt });
+    res.json({ pair, tf, candles: s.candles.slice(-150), source: s.source, futuresProxy: s.futuresProxy, fetchedAt: s.fetchedAt });
   } catch (err: any) {
     res.status(502).json({ error: `Données indisponibles : ${err.message}` });
   }
@@ -46,10 +67,10 @@ app.get('/api/quotes', async (_req, res) => {
 
 // ---------- Analyse ----------
 app.post('/api/analyze', async (req, res) => {
-  const { pair = 'EUR/USD', provider, image, note } = req.body || {};
+  const { pair = 'EUR/USD', provider, image, note, spread, commissionPerLot } = req.body || {};
   try {
     const img = image && typeof image.base64 === 'string' ? { base64: image.base64, mediaType: String(image.mediaType || 'image/jpeg') } : undefined;
-    res.json(await runAnalysis({ pair, provider, image: img, note }));
+    res.json(await runAnalysis({ pair, provider, image: img, note, spread: Number(spread), commissionPerLot: Number(commissionPerLot) }));
   } catch (err: any) {
     res.status(err instanceof AnalysisError ? err.status : 500).json({ error: err.message });
   }
