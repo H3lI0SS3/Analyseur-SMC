@@ -67,7 +67,8 @@ export interface SeriesResult {
   fetchedAt: number;
 }
 
-const CACHE_TTL: Record<'M15' | 'H1', number> = { M15: 60_000, H1: 120_000 };
+// Offre gratuite Twelve Data : 800 crédits/jour. M15 rafraîchi toutes les 2 min, H1 toutes les 5 min.
+const CACHE_TTL: Record<'M15' | 'H1', number> = { M15: 120_000, H1: 300_000 };
 const cache = new Map<string, SeriesResult>();
 const inflight = new Map<string, Promise<SeriesResult>>();
 
@@ -89,7 +90,9 @@ async function getRaw(pairId: string, tf: 'M15' | 'H1'): Promise<SeriesResult> {
   if (!pair) throw new Error(`Actif non supporté : ${pairId}`);
   const key = `${pairId}|${tf}`;
   const hit = cache.get(key);
-  if (hit && !hit.fromStaleCache && Date.now() - hit.fetchedAt < CACHE_TTL[tf]) return hit;
+  // Marché fermé : aucune nouvelle bougie, inutile de consommer des crédits (cache 30 min).
+  const ttl = marketClosed(Date.now()) ? 30 * 60_000 : CACHE_TTL[tf];
+  if (hit && !hit.fromStaleCache && Date.now() - hit.fetchedAt < ttl) return hit;
   const running = inflight.get(key);
   if (running) return running;
 

@@ -1,10 +1,15 @@
 // Backtest en tâche de fond, découpé en tranches, et historique des trades pour éclairer chaque signal.
 // Cloud Run ne donne vraiment du CPU que pendant les requêtes : chaque consultation (analyse, cotations,
 // onglet Journal, connecteur Claude) fait donc avancer le calcul de quelques secondes.
+import crypto from 'crypto';
 import { PAIRS, getHistory } from './marketData';
+
+/** Identifiant de ce serveur : si deux appels n'ont pas le même, l'hébergeur a lancé plusieurs serveurs. */
+export const INSTANCE_ID = crypto.randomBytes(3).toString('hex');
 import { BacktestRun, similarHistory, type BacktestResult, type BtTrade, type SetupFeatures, type SimilarHistory } from './backtest';
 
 export interface JobView {
+  instance?: string;
   status: 'aucun' | 'en cours' | 'terminé' | 'erreur';
   phase?: string;
   progress?: number; // 0-100
@@ -26,7 +31,7 @@ const MAX_AGE = 7 * 24 * 3_600_000;
 
 const view = (j: Job): JobView => {
   const { run, meta, trades, ...v } = j;
-  return v;
+  return { ...v, instance: INSTANCE_ID };
 };
 
 /** Fait avancer le calcul (budget en ms) et renvoie l'état. */
@@ -92,6 +97,7 @@ export function startBacktest(pair: string, spread?: number, commissionPerLot?: 
       job.status = 'erreur';
       job.error = String(err?.message || err);
       job.finishedAt = Date.now();
+      console.error(`[Backtest ${pair}] erreur : ${job.error}`);
     }
   })();
   return view(job);

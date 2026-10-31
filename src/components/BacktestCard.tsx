@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FlaskConical, Loader2 } from 'lucide-react';
-import type { BacktestJob, RiskSettings, VariantStats } from '../types';
+import type { BacktestJob, LabStats, RiskSettings, VariantStats } from '../types';
 import { api, costsFor, cx, localDateTime } from '../lib/utils';
 
 interface Props {
@@ -107,6 +107,7 @@ export function BacktestCard({ pair, settings }: Props) {
             <Variant title="Sweep obligatoire" v={res.strictForward} />
             <Variant title="Sweep en bonus" v={res.soupleForward} />
           </div>
+          {res.lab && <LabTable lab={res.lab} />}
           <details className="text-[11px] text-mute">
             <summary className="cursor-pointer">Hypothèses du test</summary>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
@@ -132,6 +133,39 @@ function Variant({ title, v }: { title: string; v: VariantStats }) {
         <div>{v.trades} trades · réussite {v.winRate ?? '—'} %</div>
         <div>moyenne {v.avgR ?? '—'} R · PF {v.profitFactor ?? '—'}</div>
         <div>pire repli {v.maxDrawdownR} R · {v.longestLosingStreak} pertes d’affilée</div>
+      </div>
+    </div>
+  );
+}
+
+function LabTable({ lab }: { lab: NonNullable<NonNullable<BacktestJob['result']>['lab']> }) {
+  const fmtR = (s: LabStats | null) => (s && s.avgR !== null ? `${s.avgR >= 0 ? '+' : ''}${s.avgR.toFixed(2)} R` : '—');
+  const cls = (s: LabStats | null) => (s && s.avgR !== null ? (s.avgR > 0 ? 'text-up' : s.avgR < 0 ? 'text-down' : '') : 'text-mute');
+  return (
+    <div className="space-y-2 pt-1">
+      <div className="label">Labo d’optimisation</div>
+      <p className="text-[11px] leading-snug text-mute">
+        Chaque variante est notée sur la 1re moitié (jusqu’au {localDateTime(lab.splitAt)}). La 2e moitié, jamais utilisée pour choisir, n’est révélée que pour les 3 meilleures et la référence : c’est le vrai test.
+      </p>
+      <div className="overflow-hidden rounded-lg border border-line">
+        <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 bg-card2 px-2 py-1.5 text-[10px] uppercase tracking-wide text-mute">
+          <span>Variante</span>
+          <span className="text-right">1re moitié</span>
+          <span className="text-right">2e moitié</span>
+        </div>
+        {lab.variants.map(v => (
+          <div key={v.id} className={cx('grid grid-cols-[1fr_auto_auto] items-center gap-x-3 border-t border-line px-2 py-1.5 text-[11px]', v.id === 'base' && 'bg-white/5')}>
+            <span className="leading-tight">{v.label}</span>
+            <span className={cx('num text-right', cls(v.inSample))}>
+              {fmtR(v.inSample)}
+              <span className="block text-[9px] text-mute">{v.inSample.trades} tr.</span>
+            </span>
+            <span className={cx('num text-right', cls(v.outOfSample))}>
+              {v.outOfSample ? fmtR(v.outOfSample) : 'masquée'}
+              {v.outOfSample && <span className="block text-[9px] text-mute">{v.outOfSample.trades} tr.</span>}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );

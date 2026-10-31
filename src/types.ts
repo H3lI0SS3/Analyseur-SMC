@@ -142,7 +142,23 @@ export interface BacktestJob {
     rulesVersion: string;
     limitedBySource: boolean;
     m15Count: number;
+    lab?: {
+      splitAt: number;
+      rule: string;
+      variants: { id: string; label: string; inSample: LabStats; outOfSample: LabStats | null }[];
+    };
   };
+}
+
+export interface LabStats {
+  trades: number;
+  winRate: number | null;
+  avgR: number | null;
+  totalR: number;
+  profitFactor: number | null;
+  maxDrawdownR: number;
+  ciLow: number | null;
+  ciHigh: number | null;
 }
 
 export interface CheckItem {

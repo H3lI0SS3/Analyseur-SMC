@@ -177,11 +177,18 @@ function buildServer() {
     },
     async ({ actif, relancer }) => {
       let job = getJob(actif, 25_000);
-      if (!job || relancer || job.status === 'erreur') {
-        const started = startBacktest(actif);
-        return text(`Backtest ${actif} lancé (${maDateTime(started.startedAt!)}) : ${started.phase}. Rappelle l’outil pour le faire avancer.`);
+      if (job?.status === 'erreur' && !relancer) {
+        return fail(`Backtest ${actif} en erreur (serveur ${job.instance}) : ${job.error}. Passe relancer=true pour réessayer.`);
       }
-      if (job.status === 'en cours') return text(`Backtest ${actif} en cours : ${job.phase}. Rappelle l’outil pour continuer le calcul.`);
+      if (!job || relancer) {
+        const started = startBacktest(actif);
+        // laisse au téléchargement le temps d'avancer pendant cet appel
+        await new Promise(r => setTimeout(r, 20_000));
+        job = getJob(actif, 5_000) ?? started;
+        if (job.status === 'erreur') return fail(`Backtest ${actif} en erreur (serveur ${job.instance}) : ${job.error}`);
+        return text(`Backtest ${actif} lancé (serveur ${job.instance}) : ${job.phase}. Rappelle l’outil pour le faire avancer.`);
+      }
+      if (job.status === 'en cours') return text(`Backtest ${actif} en cours (serveur ${job.instance}) : ${job.phase}. Rappelle l’outil pour continuer le calcul.`);
       const r = job.result!;
       return text({
         actif,
@@ -200,6 +207,15 @@ function buildServer() {
         },
         bougies_m15: r.m15Count,
         historique_limite_par_la_source: r.limitedBySource,
+        labo: {
+          coupure_entre_les_deux_moities: maDateTime(r.lab.splitAt),
+          regle: r.lab.rule,
+          variantes: r.lab.variants.map(v => ({
+            variante: v.label,
+            premiere_moitie: v.inSample,
+            deuxieme_moitie: v.outOfSample ?? 'masquée (non retenue sur la 1re moitié)',
+          })),
+        },
         hypotheses: r.assumptions,
         derniers_trades: r.lastTrades.map(t => ({
           variante: t.variant,

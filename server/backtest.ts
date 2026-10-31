@@ -95,12 +95,21 @@ export interface BacktestResult {
   strictForward: VariantStats;
   soupleForward: VariantStats;
   lastTrades: BtTrade[];
+  lab: LabResult;
 }
 
 const EXPIRY = 4 * HOUR; // un ordre limite non exécuté est annulé après 4 h
 const MAX_HOLD = 5 * 24 * HOUR; // un trade ouvert est clôturé après 5 jours
 
-export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: number, spread: number) {
+/**
+ * Gestion du trade :
+ *  - 'partiel' : 50 % à TP1, stop au point d'entrée, reste à TP2 (sans TP2 : tout à TP1) ;
+ *  - 'tp1'     : tout à TP1 ;
+ *  - 'final'   : tout à l'objectif le plus lointain (TP2 sinon TP1), sans point mort.
+ */
+export type Management = 'partiel' | 'tp1' | 'final';
+
+export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: number, spread: number, mode: Management = 'partiel') {
   const long = setup.direction === 'acheter';
   // au marché, un achat est servi à l'ask (prix affiché + spread)
   const entry = setup.entryType === 'marché' && long ? setup.entry + spread : setup.entry;
@@ -131,7 +140,8 @@ export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: nu
   let remaining = 1;
   let pnl = 0;
   let tp1Done = false;
-  const hasTp2 = setup.tp2 !== null;
+  const hasTp2 = mode === 'partiel' && setup.tp2 !== null;
+  const firstTarget = mode === 'final' ? setup.tp2 ?? setup.tp1 : setup.tp1;
   for (let i = filledIdx; i < m15.length; i++) {
     const c = m15[i];
     if (c.t - filledAt > MAX_HOLD) {
@@ -146,9 +156,9 @@ export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: nu
       return { filledAt, exitAt: c.t, pnl, outcome, risk };
     }
     const hit = (tp: number) => (long ? c.h >= tp : c.l <= tp - spread);
-    if (!tp1Done && hit(setup.tp1)) {
+    if (!tp1Done && hit(firstTarget)) {
       const part = hasTp2 ? 0.5 : 1;
-      pnl += part * Math.abs(setup.tp1 - entry);
+      pnl += part * Math.abs(firstTarget - entry);
       remaining -= part;
       tp1Done = true;
       if (!hasTp2) return { filledAt, exitAt: c.t, pnl, outcome: 'gagné' as const, risk };
@@ -281,8 +291,6 @@ export class BacktestRun {
       const k = this.k++;
       const now = m15[k].t + TF_MS.M15; // instant de clôture de la bougie k
       if (now < this.startT || marketClosed(m15[k].t)) continue;
-      // un trade est déjà en cours dans les deux variantes : aucun nouveau signal ne serait pris
-      if (now < this.busyUntil.strict && now < this.busyUntil.souple) continue;
       this.iH1 = upto(h1, now, this.iH1);
       this.iH4 = upto(this.h4All, now, this.iH4);
       this.iD1 = upto(this.d1All, now, this.iD1);
@@ -306,6 +314,8 @@ export class BacktestRun {
         continue;
       }
       this.steps++;
+
+      this.collectCandidate(eng, now, k);
 
       const souple = eng.signal !== 'attendre' && !!eng.setup;
       const sweepOk = !!eng.checklist.find(c => c.key === 'sweep')?.ok;
@@ -342,6 +352,41 @@ export class BacktestRun {
     if (this.k >= m15.length) this.done = true;
   }
 
+  private candidates: Candidate[] = [];
+
+  /** Enregistre chaque setup qui passe les conditions obligatoires, avec son résultat pour chaque gestion. */
+  private collectCandidate(eng: EngineResult, now: number, k: number) {
+    const s = eng.setup;
+    if (!s) return;
+    if (!eng.checklist.filter(c => c.core).every(c => c.ok)) return;
+    const ok = (key: string) => !!eng.checklist.find(c => c.key === key)?.ok;
+    const res = {} as Candidate['res'];
+    for (const mode of ['partiel', 'tp1', 'final'] as Management[]) {
+      const sim = simulate(s, now, this.m15, k + 1, this.costs.spread, mode);
+      res[mode] = {
+        filledAt: sim.filledAt,
+        exitAt: sim.exitAt,
+        r: sim.outcome === 'expiré' || sim.outcome === 'en cours' ? null : (sim.pnl - this.commUnit) / (sim.risk + this.commUnit),
+      };
+    }
+    const [zoneTf] = s.zoneId.split('-');
+    this.candidates.push({
+      t: now,
+      direction: s.direction,
+      entryType: s.entryType,
+      zoneTf,
+      touched: !!eng.zones.find(z => z.id === s.zoneId)?.touched,
+      optionalOk: eng.checklist.filter(c => !c.core && c.ok).length,
+      sweep: ok('sweep'),
+      amd: ok('amd'),
+      pd: ok('pd'),
+      ltf: ok('ltf'),
+      killzone: eng.session.killzone,
+      rr: s.rr2 ?? s.rr1,
+      res,
+    });
+  }
+
   /** Tous les trades simulés (pour l'historique des setups similaires). */
   allTrades(): BtTrade[] {
     return this.trades;
@@ -375,6 +420,7 @@ export class BacktestRun {
         .filter(t => t.r !== null)
         .sort((a, b) => b.signalAt - a.signalAt)
         .slice(0, 20),
+      lab: runLab(this.candidates, this.startT, m15[m15.length - 1].t),
     };
   }
 }
@@ -493,4 +539,130 @@ export function similarHistory(trades: BtTrade[], f: SetupFeatures, period: { fr
     };
   }
   return null;
+}
+
+// ---------- Labo : variantes de règles, notées sur la 1re moitié, validées sur la 2e ----------
+interface Candidate {
+  t: number;
+  direction: 'acheter' | 'vendre';
+  entryType: 'marché' | 'limite';
+  zoneTf: string;
+  touched: boolean;
+  optionalOk: number;
+  sweep: boolean;
+  amd: boolean;
+  pd: boolean;
+  ltf: boolean;
+  killzone: boolean;
+  rr: number;
+  res: Record<Management, { filledAt: number | null; exitAt: number | null; r: number | null }>;
+}
+
+export interface LabStats {
+  trades: number;
+  winRate: number | null;
+  avgR: number | null;
+  totalR: number;
+  profitFactor: number | null;
+  maxDrawdownR: number;
+  ciLow: number | null;
+  ciHigh: number | null;
+}
+
+export interface LabVariant {
+  id: string;
+  label: string;
+  inSample: LabStats;
+  /** révélé seulement pour la référence et les 3 meilleures variantes de la 1re moitié */
+  outOfSample: LabStats | null;
+}
+
+export interface LabResult {
+  splitAt: number;
+  rule: string;
+  variants: LabVariant[];
+}
+
+// La règle de base reproduit exactement le signal actuel du moteur (« sweep en bonus »).
+const marketRule = (c: Candidate) => !(c.entryType === 'marché' && !c.ltf);
+const base = (c: Candidate) => c.optionalOk >= 2 && marketRule(c);
+
+/** Liste FIGÉE à l'avance : on ne l'ajuste pas après avoir vu les résultats. */
+export const LAB_VARIANTS: { id: string; label: string; filter: (c: Candidate) => boolean; mode: Management }[] = [
+  { id: 'base', label: 'Référence : règles actuelles (sweep en bonus)', filter: base, mode: 'partiel' },
+  { id: 'strict', label: 'Sweep obligatoire', filter: c => c.sweep && c.optionalOk - 1 >= 2 && marketRule(c), mode: 'partiel' },
+  { id: 'kz', label: 'Kill zone obligatoire', filter: c => base(c) && c.killzone, mode: 'partiel' },
+  { id: 'pd', label: 'Premium/discount obligatoire', filter: c => base(c) && c.pd, mode: 'partiel' },
+  { id: 'amd', label: 'Cycle AMD aligné obligatoire', filter: c => base(c) && c.amd, mode: 'partiel' },
+  { id: 'ltf', label: 'Structure M15 alignée obligatoire', filter: c => base(c) && c.ltf, mode: 'partiel' },
+  { id: 'h1', label: 'Zones H1 uniquement', filter: c => base(c) && c.zoneTf === 'H1', mode: 'partiel' },
+  { id: 'fresh', label: 'Zones jamais testées uniquement', filter: c => base(c) && !c.touched, mode: 'partiel' },
+  { id: 'conf3', label: '3 confluences ou plus', filter: c => c.optionalOk >= 3 && marketRule(c), mode: 'partiel' },
+  { id: 'kzsweep', label: 'Kill zone + sweep obligatoires', filter: c => base(c) && c.killzone && c.sweep, mode: 'partiel' },
+  { id: 'tp1', label: 'Gestion : tout à TP1', filter: base, mode: 'tp1' },
+  { id: 'final', label: 'Gestion : tout à l’objectif final, sans point mort', filter: base, mode: 'final' },
+];
+
+function labStats(rs: number[]): LabStats {
+  const n = rs.length;
+  const r2 = (x: number) => Number(x.toFixed(2));
+  if (!n) return { trades: 0, winRate: null, avgR: null, totalR: 0, profitFactor: null, maxDrawdownR: 0, ciLow: null, ciHigh: null };
+  const mean = rs.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(rs.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1));
+  const half = (1.96 * sd) / Math.sqrt(n);
+  let eq = 0;
+  let peak = 0;
+  let dd = 0;
+  for (const r of rs) {
+    eq += r;
+    peak = Math.max(peak, eq);
+    dd = Math.max(dd, peak - eq);
+  }
+  const gain = rs.filter(r => r > 0).reduce((a, b) => a + b, 0);
+  const loss = -rs.filter(r => r < 0).reduce((a, b) => a + b, 0);
+  return {
+    trades: n,
+    winRate: Math.round((rs.filter(r => r > 0.05).length / n) * 100),
+    avgR: r2(mean),
+    totalR: r2(eq),
+    profitFactor: loss > 0 ? r2(gain / loss) : null,
+    maxDrawdownR: r2(dd),
+    ciLow: r2(mean - half),
+    ciHigh: r2(mean + half),
+  };
+}
+
+/** Rejoue chaque variante (un trade à la fois), sépare 1re et 2e moitié de la période. */
+export function runLab(cands: Candidate[], from: number, to: number): LabResult {
+  const splitAt = from + (to - from) / 2;
+  const evaluated = LAB_VARIANTS.map(v => {
+    let busy = 0;
+    const isR: number[] = [];
+    const oosR: number[] = [];
+    for (const c of cands) {
+      if (c.t < busy || !v.filter(c)) continue;
+      const r = c.res[v.mode];
+      busy = r.exitAt ?? (r.filledAt === null ? c.t + EXPIRY : Number.MAX_SAFE_INTEGER);
+      if (r.r === null) continue;
+      (c.t < splitAt ? isR : oosR).push(r.r);
+    }
+    return { id: v.id, label: v.label, inSample: labStats(isR), oosAll: labStats(oosR) };
+  });
+  // Règle de sélection fixée à l'avance : les 3 meilleures moyennes de la 1re moitié parmi les variantes
+  // ayant au moins 60 trades. Seules celles-ci (et la référence) voient leur 2e moitié révélée.
+  const top = evaluated
+    .filter(v => v.id !== 'base' && v.inSample.trades >= 60 && v.inSample.avgR !== null)
+    .sort((a, b) => b.inSample.avgR! - a.inSample.avgR!)
+    .slice(0, 3)
+    .map(v => v.id);
+  return {
+    splitAt,
+    rule: 'Sélection sur la 1re moitié uniquement (meilleure moyenne en R, au moins 60 trades) ; la 2e moitié n’est révélée que pour les 3 retenues et la référence.',
+    variants: evaluated.map(v => ({
+      id: v.id,
+      label: v.label,
+      inSample: v.inSample,
+      outOfSample: v.id === 'base' || top.includes(v.id) ? v.oosAll : null,
+    })),
+  };
 }
