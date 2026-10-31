@@ -2,6 +2,8 @@
 import { PAIRS, TIMEFRAMES, getSeries, type Timeframe, type Candle } from './marketData';
 import { getNews, NEWS_CURRENCIES } from './news';
 import { marketClosed, maTime } from './time';
+import { setupFeatures } from './backtest';
+import { advanceAll, historyForSignal } from './backtestJobs';
 import { analyze, type EngineResult } from './smc';
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
 
@@ -219,6 +221,13 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   }
 
   const final = reconcile(engine, ai, info.decimals, costs);
+
+  // Résultat réel passé des setups similaires (backtest sur l'historique M15)
+  advanceAll(1500);
+  const history = futuresProxy ? null : historyForSignal(pair, setupFeatures(engine, now));
+  if (history && history.status === 'disponible' && history.verdict === 'défavorable' && final.signal !== 'attendre') {
+    final.notes.unshift(`Attention : ${history.message}`);
+  }
   if (blockers.length || marketIsClosed) {
     final.signal = 'attendre';
     final.plan = futuresProxy ? null : final.plan;
@@ -245,5 +254,6 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     ai,
     aiError,
     final,
+    history,
   };
 }

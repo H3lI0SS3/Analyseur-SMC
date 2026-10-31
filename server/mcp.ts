@@ -152,6 +152,7 @@ function buildServer() {
           zones: e.zones.map(z => ({ type: z.kind, ut: z.tf, sens: z.dir === 'bull' ? 'haussier' : 'baissier', bas: z.bottom, haut: z.top, deja_teste: z.touched })),
           plans_alternatifs: e.alternatives,
           notes: a.final.notes,
+          historique_setups_similaires: a.history,
           ia_interne: a.ai ? { moteur: a.ai.engine, verdict: a.ai.verdict, resume: a.ai.resume, plan: a.ai.plan, invalidation: a.ai.invalidation } : a.aiError,
         });
       } catch (err: any) {

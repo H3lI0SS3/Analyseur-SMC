@@ -1,5 +1,5 @@
 // Tests du simulateur et du backtest : npx tsx server/backtest.test.ts
-import { simulate, runBacktest, BacktestRun } from './backtest';
+import { simulate, runBacktest, BacktestRun, similarHistory, type BtTrade, type SetupFeatures } from './backtest';
 import type { Candle } from './marketData';
 import type { Setup } from './smc';
 import { nyParts } from './time';
@@ -113,6 +113,31 @@ const setup = (p: Partial<Setup>): Setup => ({
   ok('Remonte jusqu’à la limite de la source', Math.abs(hist.m15[0].t - firstAvailable) < 7 * 86_400_000, new Date(hist.m15[0].t).toISOString().slice(0, 10));
   ok('Limite de la source signalée', hist.limitedBySource === true);
   ok('H1 couvre la période M15 + préchauffage', hist.h1[0].t <= hist.m15[0].t + 7 * 86_400_000, `H1 dès ${new Date(hist.h1[0].t).toISOString().slice(0, 10)}`);
+}
+
+// 8. Historique des setups similaires
+{
+  const f: SetupFeatures = { direction: 'vendre', zoneKind: 'OB', zoneTf: 'M15', session: 'Kill zone de New York', sweep: true, amd: true, premiumDiscount: true, entryType: 'limite' };
+  const mk = (over: Partial<SetupFeatures>, r: number | null, i: number): BtTrade => ({
+    variant: 'souple', signalAt: i, filledAt: r === null ? null : i, exitAt: i, direction: (over.direction ?? f.direction), entry: 1, sl: 1, tp1: 1, tp2: null,
+    plannedRR: 2, outcome: r === null ? 'expiré' : r > 0 ? 'gagné' : 'perdu', r, session: '', amdPhase: '', features: { ...f, ...over },
+  });
+  const trades: BtTrade[] = [];
+  // 40 setups identiques, nettement gagnants
+  for (let i = 0; i < 40; i++) trades.push(mk({}, i % 2 ? 2.5 : -1, i));
+  // 200 autres setups (achats) perdants
+  for (let i = 0; i < 200; i++) trades.push(mk({ direction: 'acheter' }, i % 4 ? -1 : 1.5, 100 + i));
+  const h = similarHistory(trades, f, { from: 0, to: 1 })!;
+  ok('Setups identiques trouvés au niveau le plus précis', h.trades === 40 && h.matched.length === 6, h.criteria);
+  ok('Moyenne exacte', Math.abs(h.avgR - 0.75) < 1e-9, `${h.avgR}`);
+  ok('Verdict favorable si toute la fourchette est > 0', h.verdict === (h.ciLow > 0 ? 'favorable' : 'non démontré'), `${h.ciLow} → ${h.ciHigh}`);
+  const g = similarHistory(trades, { ...f, direction: 'acheter', zoneKind: 'FVG' }, { from: 0, to: 1 })!;
+  ok('Élargissement automatique si trop peu de setups identiques', g.matched.length === 1 && g.trades === 200, g.criteria);
+  ok('Setup historiquement perdant détecté', g.verdict === 'défavorable', `${g.avgR} R`);
+  const few = similarHistory(trades.slice(0, 10), f, { from: 0, to: 1 })!;
+  ok('Moins de 30 setups au total : on utilise tous les signaux', few.matched.length === 0 && few.trades === 10);
+  ok('Moins de 30 trades : aucun verdict', few.verdict === 'non démontré');
+  ok('Les ordres expirés ne comptent pas comme trades', similarHistory([...trades, mk({}, null, 999)], f, { from: 0, to: 1 })!.trades === 40);
 }
 
 if (failed) {

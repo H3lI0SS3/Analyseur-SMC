@@ -201,7 +201,28 @@ export interface FinalPlan {
   origin: string;
 }
 
+export type SignalHistory =
+  | {
+      status: 'disponible';
+      criteria: string;
+      matched: string[];
+      trades: number;
+      winRate: number;
+      avgR: number;
+      ciLow: number;
+      ciHigh: number;
+      profitFactor: number | null;
+      fillRate: number | null;
+      verdict: 'favorable' | 'défavorable' | 'non démontré';
+      message: string;
+      period: { from: number; to: number };
+      rulesVersion: string;
+    }
+  | { status: 'en préparation'; message: string; progress: number }
+  | { status: 'indisponible'; message: string };
+
 export interface AnalysisResponse {
+  history?: SignalHistory | null;
   pair: string;
   label: string;
   decimals: number;

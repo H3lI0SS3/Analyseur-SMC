@@ -251,6 +251,7 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
             </div>
             {lots === 0 && <p className="mt-1 text-warn">Stop trop large pour ton capital : taille inférieure à 0,01 lot.</p>}
           </div>
+          {a.history && <HistoryBox h={a.history} />}
           {e.setup && <p className="mt-2 text-[11px] text-mute">Zone : {e.setup.zoneLabel}</p>}
           {e.setup?.validUntil && plan.entryType === 'limite' && (
             <p className="mt-1 text-[11px] text-mute">Ordre limite à annuler s’il n’est pas exécuté avant {localTime(e.setup.validUntil)}.</p>
@@ -395,6 +396,53 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
 
       <p className="px-2 text-center text-[10px] leading-snug text-mute">
         Outil d’aide à la décision, pas un conseil en investissement. Le trading avec effet de levier peut faire perdre plus que la mise : teste d’abord en démo.
+      </p>
+    </div>
+  );
+}
+
+function HistoryBox({ h }: { h: NonNullable<AnalysisResponse['history']> }) {
+  if (h.status !== 'disponible') {
+    return (
+      <div className="mt-3 rounded-lg border border-line px-3 py-2 text-[11px] text-mute">
+        <div className="mb-0.5 font-semibold text-ink">Résultat passé de ce type de setup</div>
+        {h.message}
+        {h.status === 'en préparation' && (
+          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-card2">
+            <div className="h-full bg-gold" style={{ width: `${h.progress}%` }} />
+          </div>
+        )}
+      </div>
+    );
+  }
+  const tone = h.verdict === 'favorable' ? 'border-up/60 text-up' : h.verdict === 'défavorable' ? 'border-down/60 text-down' : 'border-warn/60 text-warn';
+  const pos = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2)} R`;
+  return (
+    <div className={cx('mt-3 rounded-lg border px-3 py-2', tone.split(' ')[0])}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-ink">Résultat passé de ce type de setup</span>
+        <span className={cx('rounded px-1.5 py-0.5 text-[10px] font-bold', tone.split(' ')[1], 'bg-white/5')}>
+          {h.verdict === 'favorable' ? 'AVANTAGE PROUVÉ' : h.verdict === 'défavorable' ? 'HISTORIQUEMENT PERDANT' : 'AVANTAGE NON PROUVÉ'}
+        </span>
+      </div>
+      <div className="num mt-2 grid grid-cols-3 gap-1 text-center text-[11px]">
+        <div>
+          <div className="text-mute">Trades</div>
+          <div className="text-sm font-semibold">{h.trades}</div>
+        </div>
+        <div>
+          <div className="text-mute">Réussite</div>
+          <div className="text-sm font-semibold">{h.winRate} %</div>
+        </div>
+        <div>
+          <div className="text-mute">Moyenne</div>
+          <div className={cx('text-sm font-semibold', h.avgR > 0 ? 'text-up' : h.avgR < 0 ? 'text-down' : '')}>{pos(h.avgR)}</div>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] leading-snug text-ink/90">{h.message}</p>
+      <p className="mt-1 text-[10px] leading-snug text-mute">
+        Comparé à : {h.criteria}. Période {localDateTime(h.period.from)} → {localDateTime(h.period.to)}, bougies M15 réelles, coûts inclus
+        {h.fillRate !== null ? `, ordres limite exécutés ${h.fillRate} % du temps` : ''}.
       </p>
     </div>
   );

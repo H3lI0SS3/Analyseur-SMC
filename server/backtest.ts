@@ -29,6 +29,37 @@ export interface BtTrade {
   r: number | null;
   session: string;
   amdPhase: string;
+  features: SetupFeatures;
+}
+
+/** Caractéristiques d'un setup, utilisées pour retrouver les setups similaires dans l'historique. */
+export interface SetupFeatures {
+  direction: 'acheter' | 'vendre';
+  zoneKind: 'FVG' | 'OB';
+  zoneTf: string;
+  session: string;
+  sweep: boolean;
+  amd: boolean;
+  premiumDiscount: boolean;
+  entryType: 'marché' | 'limite';
+}
+
+/** Extrait les caractéristiques du plan proposé par le moteur. */
+export function setupFeatures(eng: EngineResult, now: number): SetupFeatures | null {
+  const s = eng.setup;
+  if (!s) return null;
+  const [zoneTf, kind] = s.zoneId.split('-');
+  const ok = (k: string) => !!eng.checklist.find(c => c.key === k)?.ok;
+  return {
+    direction: s.direction,
+    zoneKind: kind === 'OB' ? 'OB' : 'FVG',
+    zoneTf,
+    session: eng.session.killzone ? eng.session.name : sessionBucket(now),
+    sweep: ok('sweep'),
+    amd: ok('amd'),
+    premiumDiscount: ok('pd'),
+    entryType: s.entryType,
+  };
 }
 
 export interface VariantStats {
@@ -302,12 +333,18 @@ export class BacktestRun {
           r: r === null ? null : Number(r.toFixed(2)),
           session: eng.session.killzone ? eng.session.name : sessionBucket(now),
           amdPhase: eng.amd.phase,
+          features: setupFeatures(eng, now)!,
         });
         this.busyUntil[variant] = sim.exitAt ?? (sim.filledAt === null ? now + EXPIRY : Number.MAX_SAFE_INTEGER);
       }
     }
     this.computeMs += Date.now() - t0;
     if (this.k >= m15.length) this.done = true;
+  }
+
+  /** Tous les trades simulés (pour l'historique des setups similaires). */
+  allTrades(): BtTrade[] {
+    return this.trades;
   }
 
   result(): BacktestResult {
@@ -352,7 +389,7 @@ export async function runBacktest(pair: string, h1: Candle[], m15: Candle[], dec
   return run.result();
 }
 
-function sessionBucket(t: number): string {
+export function sessionBucket(t: number): string {
   const h = nyParts(t).h;
   if (h >= 20 || h < 2) return 'Session asiatique';
   if (h < 7) return 'Londres (hors kill zone)';
@@ -367,3 +404,93 @@ export function describe(v: VariantStats): string {
 }
 
 export const fmtDate = maDateTime;
+
+// ---------- Historique des setups similaires ----------
+export interface SimilarHistory {
+  status: 'disponible';
+  criteria: string;
+  matched: string[];
+  trades: number;
+  winRate: number;
+  avgR: number;
+  ciLow: number;
+  ciHigh: number;
+  profitFactor: number | null;
+  fillRate: number | null; // ordres limite réellement exécutés
+  verdict: 'favorable' | 'défavorable' | 'non démontré';
+  message: string;
+  period: { from: number; to: number };
+  rulesVersion: string;
+}
+
+const LABELS: Record<keyof SetupFeatures, (f: SetupFeatures) => string> = {
+  direction: f => (f.direction === 'acheter' ? 'achats' : 'ventes'),
+  zoneKind: f => (f.zoneKind === 'OB' ? 'Order Block' : 'FVG'),
+  zoneTf: f => f.zoneTf,
+  session: f => f.session,
+  sweep: f => (f.sweep ? 'avec sweep' : 'sans sweep'),
+  amd: f => (f.amd ? 'AMD aligné' : 'AMD non aligné'),
+  premiumDiscount: f => (f.premiumDiscount ? 'premium/discount respecté' : 'premium/discount non respecté'),
+  entryType: f => (f.entryType === 'marché' ? 'au marché' : 'ordre limite'),
+};
+
+/**
+ * Cherche dans le backtest les setups les plus proches du plan actuel.
+ * Du plus précis au plus large : on garde le premier niveau qui réunit au moins 30 trades clôturés.
+ */
+export function similarHistory(trades: BtTrade[], f: SetupFeatures, period: { from: number; to: number }, minTrades = 30): SimilarHistory | null {
+  const pool = trades.filter(t => t.variant === 'souple' && t.features);
+  const levels: (keyof SetupFeatures)[][] = [
+    ['direction', 'zoneKind', 'zoneTf', 'session', 'sweep', 'amd'],
+    ['direction', 'zoneKind', 'zoneTf', 'session', 'sweep'],
+    ['direction', 'zoneKind', 'zoneTf', 'session'],
+    ['direction', 'zoneKind', 'zoneTf'],
+    ['direction', 'zoneKind'],
+    ['direction'],
+    [],
+  ];
+  for (const keys of levels) {
+    const same = pool.filter(t => keys.every(k => t.features[k] === f[k]));
+    const closed = same.filter(t => t.r !== null);
+    if (closed.length < minTrades && keys.length) continue;
+    if (!closed.length) return null;
+    const rs = closed.map(t => t.r!);
+    const n = rs.length;
+    const mean = rs.reduce((a, b) => a + b, 0) / n;
+    const sd = Math.sqrt(rs.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1));
+    const half = (1.96 * sd) / Math.sqrt(n);
+    const gain = rs.filter(r => r > 0).reduce((a, b) => a + b, 0);
+    const loss = -rs.filter(r => r < 0).reduce((a, b) => a + b, 0);
+    const limits = same.filter(t => t.features.entryType === 'limite');
+    // en dessous de 30 trades, aucun verdict : l'échantillon est trop petit
+    const verdict: SimilarHistory['verdict'] = n < minTrades ? 'non démontré' : mean - half > 0 ? 'favorable' : mean + half < 0 ? 'défavorable' : 'non démontré';
+    const r2 = (x: number) => Number(x.toFixed(2));
+    const matched = keys.map(k => LABELS[k](f));
+    const crit = matched.length ? matched.join(' · ') : 'tous les signaux du moteur';
+    const message =
+      verdict === 'favorable'
+        ? `Ce type de setup a historiquement gagné : +${r2(mean)} R par trade en moyenne sur ${n} trades (fourchette probable ${r2(mean - half)} à ${r2(mean + half)} R).`
+        : verdict === 'défavorable'
+        ? `Ce type de setup a historiquement PERDU : ${r2(mean)} R par trade en moyenne sur ${n} trades. Prudence.`
+        : n < minTrades
+        ? `Seulement ${n} trades dans l’historique : trop peu pour conclure (${mean >= 0 ? '+' : ''}${r2(mean)} R en moyenne).`
+        : `Pas d’avantage démontré : ${mean >= 0 ? '+' : ''}${r2(mean)} R par trade sur ${n} trades, mais la fourchette (${r2(mean - half)} à ${r2(mean + half)} R) inclut zéro. Ce setup peut aussi bien gagner que perdre.`;
+    return {
+      status: 'disponible',
+      criteria: crit,
+      matched,
+      trades: n,
+      winRate: Math.round((rs.filter(r => r > 0.05).length / n) * 100),
+      avgR: r2(mean),
+      ciLow: r2(mean - half),
+      ciHigh: r2(mean + half),
+      profitFactor: loss > 0 ? r2(gain / loss) : null,
+      fillRate: limits.length ? Math.round((limits.filter(t => t.filledAt !== null).length / limits.length) * 100) : null,
+      verdict,
+      message,
+      period,
+      rulesVersion: RULES_VERSION,
+    };
+  }
+  return null;
+}

@@ -7,7 +7,7 @@ import { PAIRS, TIMEFRAMES, getSeries, getQuotes, dataSourceName, type Timeframe
 import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './server/ai';
 import { runAnalysis, AnalysisError } from './server/analysis';
 import { mountMcp } from './server/mcp';
-import { getJob, startBacktest } from './server/backtestJobs';
+import { advanceAll, getJob, startBacktest } from './server/backtestJobs';
 
 dotenv.config();
 
@@ -63,7 +63,9 @@ app.get('/api/candles', async (req, res) => {
 
 // ---------- Cotations ----------
 app.get('/api/quotes', async (_req, res) => {
-  res.json({ quotes: await getQuotes() });
+  const quotes = await getQuotes();
+  advanceAll(1500); // fait progresser un éventuel calcul d'historique
+  res.json({ quotes });
 });
 
 // ---------- Analyse ----------

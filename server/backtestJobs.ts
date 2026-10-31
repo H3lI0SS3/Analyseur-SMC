@@ -1,8 +1,8 @@
-// Backtest en tâche de fond, découpé en tranches.
-// Cloud Run ne donne vraiment du CPU que pendant les requêtes : chaque consultation de l'état
-// (onglet Journal ou connecteur Claude) fait donc avancer le calcul de quelques secondes.
+// Backtest en tâche de fond, découpé en tranches, et historique des trades pour éclairer chaque signal.
+// Cloud Run ne donne vraiment du CPU que pendant les requêtes : chaque consultation (analyse, cotations,
+// onglet Journal, connecteur Claude) fait donc avancer le calcul de quelques secondes.
 import { PAIRS, getHistory } from './marketData';
-import { BacktestRun, type BacktestResult } from './backtest';
+import { BacktestRun, similarHistory, type BacktestResult, type BtTrade, type SetupFeatures, type SimilarHistory } from './backtest';
 
 export interface JobView {
   status: 'aucun' | 'en cours' | 'terminé' | 'erreur';
@@ -17,12 +17,15 @@ export interface JobView {
 interface Job extends JobView {
   run?: BacktestRun;
   meta?: { source: string; futuresProxy: boolean; limitedBySource: boolean; m15Count: number };
+  trades?: BtTrade[];
 }
 
 const jobs = new Map<string, Job>();
+/** Un historique de plus de 7 jours est recalculé à la prochaine analyse. */
+const MAX_AGE = 7 * 24 * 3_600_000;
 
 const view = (j: Job): JobView => {
-  const { run, meta, ...v } = j;
+  const { run, meta, trades, ...v } = j;
   return v;
 };
 
@@ -34,6 +37,11 @@ export function getJob(pair: string, budgetMs = 8000): JobView | null {
   return view(job);
 }
 
+/** Fait avancer tous les calculs en cours (appelé à chaque rafraîchissement des cotations). */
+export function advanceAll(budgetMs: number) {
+  for (const job of jobs.values()) advance(job, budgetMs);
+}
+
 function advance(job: Job, budgetMs: number) {
   if (job.status !== 'en cours' || !job.run) return;
   job.run.step(budgetMs);
@@ -41,6 +49,7 @@ function advance(job: Job, budgetMs: number) {
   job.phase = `Calcul : ${job.progress} %`;
   if (job.run.done) {
     job.result = { ...job.run.result(), ...job.meta! };
+    job.trades = job.run.allTrades();
     job.status = 'terminé';
     job.finishedAt = Date.now();
     job.run = undefined; // libère la mémoire
@@ -60,6 +69,11 @@ export function startBacktest(pair: string, spread?: number, commissionPerLot?: 
   const running = jobs.get(pair);
   if (running && running.status === 'en cours' && Date.now() - running.startedAt! < 60 * 60_000) return view(running);
   const job: Job = { status: 'en cours', phase: 'Téléchargement de l’historique…', progress: 0, startedAt: Date.now() };
+  // on garde l'ancien historique de trades tant que le nouveau calcul n'est pas fini
+  if (running?.trades) {
+    job.trades = running.trades;
+    job.result = running.result;
+  }
   jobs.set(pair, job);
   const costs = {
     spread: Number.isFinite(spread) && spread! >= 0 && spread! < 50 * info.pipSize ? spread! : info.defaultSpread,
@@ -81,4 +95,37 @@ export function startBacktest(pair: string, spread?: number, commissionPerLot?: 
     }
   })();
   return view(job);
+}
+
+export type HistoryForSignal =
+  | SimilarHistory
+  | { status: 'en préparation'; message: string; progress: number }
+  | { status: 'indisponible'; message: string };
+
+/**
+ * Résultat historique des setups similaires au plan actuel.
+ * Lance automatiquement le backtest si aucun n'existe (ou s'il a plus de 7 jours).
+ */
+export function historyForSignal(pair: string, features: SetupFeatures | null): HistoryForSignal | null {
+  let job = jobs.get(pair);
+  const stale = job?.status === 'terminé' && Date.now() - (job.finishedAt || 0) > MAX_AGE;
+  if (!job || job.status === 'erreur' || stale) {
+    try {
+      startBacktest(pair);
+    } catch {
+      /* actif non supporté : ignoré */
+    }
+    job = jobs.get(pair);
+  }
+  if (!features) return null;
+  if (job?.trades && job.result) {
+    const h = similarHistory(job.trades, features, { from: job.result.from, to: job.result.to });
+    return h ?? { status: 'indisponible', message: 'Aucun setup comparable dans l’historique.' };
+  }
+  if (job?.status === 'erreur') return { status: 'indisponible', message: `Historique indisponible : ${job.error}` };
+  return {
+    status: 'en préparation',
+    message: `Historique en cours de calcul (${job?.phase ?? 'démarrage'}). Le résultat passé de ce type de setup s’affichera à la prochaine analyse.`,
+    progress: job?.progress ?? 0,
+  };
 }
