@@ -245,7 +245,9 @@ async function fetchTwelveDeep(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string,
     all = [...fresh, ...all];
     onPage?.(all.length);
     endDate = fmtTwelve(fresh[0].t - 60_000);
-    if (chunk.length < 4000) {
+    // page incomplète côté source = on est au bout de l'historique disponible
+    // (on compte les lignes BRUTES : les bougies du week-end retirées par clean() ne comptent pas)
+    if (json.values.length < 4000) {
       limited = true;
       break;
     }

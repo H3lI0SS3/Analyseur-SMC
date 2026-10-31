@@ -97,9 +97,8 @@ const setup = (p: Partial<Setup>): Setup => ({
     const step = u.searchParams.get('interval') === '15min' ? 900_000 : 3_600_000;
     const end = u.searchParams.get('end_date') ? Date.parse(u.searchParams.get('end_date')!.replace(' ', 'T') + 'Z') : lastBar;
     const vals: any[] = [];
+    // comme Twelve Data, la source simulée publie AUSSI des bougies plates le week-end
     for (let t = Math.floor(end / step) * step; vals.length < 5000 && t >= firstAvailable; t -= step) {
-      const ny = nyParts(t);
-      if ((ny.dow === 5 && ny.h >= 17) || ny.dow === 6 || (ny.dow === 0 && ny.h < 17)) continue;
       vals.push({ datetime: new Date(t).toISOString().slice(0, 19).replace('T', ' '), open: '1.1', high: '1.11', low: '1.09', close: '1.1' });
     }
     vals.reverse();
