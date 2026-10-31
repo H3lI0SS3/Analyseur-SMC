@@ -1,5 +1,5 @@
 // Tests du simulateur et du backtest : npx tsx server/backtest.test.ts
-import { simulate, runBacktest } from './backtest';
+import { simulate, runBacktest, BacktestRun } from './backtest';
 import type { Candle } from './marketData';
 import type { Setup } from './smc';
 import { nyParts } from './time';
@@ -74,7 +74,46 @@ const setup = (p: Partial<Setup>): Setup => ({
   ok('Moins de 90 s de calcul', secs < 90);
   ok('La règle stricte prend au plus autant de signaux que la souple', res.strict.signals <= res.souple.signals, `${res.strict.signals} vs ${res.souple.signals}`);
   ok('Résultats cohérents (gains + pertes + BE = trades)', res.strict.wins + res.strict.losses + res.strict.breakeven === res.strict.trades);
+  ok('Statistiques « depuis le gel » présentes', !!res.strictForward && !!res.soupleForward);
+  // le découpage en tranches ne doit pas changer le résultat
+  const run = new BacktestRun('EUR/USD', h1.slice(-5000), m15.slice(-5000), 5, { spread: 0.0001, commissionPerLot: 7, contract: 100_000 });
+  while (!run.done) run.step(137);
+  const r2 = run.result();
+  ok('Calcul par tranches identique au calcul en une fois', r2.souple.totalR === res.souple.totalR && r2.strict.trades === res.strict.trades, `${r2.souple.totalR} vs ${res.souple.totalR}`);
   console.log(`(info) marché aléatoire — strict : ${res.strict.trades} trades, ${res.strict.totalR} R ; souple : ${res.souple.trades} trades, ${res.souple.totalR} R`);
+}
+
+// 7. Téléchargement de l'historique page par page (Twelve Data simulé)
+{
+  process.env.TWELVE_DATA_API_KEY = 'test';
+  process.env.TWELVE_RATE_PER_MIN = '1000';
+  const realFetch = globalThis.fetch;
+  const firstAvailable = Date.UTC(2025, 3, 1); // la source ne remonte pas avant le 1er avril 2025
+  const lastBar = Date.UTC(2026, 9, 30, 20, 45);
+  let calls = 0;
+  globalThis.fetch = (async (url: any) => {
+    calls++;
+    const u = new URL(String(url));
+    const step = u.searchParams.get('interval') === '15min' ? 900_000 : 3_600_000;
+    const end = u.searchParams.get('end_date') ? Date.parse(u.searchParams.get('end_date')!.replace(' ', 'T') + 'Z') : lastBar;
+    const vals: any[] = [];
+    for (let t = Math.floor(end / step) * step; vals.length < 5000 && t >= firstAvailable; t -= step) {
+      const ny = nyParts(t);
+      if ((ny.dow === 5 && ny.h >= 17) || ny.dow === 6 || (ny.dow === 0 && ny.h < 17)) continue;
+      vals.push({ datetime: new Date(t).toISOString().slice(0, 19).replace('T', ' '), open: '1.1', high: '1.11', low: '1.09', close: '1.1' });
+    }
+    vals.reverse();
+    if (!vals.length) return new Response(JSON.stringify({ status: 'error', code: 400, message: 'No data is available on the specified dates.' }), { status: 200 });
+    return new Response(JSON.stringify({ status: 'ok', values: vals }), { status: 200 });
+  }) as any;
+  const { getHistory } = await import('./marketData');
+  const hist = await getHistory('EUR/USD');
+  globalThis.fetch = realFetch;
+  const sortedUnique = hist.m15.every((c, i) => i === 0 || c.t > hist.m15[i - 1].t);
+  ok('Historique M15 reconstitué sans doublon ni trou de tri', sortedUnique, `${hist.m15.length} bougies, ${calls} requêtes`);
+  ok('Remonte jusqu’à la limite de la source', Math.abs(hist.m15[0].t - firstAvailable) < 7 * 86_400_000, new Date(hist.m15[0].t).toISOString().slice(0, 10));
+  ok('Limite de la source signalée', hist.limitedBySource === true);
+  ok('H1 couvre la période M15 + préchauffage', hist.h1[0].t <= hist.m15[0].t + 7 * 86_400_000, `H1 dès ${new Date(hist.h1[0].t).toISOString().slice(0, 10)}`);
 }
 
 if (failed) {

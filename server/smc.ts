@@ -4,6 +4,12 @@
 import { TF_MS, type Candle, type Timeframe } from './marketData';
 import { HOUR, marketClosed, maDateTime, maTime, nyParts, nyToUtc, tradingDayStart, tradingWeekStart } from './time';
 
+// ---------------- Version des règles ----------------
+// Toute modification de la logique de décision doit changer la version ET la date de gel :
+// les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
+export const RULES_VERSION = '3.2';
+export const RULES_FROZEN_AT = Date.UTC(2026, 9, 31, 3, 0); // 31/10/2026 03:00 UTC
+
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
 export type Dir = 'bull' | 'bear';

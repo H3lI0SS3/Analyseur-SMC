@@ -5,7 +5,7 @@
 //  - « souple »  : le balayage n'est qu'un bonus de confluence.
 
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
-import { analyze, type EngineResult, type Setup } from './smc';
+import { analyze, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
 import { HOUR, marketClosed, maDateTime, nyParts } from './time';
 
 export interface BacktestCosts {
@@ -55,9 +55,14 @@ export interface BacktestResult {
   to: number;
   stepsEvaluated: number;
   durationMs: number;
+  rulesVersion: string;
+  frozenFrom: number;
   assumptions: string[];
   strict: VariantStats;
   souple: VariantStats;
+  /** uniquement les signaux postérieurs au gel des règles (équivalent d'un suivi en direct) */
+  strictForward: VariantStats;
+  soupleForward: VariantStats;
   lastTrades: BtTrade[];
 }
 
@@ -193,112 +198,158 @@ function finalize(trades: BtTrade[]): VariantStats {
 }
 
 /**
- * Rejoue le moteur toutes les 15 minutes. À chaque pas, seules les bougies déjà clôturées sont visibles.
- * h1 : historique H1 (H4/D1 sont reconstruits à 17h00 New York) ; m15 : historique M15.
+ * Backtest incrémental : le calcul avance par tranches (step) pour rester compatible avec un
+ * hébergement qui ne donne du CPU que pendant les requêtes (Cloud Run). À chaque pas de 15 minutes,
+ * seules les bougies déjà clôturées sont visibles par le moteur.
  */
-export async function runBacktest(pair: string, h1: Candle[], m15: Candle[], decimals: number, costs: BacktestCosts): Promise<BacktestResult> {
-  const t0 = Date.now();
-  const h4All = aggregateTrading(h1, 'H4');
-  const d1All = aggregateTrading(h1, 'D1');
-  const commUnit = costs.commissionPerLot / costs.contract;
-  const trades: BtTrade[] = [];
-  const busyUntil: Record<'strict' | 'souple', number> = { strict: 0, souple: 0 };
+export class BacktestRun {
+  private h4All: Candle[];
+  private d1All: Candle[];
+  private commUnit: number;
+  private trades: BtTrade[] = [];
+  private busyUntil: Record<'strict' | 'souple', number> = { strict: 0, souple: 0 };
+  private iH1 = 0;
+  private iH4 = 0;
+  private iD1 = 0;
+  private k = 0;
+  private steps = 0;
+  private computeMs = 0;
+  readonly startT: number;
+  done = false;
 
-  // index glissants pour découper les séries sans tout re-filtrer à chaque pas
-  const upto = (arr: Candle[], t: number, from: number) => {
-    let i = from;
-    while (i < arr.length && arr[i].t < t) i++;
-    return i;
-  };
-  let iH1 = 0;
-  let iH4 = 0;
-  let iD1 = 0;
-  // départ : il faut au moins 60 jours de H1 et 500 bougies M15 d'historique
-  const startT = Math.max(h1[0].t + 60 * 24 * HOUR, m15[Math.min(500, m15.length - 1)].t);
-  let steps = 0;
-
-  for (let k = 0; k < m15.length; k++) {
-    const now = m15[k].t + TF_MS.M15; // instant de clôture de la bougie k
-    if (now < startT || marketClosed(m15[k].t)) continue;
-    iH1 = upto(h1, now, iH1);
-    iH4 = upto(h4All, now, iH4);
-    iD1 = upto(d1All, now, iD1);
-    const series: Record<Timeframe, Candle[]> = {
-      M15: m15.slice(Math.max(0, k + 1 - 500), k + 1),
-      H1: h1.slice(Math.max(0, iH1 - 800), iH1),
-      H4: h4All.slice(Math.max(0, iH4 - 300), iH4),
-      D1: d1All.slice(0, iD1),
-    };
-    let eng: EngineResult;
-    try {
-      eng = analyze(series, decimals, {
-        now,
-        spread: costs.spread,
-        commissionPerLot: costs.commissionPerLot,
-        contract: costs.contract,
-        news: { available: true, events: [] }, // calendrier historique non disponible
-        strictSweep: false,
-      });
-    } catch {
-      continue;
-    }
-    steps++;
-    if (steps % 200 === 0) await new Promise(r => setImmediate(r)); // laisse respirer le serveur
-
-    const souple = eng.signal !== 'attendre' && !!eng.setup;
-    const sweepOk = !!eng.checklist.find(c => c.key === 'sweep')?.ok;
-    const optionalOk = eng.checklist.filter(c => !c.core && c.ok).length;
-    const strict = souple && sweepOk && optionalOk - 1 >= 2;
-
-    for (const variant of ['strict', 'souple'] as const) {
-      const take = variant === 'strict' ? strict : souple;
-      if (!take || now < busyUntil[variant]) continue; // un seul trade à la fois par variante
-      const setup = eng.setup!;
-      const sim = simulate(setup, now, m15, k + 1, costs.spread);
-      const r = sim.outcome === 'expiré' || sim.outcome === 'en cours' ? null : (sim.pnl - commUnit) / (sim.risk + commUnit);
-      trades.push({
-        variant,
-        signalAt: now,
-        filledAt: sim.filledAt,
-        exitAt: sim.exitAt,
-        direction: setup.direction,
-        entry: setup.entry,
-        sl: setup.sl,
-        tp1: setup.tp1,
-        tp2: setup.tp2,
-        plannedRR: setup.rr2 ?? setup.rr1,
-        outcome: sim.outcome,
-        r: r === null ? null : Number(r.toFixed(2)),
-        session: eng.session.killzone ? eng.session.name : sessionBucket(now),
-        amdPhase: eng.amd.phase,
-      });
-      busyUntil[variant] = sim.exitAt ?? (sim.filledAt === null ? now + EXPIRY : Number.MAX_SAFE_INTEGER);
-    }
+  constructor(
+    readonly pair: string,
+    private h1: Candle[],
+    private m15: Candle[],
+    private decimals: number,
+    private costs: BacktestCosts
+  ) {
+    this.h4All = aggregateTrading(h1, 'H4');
+    this.d1All = aggregateTrading(h1, 'D1');
+    this.commUnit = costs.commissionPerLot / costs.contract;
+    // départ : il faut au moins 60 jours de H1 et 500 bougies M15 d'historique
+    this.startT = Math.max(h1[0].t + 60 * 24 * HOUR, m15[Math.min(500, m15.length - 1)].t);
   }
 
-  const strictTrades = trades.filter(t => t.variant === 'strict');
-  const soupleTrades = trades.filter(t => t.variant === 'souple');
-  return {
-    pair,
-    from: startT,
-    to: m15[m15.length - 1].t,
-    stepsEvaluated: steps,
-    durationMs: Date.now() - t0,
-    assumptions: [
-      'Le moteur ne voit que les bougies clôturées à chaque instant (aucune information future).',
-      'Ordre limite annulé après 4 h ou si TP1 est atteint avant l’exécution ; un seul trade à la fois.',
-      'Gestion : 50 % à TP1 puis stop au point d’entrée, reste à TP2 ; sans TP2, sortie totale à TP1.',
-      'Si stop et objectif sont touchés dans la même bougie M15, on compte le stop (hypothèse prudente).',
-      `Coûts inclus : spread ${costs.spread} et commission ${costs.commissionPerLot} $ par lot.`,
-      'Annonces économiques non filtrées (pas de calendrier historique) : résultats un peu optimistes ou pessimistes selon les jours.',
-    ],
-    strict: finalize(strictTrades),
-    souple: finalize(soupleTrades),
-    lastTrades: trades
-      .filter(t => t.r !== null)
-      .sort((a, b) => b.signalAt - a.signalAt)
-      .slice(0, 20),
-  };
+  /** Avancement de 0 à 1. */
+  get progress(): number {
+    return this.m15.length ? this.k / this.m15.length : 1;
+  }
+
+  /** Calcule pendant au plus budgetMs millisecondes. */
+  step(budgetMs: number): void {
+    const until = Date.now() + budgetMs;
+    const t0 = Date.now();
+    const { m15, h1 } = this;
+    const upto = (arr: Candle[], t: number, from: number) => {
+      let i = from;
+      while (i < arr.length && arr[i].t < t) i++;
+      return i;
+    };
+    while (this.k < m15.length && Date.now() < until) {
+      const k = this.k++;
+      const now = m15[k].t + TF_MS.M15; // instant de clôture de la bougie k
+      if (now < this.startT || marketClosed(m15[k].t)) continue;
+      // un trade est déjà en cours dans les deux variantes : aucun nouveau signal ne serait pris
+      if (now < this.busyUntil.strict && now < this.busyUntil.souple) continue;
+      this.iH1 = upto(h1, now, this.iH1);
+      this.iH4 = upto(this.h4All, now, this.iH4);
+      this.iD1 = upto(this.d1All, now, this.iD1);
+      const series: Record<Timeframe, Candle[]> = {
+        M15: m15.slice(Math.max(0, k + 1 - 500), k + 1),
+        H1: h1.slice(Math.max(0, this.iH1 - 800), this.iH1),
+        H4: this.h4All.slice(Math.max(0, this.iH4 - 300), this.iH4),
+        D1: this.d1All.slice(Math.max(0, this.iD1 - 400), this.iD1),
+      };
+      let eng: EngineResult;
+      try {
+        eng = analyze(series, this.decimals, {
+          now,
+          spread: this.costs.spread,
+          commissionPerLot: this.costs.commissionPerLot,
+          contract: this.costs.contract,
+          news: { available: true, events: [] }, // calendrier historique non disponible
+          strictSweep: false,
+        });
+      } catch {
+        continue;
+      }
+      this.steps++;
+
+      const souple = eng.signal !== 'attendre' && !!eng.setup;
+      const sweepOk = !!eng.checklist.find(c => c.key === 'sweep')?.ok;
+      const optionalOk = eng.checklist.filter(c => !c.core && c.ok).length;
+      const strict = souple && sweepOk && optionalOk - 1 >= 2;
+
+      for (const variant of ['strict', 'souple'] as const) {
+        const take = variant === 'strict' ? strict : souple;
+        if (!take || now < this.busyUntil[variant]) continue; // un seul trade à la fois par variante
+        const setup = eng.setup!;
+        const sim = simulate(setup, now, m15, k + 1, this.costs.spread);
+        const r = sim.outcome === 'expiré' || sim.outcome === 'en cours' ? null : (sim.pnl - this.commUnit) / (sim.risk + this.commUnit);
+        this.trades.push({
+          variant,
+          signalAt: now,
+          filledAt: sim.filledAt,
+          exitAt: sim.exitAt,
+          direction: setup.direction,
+          entry: setup.entry,
+          sl: setup.sl,
+          tp1: setup.tp1,
+          tp2: setup.tp2,
+          plannedRR: setup.rr2 ?? setup.rr1,
+          outcome: sim.outcome,
+          r: r === null ? null : Number(r.toFixed(2)),
+          session: eng.session.killzone ? eng.session.name : sessionBucket(now),
+          amdPhase: eng.amd.phase,
+        });
+        this.busyUntil[variant] = sim.exitAt ?? (sim.filledAt === null ? now + EXPIRY : Number.MAX_SAFE_INTEGER);
+      }
+    }
+    this.computeMs += Date.now() - t0;
+    if (this.k >= m15.length) this.done = true;
+  }
+
+  result(): BacktestResult {
+    const by = (v: 'strict' | 'souple', from = 0) => this.trades.filter(t => t.variant === v && t.signalAt >= from);
+    const m15 = this.m15;
+    return {
+      pair: this.pair,
+      from: this.startT,
+      to: m15[m15.length - 1].t,
+      stepsEvaluated: this.steps,
+      durationMs: this.computeMs,
+      rulesVersion: RULES_VERSION,
+      frozenFrom: RULES_FROZEN_AT,
+      assumptions: [
+        'Le moteur ne voit que les bougies clôturées à chaque instant (aucune information future).',
+        'Ordre limite annulé après 4 h ou si TP1 est atteint avant l’exécution ; un seul trade à la fois.',
+        'Gestion : 50 % à TP1 puis stop au point d’entrée, reste à TP2 ; sans TP2, sortie totale à TP1.',
+        'Si stop et objectif sont touchés dans la même bougie M15, on compte le stop (hypothèse prudente).',
+        `Coûts inclus : spread ${this.costs.spread} et commission ${this.costs.commissionPerLot} $ par lot.`,
+        'Annonces économiques non filtrées (pas de calendrier historique) : résultats un peu optimistes ou pessimistes selon les jours.',
+        `« Depuis le gel des règles » : seuls les signaux apparus après le ${maDateTime(RULES_FROZEN_AT)}, date à laquelle les règles du moteur (version ${RULES_VERSION}) ont été figées. Ces trades n’ont pas pu influencer la conception du moteur : c’est l’équivalent d’un suivi en direct.`,
+      ],
+      strict: finalize(by('strict')),
+      souple: finalize(by('souple')),
+      strictForward: finalize(by('strict', RULES_FROZEN_AT)),
+      soupleForward: finalize(by('souple', RULES_FROZEN_AT)),
+      lastTrades: this.trades
+        .filter(t => t.r !== null)
+        .sort((a, b) => b.signalAt - a.signalAt)
+        .slice(0, 20),
+    };
+  }
+}
+
+/** Exécution complète en une fois (tests, scripts). */
+export async function runBacktest(pair: string, h1: Candle[], m15: Candle[], decimals: number, costs: BacktestCosts): Promise<BacktestResult> {
+  const run = new BacktestRun(pair, h1, m15, decimals, costs);
+  while (!run.done) {
+    run.step(2000);
+    await new Promise(r => setImmediate(r));
+  }
+  return run.result();
 }
 
 function sessionBucket(t: number): string {

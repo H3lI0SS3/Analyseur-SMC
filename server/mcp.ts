@@ -165,9 +165,9 @@ function buildServer() {
     {
       title: 'Backtest du moteur',
       description:
-        'Rejoue le moteur sur l’historique réel (≈ 2 mois en M15) et simule chaque plan avec coûts : nombre de trades, réussite, total en R, profit factor, pire repli. ' +
-        'Compare la règle stricte (balayage de liquidité obligatoire) et la règle souple. Le calcul prend environ une minute : ' +
-        'le premier appel le lance, rappelle l’outil ensuite pour lire le résultat.',
+        'Rejoue le moteur sur l’historique réel en M15 (jusqu’à ~2 ans avec Twelve Data) et simule chaque plan avec coûts : trades, réussite, total en R, profit factor, pire repli. ' +
+        'Compare la règle stricte (balayage obligatoire) et la règle souple, sur toute la période ET depuis le gel des règles (équivalent d’un suivi en direct). ' +
+        'Le calcul prend plusieurs minutes : chaque appel le fait avancer ; rappelle l’outil jusqu’au statut « terminé ».',
       inputSchema: {
         actif: PAIR_ENUM.describe('EUR/USD ou XAU/USD'),
         relancer: z.boolean().optional().describe('Relancer même si un résultat existe déjà'),
@@ -175,12 +175,12 @@ function buildServer() {
       annotations: readOnly,
     },
     async ({ actif, relancer }) => {
-      let job = getJob(actif);
+      let job = getJob(actif, 25_000);
       if (!job || relancer || job.status === 'erreur') {
-        job = startBacktest(actif);
-        return text(`Backtest ${actif} lancé (${maDateTime(job.startedAt)}). Rappelle l’outil dans environ une minute pour lire le résultat.`);
+        const started = startBacktest(actif);
+        return text(`Backtest ${actif} lancé (${maDateTime(started.startedAt!)}) : ${started.phase}. Rappelle l’outil pour le faire avancer.`);
       }
-      if (job.status === 'en cours') return text(`Backtest ${actif} en cours depuis ${Math.round((Date.now() - job.startedAt) / 1000)} s. Rappelle l’outil dans 30 secondes.`);
+      if (job.status === 'en cours') return text(`Backtest ${actif} en cours : ${job.phase}. Rappelle l’outil pour continuer le calcul.`);
       const r = job.result!;
       return text({
         actif,
@@ -191,6 +191,14 @@ function buildServer() {
         duree_calcul_s: Math.round(r.durationMs / 1000),
         regle_stricte_sweep_obligatoire: { resume: describeBt(r.strict), ...r.strict },
         regle_souple_sweep_bonus: { resume: describeBt(r.souple), ...r.souple },
+        depuis_gel_des_regles: {
+          date_gel: maDateTime(r.frozenFrom),
+          version_regles: r.rulesVersion,
+          stricte: describeBt(r.strictForward),
+          souple: describeBt(r.soupleForward),
+        },
+        bougies_m15: r.m15Count,
+        historique_limite_par_la_source: r.limitedBySource,
         hypotheses: r.assumptions,
         derniers_trades: r.lastTrades.map(t => ({
           variante: t.variant,

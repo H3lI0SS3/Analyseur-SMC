@@ -87,7 +87,8 @@ app.post('/api/backtest', (req, res) => {
   }
 });
 app.get('/api/backtest', (req, res) => {
-  res.json(getJob(String(req.query.pair || 'EUR/USD')) || { status: 'aucun' });
+  // chaque consultation fait avancer le calcul ~2,5 s (Cloud Run ne donne du CPU que pendant les requêtes)
+  res.json(getJob(String(req.query.pair || 'EUR/USD'), 2500) || { status: 'aucun' });
 });
 
 // ---------- Connecteur MCP (pour piloter l'app depuis Claude) ----------

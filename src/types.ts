@@ -124,6 +124,8 @@ export interface VariantStats {
 
 export interface BacktestJob {
   status: 'aucun' | 'en cours' | 'terminé' | 'erreur';
+  phase?: string;
+  progress?: number;
   startedAt?: number;
   error?: string;
   result?: {
@@ -134,6 +136,12 @@ export interface BacktestJob {
     assumptions: string[];
     strict: VariantStats;
     souple: VariantStats;
+    strictForward: VariantStats;
+    soupleForward: VariantStats;
+    frozenFrom: number;
+    rulesVersion: string;
+    limitedBySource: boolean;
+    m15Count: number;
   };
 }
 

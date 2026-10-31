@@ -19,6 +19,7 @@ export function BacktestCard({ pair, settings }: Props) {
       const r = await api(`/api/backtest?pair=${encodeURIComponent(pair)}`);
       const j: BacktestJob = await r.json();
       setJob(j);
+      if (j.status === 'en cours' && !timer.current) timer.current = setInterval(poll, 3000);
       if (j.status !== 'en cours' && timer.current) {
         clearInterval(timer.current);
         timer.current = null;
@@ -47,7 +48,7 @@ export function BacktestCard({ pair, settings }: Props) {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Erreur');
       setJob(j);
-      if (!timer.current) timer.current = setInterval(poll, 5000);
+      if (!timer.current) timer.current = setInterval(poll, 3000);
     } catch (e: any) {
       setError(e.message);
     }
@@ -70,24 +71,42 @@ export function BacktestCard({ pair, settings }: Props) {
         </button>
       </div>
       <p className="text-[11px] leading-snug text-mute">
-        Rejoue le moteur toutes les 15 minutes sur environ 2 mois de vraies données, avec tes coûts, et mesure ce qu’auraient donné ses plans. Calcul d’environ une minute.
+        Rejoue le moteur toutes les 15 minutes sur les vraies bougies M15 (jusqu’à 2 ans), avec tes coûts, sans jamais voir le futur. Calcul de plusieurs minutes : garde cet écran ouvert, il fait avancer le calcul.
       </p>
       {error && <p className="text-xs text-down">{error}</p>}
       {job.status === 'erreur' && <p className="text-xs text-down">Erreur : {job.error}</p>}
+      {job.status === 'en cours' && (
+        <div>
+          <div className="mb-1 text-[11px] text-mute">{job.phase}</div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-card2">
+            <div className="h-full bg-gold transition-all" style={{ width: `${job.progress ?? 0}%` }} />
+          </div>
+        </div>
+      )}
       {res && (
         <>
           <p className="text-[11px] text-mute">
-            Période : {localDateTime(res.from)} → {localDateTime(res.to)} · {res.source}
+            Période : {localDateTime(res.from)} → {localDateTime(res.to)} ({Math.round((res.to - res.from) / 86_400_000)} jours, {res.m15Count.toLocaleString('fr-FR')} bougies M15) · {res.source}
+            {res.limitedBySource && ' · historique maximal fourni par la source'}
           </p>
+          <div className="label">Toute la période</div>
           <div className="grid grid-cols-2 gap-2">
             <Variant title="Sweep obligatoire (ta règle)" v={res.strict} />
             <Variant title="Sweep en bonus" v={res.souple} />
           </div>
-          {res.strict.trades < 30 && (
+          {Math.min(res.strict.trades, res.souple.trades) < 100 && (
             <p className="text-[11px] leading-snug text-warn">
-              Moins de 30 trades : échantillon trop petit pour conclure. Relance chaque semaine et compare.
+              Moins de 100 trades sur une des deux règles : échantillon encore trop petit pour trancher.
             </p>
           )}
+          <div className="label pt-1">Depuis le gel des règles ({localDateTime(res.frozenFrom)}, version {res.rulesVersion})</div>
+          <p className="text-[11px] leading-snug text-mute">
+            Signaux apparus après la date où les règles ont été figées : ils n’ont pas pu influencer la conception du moteur. C’est l’équivalent d’un suivi en direct ; il se remplit semaine après semaine.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <Variant title="Sweep obligatoire" v={res.strictForward} />
+            <Variant title="Sweep en bonus" v={res.soupleForward} />
+          </div>
           <details className="text-[11px] text-mute">
             <summary className="cursor-pointer">Hypothèses du test</summary>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
