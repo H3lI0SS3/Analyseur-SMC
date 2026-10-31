@@ -650,7 +650,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   }).map(l => ({ ...l, price: r(l.price) }));
   const sweeps = findSweeps(m15, liquidity, h1, raw.H1.swings);
   // marché fermé : on décrit le cycle de la dernière séance, pas une séance qui n'existe pas
-  const amdRef = marketClosed(now) ? lastM15.t + TF_MS.M15 : now;
+  // (−1 ms : la dernière bougie de vendredi finit pile à 17h00 NY, qui ouvrirait une journée inexistante)
+  const amdRef = marketClosed(now) ? lastM15.t + TF_MS.M15 - 1 : now;
   const amd = amdPhase(m15, raw.M15.events, amdRef, decimals);
   const strictSweep = opts.strictSweep ?? true;
 

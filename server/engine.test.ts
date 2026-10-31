@@ -173,6 +173,14 @@ ok('Samedi : marché fermé, signal = attendre', saturday.signal === 'attendre' 
   ok('AMD : deux côtés balayés = indéterminé', amdPhase(both, [], t1 + 3_600_000, 5).phase === 'Indéterminée');
 }
 
+// ---------- Week-end : le cycle AMD décrit la séance de vendredi, pas une séance fantôme ----------
+{
+  const sat = Date.UTC(2026, 9, 31, 23, 40); // samedi soir
+  const fri = genM15(11, Date.UTC(2026, 9, 30, 21, 0), 0, 0.0002, 1.16); // dernière bougie : ven. 20:45 UTC (16:45 NY)
+  const wk = analyze(seriesAt(fri), 5, { now: sat, spread: 0.0001, commissionPerLot: 7, contract: 100_000, news: { available: true, events: [] }, newsCurrencies: ['USD'] });
+  ok('Week-end : AMD sans « range en formation »', !wk.amd.detail.includes('en formation'), wk.amd.detail);
+}
+
 // ---------- 7. Sweep obligatoire ----------
 {
   const strictRes = analyze(series, 5, { now: tuesday, ...costs, news: { available: true, events: [] }, strictSweep: true });
