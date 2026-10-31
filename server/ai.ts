@@ -12,6 +12,7 @@ export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 // Si un modèle est retiré par Google, on essaie automatiquement le suivant.
 const GEMINI_FALLBACKS = [...new Set([GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-flash-latest'])];
 let geminiWorking: string | null = null;
+const isBusy = (e: any) => /\b(503|429)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand/i.test(String(e?.message || e));
 const isModelGone = (e: any) => /\b404\b|not found|no longer available|is not supported/i.test(String(e?.message || e));
 
 export function availableProviders(): AiProvider[] {
@@ -183,15 +184,26 @@ async function reviewGemini(text: string, image?: { base64: string; mediaType: s
   let res: any = null;
   let used = '';
   let lastErr: any = null;
-  for (const model of geminiWorking ? [geminiWorking, ...GEMINI_FALLBACKS.filter(m => m !== geminiWorking)] : GEMINI_FALLBACKS) {
-    try {
-      res = await call(model);
-      used = model;
-      geminiWorking = model;
-      break;
-    } catch (e) {
-      lastErr = e;
-      if (!isModelGone(e)) throw e; // autre erreur (quota, réseau) : on ne masque rien
+  let goneSeen = false;
+  const order = geminiWorking ? [geminiWorking, ...GEMINI_FALLBACKS.filter(m => m !== geminiWorking)] : GEMINI_FALLBACKS;
+  outer: for (const model of order) {
+    // 2 essais par modèle si Google est momentanément surchargé (503 / 429)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        res = await call(model);
+        used = model;
+        // on ne retient un modèle de secours que si le précédent a été retiré (pas s'il était juste surchargé)
+        if (goneSeen) geminiWorking = model;
+        break outer;
+      } catch (e) {
+        lastErr = e;
+        if (isModelGone(e)) {
+          goneSeen = true;
+          continue outer; // modèle retiré : on passe au suivant
+        }
+        if (!isBusy(e)) throw e; // autre erreur (clé, réseau) : on ne masque rien
+        if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+      }
     }
   }
   if (!res) throw lastErr;

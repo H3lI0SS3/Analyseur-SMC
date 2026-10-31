@@ -209,7 +209,10 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
         typeof note === 'string' ? note.slice(0, 500) : undefined
       );
     } catch (err: any) {
-      aiError = `L’IA (${chosen}) n’a pas répondu : ${String(err?.message || err).slice(0, 200)}. Résultat basé uniquement sur les calculs du moteur.`;
+      const msg = String(err?.message || err);
+      aiError = /\b(503|429)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded/i.test(msg)
+        ? `L’IA (${chosen}) est surchargée en ce moment (côté ${chosen === 'gemini' ? 'Google' : 'Anthropic'}). Réessaie dans une minute. Résultat basé uniquement sur les calculs du moteur.`
+        : `L’IA (${chosen}) n’a pas répondu : ${msg.slice(0, 200)}. Résultat basé uniquement sur les calculs du moteur.`;
     }
   } else if (provider !== 'none') {
     aiError = 'Aucune clé IA configurée : résultat basé uniquement sur les calculs du moteur.';
