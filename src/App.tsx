@@ -4,6 +4,7 @@ import { CandleChart } from './components/CandleChart';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { JournalView } from './components/JournalView';
 import { SettingsView } from './components/SettingsView';
+import { BacktestCard } from './components/BacktestCard';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
 import { api, costsFor, cx, fmt, getAccessCode, load, loadArray, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct } from './lib/utils';
 
@@ -204,7 +205,12 @@ export default function App() {
             />
           </>
         )}
-        {tab === 'journal' && <JournalView journal={journal} setJournal={setJournal} />}
+        {tab === 'journal' && (
+          <>
+            <BacktestCard pair={pair} settings={settings} />
+            <JournalView journal={journal} setJournal={setJournal} />
+          </>
+        )}
         {tab === 'reglages' && <SettingsView settings={settings} setSettings={setSettings} status={status} />}
       </main>
 

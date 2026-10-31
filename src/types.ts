@@ -94,6 +94,47 @@ export interface Setup {
   rr2: number | null;
   zoneId: string;
   zoneLabel: string;
+  validUntil?: number;
+}
+
+export interface AmdState {
+  phase: 'Accumulation' | 'Manipulation' | 'Distribution' | 'Indéterminée';
+  direction: 'haussière' | 'baissière' | null;
+  detail: string;
+  asiaHigh: number | null;
+  asiaLow: number | null;
+}
+
+export interface VariantStats {
+  signals: number;
+  filled: number;
+  expired: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  winRate: number | null;
+  totalR: number;
+  avgR: number | null;
+  profitFactor: number | null;
+  maxDrawdownR: number;
+  longestLosingStreak: number;
+  bySession: Record<string, { trades: number; totalR: number }>;
+}
+
+export interface BacktestJob {
+  status: 'aucun' | 'en cours' | 'terminé' | 'erreur';
+  startedAt?: number;
+  error?: string;
+  result?: {
+    from: number;
+    to: number;
+    stepsEvaluated: number;
+    source: string;
+    assumptions: string[];
+    strict: VariantStats;
+    souple: VariantStats;
+  };
 }
 
 export interface CheckItem {
@@ -122,6 +163,7 @@ export interface EngineResult {
   waitCondition: string | null;
   nextNews: { t: number; currency: string; title: string } | null;
   newsAvailable: boolean;
+  amd: AmdState;
 }
 
 export interface AiReview {

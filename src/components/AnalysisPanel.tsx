@@ -187,6 +187,23 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
           </div>
         </div>
         {!go && e.waitCondition && <p className="mt-3 text-sm leading-snug text-ink/90">{e.waitCondition}</p>}
+        {e.amd && (
+          <div className="mt-3 rounded-lg bg-card2 px-3 py-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold">Cycle AMD du jour</span>
+              <span
+                className={cx(
+                  'rounded px-1.5 py-0.5 text-[10px] font-bold',
+                  e.amd.phase === 'Distribution' ? 'bg-gold/20 text-gold' : e.amd.phase === 'Manipulation' ? 'bg-warn/15 text-warn' : 'bg-white/5 text-mute'
+                )}
+              >
+                {e.amd.phase}
+                {e.amd.direction ? ` · ${e.amd.direction}` : ''}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-mute">{e.amd.detail}</p>
+          </div>
+        )}
         {ai?.resume && <p className="mt-3 border-t border-line pt-3 text-sm leading-snug text-ink/90">{ai.resume}</p>}
         <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-mute">
           <span>
@@ -235,6 +252,9 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
             {lots === 0 && <p className="mt-1 text-warn">Stop trop large pour ton capital : taille inférieure à 0,01 lot.</p>}
           </div>
           {e.setup && <p className="mt-2 text-[11px] text-mute">Zone : {e.setup.zoneLabel}</p>}
+          {e.setup?.validUntil && plan.entryType === 'limite' && (
+            <p className="mt-1 text-[11px] text-mute">Ordre limite à annuler s’il n’est pas exécuté avant {localTime(e.setup.validUntil)}.</p>
+          )}
           {final.notes.map(n => (
             <p key={n} className="mt-1 text-[11px] text-mute">• {n}</p>
           ))}

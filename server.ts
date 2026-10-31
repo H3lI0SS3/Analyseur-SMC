@@ -7,6 +7,7 @@ import { PAIRS, TIMEFRAMES, getSeries, getQuotes, dataSourceName, type Timeframe
 import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './server/ai';
 import { runAnalysis, AnalysisError } from './server/analysis';
 import { mountMcp } from './server/mcp';
+import { getJob, startBacktest } from './server/backtestJobs';
 
 dotenv.config();
 
@@ -74,6 +75,19 @@ app.post('/api/analyze', async (req, res) => {
   } catch (err: any) {
     res.status(err instanceof AnalysisError ? err.status : 500).json({ error: err.message });
   }
+});
+
+// ---------- Backtest (rejeu du moteur sur l'historique) ----------
+app.post('/api/backtest', (req, res) => {
+  const { pair = 'EUR/USD', spread, commissionPerLot } = req.body || {};
+  try {
+    res.json(startBacktest(pair, Number(spread), Number(commissionPerLot)));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get('/api/backtest', (req, res) => {
+  res.json(getJob(String(req.query.pair || 'EUR/USD')) || { status: 'aucun' });
 });
 
 // ---------- Connecteur MCP (pour piloter l'app depuis Claude) ----------

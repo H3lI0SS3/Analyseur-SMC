@@ -1,8 +1,8 @@
 // Tests du moteur sur données synthétiques : npx tsx server/engine.test.ts
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
-import { analyze, findFVGs, scanStructure, findSwings, type EngineResult } from './smc';
+import { analyze, findFVGs, scanStructure, findSwings, amdPhase, type EngineResult } from './smc';
 import { reconcile } from './analysis';
-import { nyParts } from './time';
+import { nyParts, nyToUtc } from './time';
 import type { AiReview } from './ai';
 
 let failed = 0;
@@ -151,6 +151,36 @@ ok('Samedi : marché fermé, signal = attendre', saturday.signal === 'attendre' 
   ok('IA : un rejet transforme le signal en attendre', rejected.signal === 'attendre');
   const forced = reconcile({ ...eng, signal: 'attendre' }, ai({ entree: 1.1, stop_loss: 1.099, tp1: 1.1059, tp2: null }), 5, costs);
   ok('IA : ne peut jamais forcer un trade', forced.signal === 'attendre');
+}
+
+// ---------- 6. Cycle AMD ----------
+{
+  // Jour de trading du mar. 3/11/2026 : Asie 20h-00h NY le lundi soir, Londres ensuite
+  const asiaStart = nyToUtc(2026, 11, 2, 20);
+  const m: Candle[] = [];
+  for (let i = 0; i < 16; i++) m.push({ t: asiaStart + i * 900_000, o: 1.1, h: 1.101, l: 1.099, c: 1.1 }); // range 1.099-1.101
+  const t1 = asiaStart + 16 * 900_000;
+  const during = amdPhase(m.slice(0, 8), [], asiaStart + 2 * 3_600_000, 5);
+  ok('AMD : accumulation pendant l’Asie', during.phase === 'Accumulation');
+  const intact = amdPhase(m, [], t1 + 900_000, 5);
+  ok('AMD : range intact après l’Asie = accumulation', intact.phase === 'Accumulation' && intact.asiaHigh === 1.101);
+  const swept = [...m, { t: t1, o: 1.1, h: 1.1025, l: 1.0995, c: 1.1005 }];
+  const manip = amdPhase(swept, [], t1 + 1_800_000, 5);
+  ok('AMD : haut asiatique balayé = manipulation, distribution baissière attendue', manip.phase === 'Manipulation' && manip.direction === 'baissière');
+  const dist = amdPhase(swept, [{ kind: 'CHoCH', dir: 'bear', level: 1.0995, t: t1 + 3_600_000, idx: 0 }], t1 + 4_000_000, 5);
+  ok('AMD : cassure baissière après le balayage = distribution', dist.phase === 'Distribution');
+  const both = [...swept, { t: t1 + 900_000, o: 1.1, h: 1.1, l: 1.098, c: 1.099 }];
+  ok('AMD : deux côtés balayés = indéterminé', amdPhase(both, [], t1 + 3_600_000, 5).phase === 'Indéterminée');
+}
+
+// ---------- 7. Sweep obligatoire ----------
+{
+  const strictRes = analyze(series, 5, { now: tuesday, ...costs, news: { available: true, events: [] }, strictSweep: true });
+  const softRes = analyze(series, 5, { now: tuesday, ...costs, news: { available: true, events: [] }, strictSweep: false });
+  ok('Règle stricte : le balayage est une condition obligatoire', strictRes.checklist.find(c => c.key === 'sweep')?.core === true);
+  ok('Règle souple : le balayage est un bonus', softRes.checklist.find(c => c.key === 'sweep')?.core === false);
+  const sweepOk = strictRes.checklist.find(c => c.key === 'sweep')?.ok;
+  if (!sweepOk) ok('Sans balayage, la règle stricte n’autorise aucun trade', strictRes.signal === 'attendre');
 }
 
 if (failed) {

@@ -10,6 +10,9 @@ import { z } from 'zod';
 import { PAIRS, getSeries, getQuotes, dataSourceName, type Timeframe } from './marketData';
 import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './ai';
 import { runAnalysis, AnalysisError } from './analysis';
+import { getJob, startBacktest } from './backtestJobs';
+import { describe as describeBt } from './backtest';
+import { maDateTime } from './time';
 
 const CONTRACT: Record<string, number> = { 'EUR/USD': 100_000, 'XAU/USD': 100 };
 const PAIR_ENUM = z.enum(['EUR/USD', 'XAU/USD']);
@@ -136,6 +139,7 @@ function buildServer() {
             : null,
           checklist: e.checklist.map(c => ({ condition: c.label, ok: c.ok, obligatoire: c.core, detail: c.detail })),
           biais: { valeur: e.bias, detail: e.biasDetail },
+          cycle_amd: e.amd,
           session: e.session,
           structure: Object.fromEntries(
             (['D1', 'H4', 'H1', 'M15'] as const).map(tf => {
@@ -153,6 +157,55 @@ function buildServer() {
       } catch (err: any) {
         return fail(err instanceof AnalysisError ? err.message : `Erreur : ${err.message}`);
       }
+    }
+  );
+
+  server.registerTool(
+    'backtest',
+    {
+      title: 'Backtest du moteur',
+      description:
+        'Rejoue le moteur sur l’historique réel (≈ 2 mois en M15) et simule chaque plan avec coûts : nombre de trades, réussite, total en R, profit factor, pire repli. ' +
+        'Compare la règle stricte (balayage de liquidité obligatoire) et la règle souple. Le calcul prend environ une minute : ' +
+        'le premier appel le lance, rappelle l’outil ensuite pour lire le résultat.',
+      inputSchema: {
+        actif: PAIR_ENUM.describe('EUR/USD ou XAU/USD'),
+        relancer: z.boolean().optional().describe('Relancer même si un résultat existe déjà'),
+      },
+      annotations: readOnly,
+    },
+    async ({ actif, relancer }) => {
+      let job = getJob(actif);
+      if (!job || relancer || job.status === 'erreur') {
+        job = startBacktest(actif);
+        return text(`Backtest ${actif} lancé (${maDateTime(job.startedAt)}). Rappelle l’outil dans environ une minute pour lire le résultat.`);
+      }
+      if (job.status === 'en cours') return text(`Backtest ${actif} en cours depuis ${Math.round((Date.now() - job.startedAt) / 1000)} s. Rappelle l’outil dans 30 secondes.`);
+      const r = job.result!;
+      return text({
+        actif,
+        source: r.source,
+        prix_futures: r.futuresProxy,
+        periode: `${maDateTime(r.from)} → ${maDateTime(r.to)}`,
+        pas_analyses: r.stepsEvaluated,
+        duree_calcul_s: Math.round(r.durationMs / 1000),
+        regle_stricte_sweep_obligatoire: { resume: describeBt(r.strict), ...r.strict },
+        regle_souple_sweep_bonus: { resume: describeBt(r.souple), ...r.souple },
+        hypotheses: r.assumptions,
+        derniers_trades: r.lastTrades.map(t => ({
+          variante: t.variant,
+          signal: maDateTime(t.signalAt),
+          sens: t.direction,
+          entree: t.entry,
+          sl: t.sl,
+          tp1: t.tp1,
+          tp2: t.tp2,
+          resultat: t.outcome,
+          r: t.r,
+          session: t.session,
+          amd: t.amdPhase,
+        })),
+      });
     }
   );
 

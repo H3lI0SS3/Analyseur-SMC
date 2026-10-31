@@ -70,6 +70,17 @@ export interface Setup {
   rr2: number | null;
   zoneId: string;
   zoneLabel: string;
+  /** au-delà de cette heure, le plan n'est plus valable (ordre limite à annuler) */
+  validUntil?: number;
+}
+
+export interface AmdState {
+  phase: 'Accumulation' | 'Manipulation' | 'Distribution' | 'Indéterminée';
+  /** sens attendu pour la distribution */
+  direction: 'haussière' | 'baissière' | null;
+  detail: string;
+  asiaHigh: number | null;
+  asiaLow: number | null;
 }
 
 export interface CheckItem {
@@ -98,9 +109,12 @@ export interface EngineResult {
   waitCondition: string | null;
   nextNews: { t: number; currency: string; title: string } | null;
   newsAvailable: boolean;
+  amd: AmdState;
 }
 
 export interface AnalyzeOptions {
+  /** règle du trader : pas de trade sans balayage de liquidité préalable (défaut : true) */
+  strictSweep?: boolean;
   /** instant de l'analyse (par défaut maintenant) : permet de rejouer le passé */
   now?: number;
   /** spread en prix (ex. 0.0001 = 1 pip EUR/USD, 0.30 $ sur l'or) */
@@ -290,13 +304,22 @@ function updateMitigation(c: Candle[], from: number, z: Zone, touchFrom = from):
 }
 
 // ---------------- Liquidité ----------------
+export interface HtfInput {
+  h4: Candle[];
+  h4Swings: Swing[];
+  d1Swings: Swing[];
+  /** pas des chiffres ronds (50 $ sur l'or, 50 pips sur EUR/USD) */
+  roundStep: number;
+}
+
 export function buildLiquidity(
   d1: Candle[],
   h1: Candle[],
   m15: Candle[],
   h1Swings: Swing[],
   atrH1: number,
-  price: number
+  price: number,
+  htf?: HtfInput
 ): LiquidityLevel[] {
   const levels: LiquidityLevel[] = [];
   const now = m15[m15.length - 1].t;
@@ -349,16 +372,41 @@ export function buildLiquidity(
     }
   }
 
+  // Swings H4 et D1 non pris : grandes cibles de liquidité (débloquent les marchés en extension)
+  if (htf) {
+    const addHtf = (c: Candle[], swings: Swing[], tf: 'H4' | 'D1', lookback: number) => {
+      for (const sw of swings.filter(x => x.idx >= c.length - lookback)) {
+        if (c.slice(sw.idx + 1).some(k => (sw.type === 'high' ? k.h > sw.price : k.l < sw.price))) continue;
+        levels.push({
+          id: `${tf}${sw.type === 'high' ? 'H' : 'L'}-${sw.t}`,
+          label: `Swing ${sw.type === 'high' ? 'high' : 'low'} ${tf} non pris`,
+          price: sw.price,
+          side: sw.type === 'high' ? 'buy' : 'sell',
+          swept: false,
+        });
+      }
+    };
+    addHtf(d1, htf.d1Swings, 'D1', 120);
+    addHtf(htf.h4, htf.h4Swings, 'H4', 180);
+    // Chiffres ronds les plus proches (au-dessus et en dessous)
+    const up = Math.ceil(price / htf.roundStep) * htf.roundStep;
+    const down = Math.floor(price / htf.roundStep) * htf.roundStep;
+    if (up > price) levels.push({ id: `RNH-${up}`, label: 'Chiffre rond', price: up, side: 'buy', swept: false });
+    if (down < price) levels.push({ id: `RNL-${down}`, label: 'Chiffre rond', price: down, side: 'sell', swept: false });
+  }
+
   // tri + dédoublonnage des niveaux très proches (on garde le plus significatif)
-  const priority = (id: string) => (/^(PW|PD)/.test(id) ? 0 : /^AS/.test(id) ? 1 : /^EQ/.test(id) ? 2 : 3);
+  const priority = (id: string) =>
+    /^(PW|PD)/.test(id) ? 0 : /^D1/.test(id) ? 1 : /^AS/.test(id) ? 2 : /^H4/.test(id) ? 3 : /^EQ/.test(id) ? 4 : /^RN/.test(id) ? 6 : 5;
   levels.sort((a, b) => priority(a.id) - priority(b.id));
   const kept: LiquidityLevel[] = [];
   for (const l of levels) {
     if (!kept.some(k => k.side === l.side && Math.abs(k.price - l.price) <= tol * 0.5)) kept.push(l);
   }
   // On garde les niveaux non pris pertinents + ceux balayés (contexte)
+  const maxDist = (l: LiquidityLevel) => (/^(D1|PW)/.test(l.id) ? 25 : 12) * atrH1;
   return kept
-    .filter(l => l.swept || Math.abs(l.price - price) <= 12 * atrH1)
+    .filter(l => l.swept || Math.abs(l.price - price) <= maxDist(l))
     .sort((a, b) => b.price - a.price);
 }
 
@@ -391,6 +439,96 @@ export function recentSweep(m15: Candle[], levels: LiquidityLevel[], lookback = 
     }
   }
   return found;
+}
+
+export interface SweepInfo {
+  side: 'buy' | 'sell'; // liquidité balayée : buy = au-dessus (signal baissier), sell = en dessous (signal haussier)
+  label: string;
+  price: number;
+  t: number;
+}
+
+/**
+ * Balayages récents (8 h de M15) : mèche au-delà d'un niveau puis clôture revenue de l'autre côté.
+ * Niveaux testés : liquidité externe (veille, semaine, Asie, HTF) ET tous les swings H1 récents,
+ * même déjà pris (c'est justement le sweep qui les prend).
+ */
+export function findSweeps(m15: Candle[], levels: LiquidityLevel[], h1: Candle[], h1Swings: Swing[], lookback = 32): SweepInfo[] {
+  const recent = m15.slice(-lookback);
+  const cands: { side: 'buy' | 'sell'; label: string; price: number; since: number }[] = [
+    ...levels.map(l => ({ side: l.side, label: l.label, price: l.price, since: 0 })),
+    ...h1Swings
+      .filter(s => s.idx >= h1.length - 120)
+      .map(s => ({
+        side: (s.type === 'high' ? 'buy' : 'sell') as 'buy' | 'sell',
+        label: `Swing ${s.type === 'high' ? 'high' : 'low'} H1`,
+        price: s.price,
+        since: s.t + 4 * HOUR, // le swing doit être formé (k bougies) avant le balayage
+      })),
+  ];
+  const out: SweepInfo[] = [];
+  for (const l of cands) {
+    for (const c of recent) {
+      if (c.t < l.since) continue;
+      const isSweep = l.side === 'buy' ? c.h > l.price && c.c < l.price : c.l < l.price && c.c > l.price;
+      if (isSweep) {
+        out.push({ side: l.side, label: l.label, price: l.price, t: c.t });
+        break;
+      }
+    }
+  }
+  return out.sort((a, b) => b.t - a.t);
+}
+
+/**
+ * Cycle AMD du jour (ICT Power of 3), en heure de New York :
+ * Accumulation = range asiatique 20h-00h NY ; Manipulation = balayage d'un côté de ce range ;
+ * Distribution = cassure de structure M15 dans le sens opposé au balayage.
+ */
+export function amdPhase(m15: Candle[], m15Events: StructureEvent[], now: number, dec: number): AmdState {
+  const day = tradingDayStart(now);
+  const asiaStart = day + 3 * HOUR;
+  const asiaEnd = day + 7 * HOUR;
+  const asia = m15.filter(c => c.t >= asiaStart && c.t < asiaEnd);
+  const r = (x: number) => Number(x.toFixed(dec));
+  if (now < asiaEnd) {
+    return { phase: 'Accumulation', direction: null, detail: `Range asiatique en formation (fin à ${maTime(asiaEnd)} heure du Maroc).`, asiaHigh: null, asiaLow: null };
+  }
+  if (asia.length < 8) {
+    return { phase: 'Indéterminée', direction: null, detail: 'Range asiatique incomplet (données manquantes).', asiaHigh: null, asiaLow: null };
+  }
+  const hi = Math.max(...asia.map(c => c.h));
+  const lo = Math.min(...asia.map(c => c.l));
+  const after = m15.filter(c => c.t >= asiaEnd);
+  const tHigh = after.find(c => c.h > hi)?.t;
+  const tLow = after.find(c => c.l < lo)?.t;
+  if (!tHigh && !tLow) {
+    return { phase: 'Accumulation', direction: null, detail: `Range asiatique ${r(lo)} – ${r(hi)} intact : en attente de la manipulation.`, asiaHigh: r(hi), asiaLow: r(lo) };
+  }
+  if (tHigh && tLow) {
+    const first = tHigh < tLow ? 'haut' : 'bas';
+    return { phase: 'Indéterminée', direction: null, detail: `Les deux côtés du range asiatique ont été pris (d’abord le ${first}) : pas de cycle AMD exploitable aujourd’hui.`, asiaHigh: r(hi), asiaLow: r(lo) };
+  }
+  const highSwept = !!tHigh;
+  const manipT = (tHigh ?? tLow)!;
+  const direction = highSwept ? 'baissière' : 'haussière';
+  const dist = m15Events.find(e => e.t > manipT && e.dir === (highSwept ? 'bear' : 'bull'));
+  if (dist) {
+    return {
+      phase: 'Distribution',
+      direction,
+      detail: `${highSwept ? 'Haut' : 'Bas'} asiatique balayé à ${maTime(manipT)}, puis ${dist.kind} ${direction} à ${maTime(dist.t)} : distribution ${direction} en cours.`,
+      asiaHigh: r(hi),
+      asiaLow: r(lo),
+    };
+  }
+  return {
+    phase: 'Manipulation',
+    direction,
+    detail: `${highSwept ? 'Haut' : 'Bas'} asiatique (${r(highSwept ? hi : lo)}) balayé à ${maTime(manipT)} : on attend une cassure M15 ${direction} pour confirmer la distribution.`,
+    asiaHigh: r(hi),
+    asiaLow: r(lo),
+  };
 }
 
 // ---------------- Session (heure de New York, affichée en heure du Maroc) ----------------
@@ -497,8 +635,15 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     }
   }
 
-  const liquidity = buildLiquidity(closed.D1, h1, m15, raw.H1.swings, atrH1, price).map(l => ({ ...l, price: r(l.price) }));
-  const sweep = recentSweep(m15, liquidity);
+  const liquidity = buildLiquidity(closed.D1, h1, m15, raw.H1.swings, atrH1, price, {
+    h4: closed.H4,
+    h4Swings: raw.H4.swings,
+    d1Swings: raw.D1.swings,
+    roundStep: decimals >= 4 ? 0.005 : 50,
+  }).map(l => ({ ...l, price: r(l.price) }));
+  const sweeps = findSweeps(m15, liquidity, h1, raw.H1.swings);
+  const amd = amdPhase(m15, raw.M15.events, now, decimals);
+  const strictSweep = opts.strictSweep ?? true;
 
   // Zones H1 + M15 non invalidées, proches du prix
   const zones: Zone[] = [
@@ -570,6 +715,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   const wantDir = bias === 'haussier' ? 'acheter' : bias === 'baissier' ? 'vendre' : null;
   const aligned = wantDir ? candidates.filter(c => c.direction === wantDir) : [];
   const setup = aligned.find(c => (c.rr2 ?? c.rr1) >= 2) || aligned[0] || null;
+  if (setup) setup.validUntil = now + 4 * HOUR;
   const alternatives = candidates.filter(c => c !== setup).slice(0, 3);
 
   // ----- Annonces économiques -----
@@ -590,6 +736,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   // ----- Checklist -----
   const finalRR = setup ? setup.rr2 ?? setup.rr1 : 0;
   const isLong = setup?.direction === 'acheter';
+  // un achat demande un balayage SOUS le prix (liquidité vendeuse), une vente un balayage AU-DESSUS
+  const sweepForTrade = setup ? sweeps.find(sw => sw.side === (isLong ? 'sell' : 'buy')) || null : null;
+  const ltfOk = !!setup && timeframes.M15.trend === (isLong ? 'haussier' : 'baissier');
   const checklist: CheckItem[] = [
     {
       key: 'bias',
@@ -614,11 +763,20 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     },
     {
       key: 'sweep',
-      label: 'Balayage de liquidité récent dans le bon sens',
-      ok: !!setup && !!sweep && sweep.side === (isLong ? 'sell' : 'buy'),
-      detail: sweep
-        ? `${sweep.level.label} balayé à ${maTime(sweep.t)} (heure du Maroc).`
-        : 'Aucun sweep net dans les 6 dernières heures (M15).',
+      label: 'Liquidité balayée avant l’entrée',
+      ok: !!setup && !!sweepForTrade,
+      detail: sweepForTrade
+        ? `${sweepForTrade.label} (${r(sweepForTrade.price)}) balayé à ${maTime(sweepForTrade.t)} (heure du Maroc).`
+        : sweeps.length
+        ? `Dernier balayage dans l’autre sens : ${sweeps[0].label} à ${maTime(sweeps[0].t)}.`
+        : 'Aucun balayage net de liquidité dans les 8 dernières heures.',
+      core: strictSweep,
+    },
+    {
+      key: 'amd',
+      label: 'Cycle AMD dans le sens du trade',
+      ok: !!setup && amd.direction === (isLong ? 'haussière' : 'baissière') && (amd.phase === 'Manipulation' || amd.phase === 'Distribution'),
+      detail: `${amd.phase} — ${amd.detail}`,
       core: false,
     },
     {
@@ -631,7 +789,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     {
       key: 'ltf',
       label: 'Structure M15 dans le sens du trade',
-      ok: !!setup && timeframes.M15.trend === (isLong ? 'haussier' : 'baissier'),
+      ok: ltfOk,
       detail: `M15 ${timeframes.M15.trend}${timeframes.M15.lastEvent ? ` (dernier ${timeframes.M15.lastEvent.kind} ${timeframes.M15.lastEvent.dir === 'bull' ? 'haussier' : 'baissier'})` : ''}.`,
       core: false,
     },
@@ -656,9 +814,15 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   const score = Math.round((okCount / checklist.length) * 100);
   let signal: EngineResult['signal'] = 'attendre';
   let waitCondition: string | null = null;
-  // 4 conditions obligatoires + au moins 2 des 4 conditions de confluence
-  if (coreOk && okCount >= 6 && setup) {
+  // conditions obligatoires toutes remplies + au moins 2 conditions de confluence
+  const optionalOk = checklist.filter(c => !c.core && c.ok).length;
+  if (coreOk && optionalOk >= 2 && setup) {
     signal = setup.direction;
+    // au marché : seulement si la structure M15 confirme déjà le sens du trade
+    if (setup.entryType === 'marché' && !ltfOk) {
+      signal = 'attendre';
+      waitCondition = `Prix déjà dans la zone : attendre une cassure M15 ${isLong ? 'haussière' : 'baissière'} (CHoCH) avant d’entrer.`;
+    }
   } else {
     const missing = checklist.filter(c => !c.ok).map(c => c.label.toLowerCase());
     waitCondition = setup
@@ -694,5 +858,6 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     waitCondition,
     nextNews,
     newsAvailable,
+    amd,
   };
 }

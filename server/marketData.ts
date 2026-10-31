@@ -135,10 +135,9 @@ async function twelveSlot() {
   }
 }
 
-async function fetchTwelve(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string): Promise<Candle[]> {
+async function fetchTwelve(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string, size = tf === 'M15' ? 700 : 5000): Promise<Candle[]> {
   await twelveSlot();
   const interval = tf === 'M15' ? '15min' : '1h';
-  const size = tf === 'M15' ? 700 : 5000;
   const url =
     `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair.twelveSymbol)}` +
     `&interval=${interval}&outputsize=${size}&timezone=UTC&order=ASC&apikey=${encodeURIComponent(apiKey)}`;
@@ -159,8 +158,8 @@ async function fetchTwelve(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string): Pr
 }
 
 // ---------- Yahoo Finance ----------
-async function fetchYahoo(pair: PairInfo, tf: 'M15' | 'H1'): Promise<Candle[]> {
-  const [interval, range] = tf === 'M15' ? ['15m', '10d'] : ['60m', '1y'];
+async function fetchYahoo(pair: PairInfo, tf: 'M15' | 'H1', long = false): Promise<Candle[]> {
+  const [interval, range] = tf === 'M15' ? ['15m', long ? '60d' : '10d'] : ['60m', '1y'];
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(pair.yahooSymbol)}?interval=${interval}&range=${range}&includePrePost=false`;
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TradingAnalyzer/3.0)', Accept: 'application/json' },
@@ -189,6 +188,24 @@ function clean(list: Candle[]): Candle[] {
   );
   ok.sort((a, b) => a.t - b.t);
   return ok.filter((c, i) => i === 0 || c.t !== ok[i - 1].t);
+}
+
+// ---------- Historique long (backtest) ----------
+const historyCache = new Map<string, { h1: Candle[]; m15: Candle[]; source: string; futuresProxy: boolean; fetchedAt: number }>();
+
+/** Historique maximal disponible : H1 (≈ 10 mois) et M15 (≈ 2 mois). Mis en cache 30 min. */
+export async function getHistory(pairId: string) {
+  const pair = PAIRS[pairId];
+  if (!pair) throw new Error(`Actif non supporté : ${pairId}`);
+  const hit = historyCache.get(pairId);
+  if (hit && Date.now() - hit.fetchedAt < 30 * 60_000) return hit;
+  const key = process.env.TWELVE_DATA_API_KEY;
+  const [h1, m15] = key
+    ? [await fetchTwelve(pair, 'H1', key, 5000), await fetchTwelve(pair, 'M15', key, 5000)]
+    : [await fetchYahoo(pair, 'H1'), await fetchYahoo(pair, 'M15', true)];
+  const res = { h1, m15, source: dataSourceName(), futuresProxy: !key && pair.isFuturesOnYahoo, fetchedAt: Date.now() };
+  historyCache.set(pairId, res);
+  return res;
 }
 
 /**
