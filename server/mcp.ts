@@ -153,6 +153,7 @@ function buildServer() {
           liquidite: e.liquidity.map(l => ({ niveau: l.label, prix: l.price, cote: l.side === 'buy' ? 'au-dessus (acheteuse)' : 'en dessous (vendeuse)', deja_pris: l.swept })),
           zones: e.zones.map(z => ({ type: z.kind, ut: z.tf, sens: z.dir === 'bull' ? 'haussier' : 'baissier', bas: z.bottom, haut: z.top, deja_teste: z.touched })),
           plans_alternatifs: e.alternatives,
+          bougies_japonaises: (a.candlePatterns || []).map(p => ({ figure: p.name, sens: p.dir, ut: p.tf, heure_utc: new Date(p.t).toISOString(), dans_la_zone: p.inZone, detail: p.detail })),
           notes: a.final.notes,
           ia_interne: a.ai ? { moteur: a.ai.engine, verdict: a.ai.verdict, resume: a.ai.resume, plan: a.ai.plan, invalidation: a.ai.invalidation } : a.aiError,
         });

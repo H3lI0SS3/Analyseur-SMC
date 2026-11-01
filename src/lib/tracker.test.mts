@@ -61,7 +61,7 @@ const late = t0 + 20 * M;
 }
 // viabilité : rien sous 30 trades, puis calculée
 {
-  const mk = (r: number, i: number): JournalEntry => ({ ...base, id: 'k' + i, result: r > 0 ? 'gagne' : 'perdu', rMultiple: r, auto: false });
+  const mk = (r: number, i: number): JournalEntry => ({ ...base, id: 'k' + i, result: r > 0 ? 'gagne' : 'perdu', rMultiple: r, auto: true });
   ok('Viabilité masquée sous 30 trades', strategyStats(Array.from({ length: 29 }, (_, i) => mk(i % 3 ? -1 : 3, i))).viability === null);
   const good = strategyStats(Array.from({ length: MIN_TRADES }, (_, i) => mk(i % 2 ? -1 : 3, i)));
   ok('Stratégie gagnante sur 30 trades = viabilité élevée', (good.viability ?? 0) >= 95, String(good.viability));
@@ -69,6 +69,22 @@ const late = t0 + 20 * M;
   ok('Stratégie perdante = viabilité faible', (bad.viability ?? 100) < 10, String(bad.viability));
   const legacy = strategyStats([{ ...base, auto: undefined, result: 'gagne', rMultiple: 3 }]);
   ok('Anciens trades du journal (avant le suivi) non comptés', legacy.closed === 0);
+  const manual = strategyStats([{ ...base, auto: false, result: 'gagne', rMultiple: 4 }]);
+  ok('Trade saisi ou corrigé à la main non compté', manual.closed === 0);
+  const ver = strategyStats([{ ...base, auto: true, result: 'gagne', rMultiple: 2, rulesVersion: '3.2' }], undefined, '3.3');
+  ok('Trade d’une autre version des règles non compté', ver.closed === 0);
+  ok('Fourchette à 95 % fournie à partir de 30 trades', good.ciLow !== null && good.ciLow > 0);
+}
+// gap au-delà du stop : sortie à l'ouverture, perte supérieure à 1 R
+{
+  const r = evaluate({ ...base, entryType: 'marché', result: 'en_cours' }, [c(1, 1.0985, 1.0987, 1.098, 1.0982)], late);
+  ok('Gap sous le stop = perte au prix d’ouverture (-1,5 R)', r?.result === 'perdu' && r?.rMultiple === -1.5, JSON.stringify(r));
+}
+// app fermée plus de 7 jours : suivi interrompu
+{
+  const old = { ...base, createdAt: t0 - 9 * 86_400_000 };
+  const r = evaluate(old, [c(1, 1.1005, 1.1006, 1.1003, 1.1004)], late);
+  ok('Historique manquant = suivi interrompu, saisie manuelle demandée', r?.auto === false, JSON.stringify(r));
 }
 
 if (failed) {

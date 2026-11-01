@@ -7,6 +7,7 @@ import { PAIRS, TIMEFRAMES, getSeries, getQuotes, dataSourceName, TF_MS, type Ti
 import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './server/ai';
 import { runAnalysis, AnalysisError } from './server/analysis';
 import { mountMcp } from './server/mcp';
+import { RULES_VERSION } from './server/smc';
 import { advanceAll, getJob, startBacktest } from './server/backtestJobs';
 
 dotenv.config();
@@ -44,6 +45,7 @@ app.get('/api/status', (_req, res) => {
     models: { claude: CLAUDE_MODEL, gemini: GEMINI_MODEL },
     mcpEnabled: (process.env.MCP_TOKEN || '').length >= 16,
     accessRequired: accessCode().length > 0,
+    rulesVersion: RULES_VERSION,
     pairs: Object.values(PAIRS).map(p => ({ id: p.id, label: p.label, decimals: p.decimals, pipSize: p.pipSize, contract: p.contract, defaultSpread: p.defaultSpread })),
   });
 });

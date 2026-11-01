@@ -1,6 +1,8 @@
 // Logique d'analyse partagée entre l'interface web (/api/analyze) et le connecteur MCP.
 import { PAIRS, TIMEFRAMES, getSeries, type Timeframe, type Candle } from './marketData';
 import { getNews, NEWS_CURRENCIES } from './news';
+import { findCandlePatterns, type CandlePattern } from './candlePatterns';
+import { TF_MS } from './marketData';
 import { marketClosed, maTime } from './time';
 import { analyze, RULES_VERSION, type EngineResult } from './smc';
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
@@ -170,6 +172,23 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     throw new AnalysisError(`Analyse impossible : ${err.message}`, 502);
   }
 
+  // ----- Ordre limite et annonces : l'ordre doit être annulé 30 min avant la prochaine annonce forte -----
+  let newsCut: string | null = null;
+  if (engine.setup?.validUntil && engine.nextNews && engine.nextNews.t - 30 * 60_000 < engine.setup.validUntil) {
+    engine.setup.validUntil = Math.max(now, engine.nextNews.t - 30 * 60_000);
+    newsCut = `Ordre limite à annuler avant ${maTime(engine.setup.validUntil)} (heure du Maroc) : annonce forte ${engine.nextNews.title} (${engine.nextNews.currency}) à ${maTime(engine.nextNews.t)}.`;
+  }
+
+  // ----- Bougies japonaises : figures de retournement récentes (bougies clôturées), confirmation de la zone -----
+  const planZone = engine.setup ? engine.zones.find(z => z.id === engine.setup!.zoneId) : null;
+  const closedOnly = (tf: Timeframe) => series[tf].filter(c => c.t + TF_MS[tf] <= now);
+  const candlePatterns: CandlePattern[] = futuresProxy
+    ? []
+    : [
+        ...findCandlePatterns(closedOnly('M15'), 'M15', { recent: 3, zone: planZone }),
+        ...findCandlePatterns(closedOnly('H1'), 'H1', { recent: 2, zone: planZone }),
+      ];
+
   // ----- Garde-fous données -----
   const warnings: string[] = [];
   const blockers: string[] = [];
@@ -220,6 +239,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
 
   const final = reconcile(engine, ai, info.decimals, costs);
 
+  if (newsCut) final.notes.push(newsCut);
   if (blockers.length || marketIsClosed) {
     final.signal = 'attendre';
     final.plan = futuresProxy ? null : final.plan;
@@ -231,7 +251,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     engine.alternatives = [];
   }
   warnings.unshift(...blockers);
-  const verdict = buildVerdict(engine, final, ai, blockers);
+  const verdict = buildVerdict(engine, final, ai, blockers, candlePatterns);
 
   return {
     verdict,
@@ -250,6 +270,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     ai,
     aiError,
     final,
+    candlePatterns,
   };
 }
 
@@ -269,7 +290,8 @@ function buildVerdict(
   engine: EngineResult,
   final: { signal: 'acheter' | 'vendre' | 'attendre'; plan: FinalPlan | null; notes: string[] },
   ai: AiReview | null,
-  blockers: string[]
+  blockers: string[],
+  patterns: CandlePattern[] = []
 ): Verdict {
   const pour: string[] = [];
   const contre: string[] = [];
@@ -278,6 +300,17 @@ function buildVerdict(
     else contre.push(`${c.label}${c.core ? ' (obligatoire)' : ''} — ${c.detail}`);
   }
   for (const b of blockers) contre.unshift(b);
+  // Bougies japonaises : confirmation (ou alerte) dans le sens du plan, sans changer la décision
+  const setupDir = final.plan?.direction ?? engine.setup?.direction ?? null;
+  if (setupDir) {
+    const want = setupDir === 'acheter' ? 'haussier' : 'baissier';
+    const fmtP = (p: CandlePattern) => `${p.name} en ${p.tf} à ${maTime(p.t)}${p.inZone ? ', dans la zone d’entrée' : ''}`;
+    const conf = patterns.filter(p => p.dir === want);
+    const against = patterns.filter(p => p.dir !== want);
+    if (conf.length) pour.push(`Bougies japonaises — ${conf.map(fmtP).join(' ; ')} : figure de retournement dans le sens du trade.`);
+    else contre.push('Bougies japonaises — aucune figure de retournement dans le sens du trade sur les dernières bougies M15/H1 (confirmation absente, information seulement).');
+    if (against.length) contre.push(`Bougies japonaises — ${against.map(fmtP).join(' ; ')} : figure de retournement contre le trade.`);
+  }
   if (ai) {
     const l = `Relecture IA (${ai.engine}) : ${ai.verdict}. ${ai.resume}`;
     (ai.verdict === 'VALIDÉ' ? pour : contre).push(l);

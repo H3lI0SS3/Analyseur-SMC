@@ -27,6 +27,7 @@ export interface Status {
   models: { claude: string; gemini: string };
   mcpEnabled?: boolean;
   accessRequired?: boolean;
+  rulesVersion?: string;
   pairs: PairMeta[];
 }
 
@@ -246,7 +247,18 @@ export interface Verdict {
   contre: string[];
 }
 
+export interface CandlePattern {
+  name: string;
+  dir: 'haussier' | 'baissier';
+  tf: Timeframe;
+  t: number;
+  candles: number;
+  inZone: boolean;
+  detail: string;
+}
+
 export interface AnalysisResponse {
+  candlePatterns?: CandlePattern[];
   rulesVersion?: string;
   verdict?: Verdict;
   history?: SignalHistory | null;
@@ -309,4 +321,5 @@ export interface JournalEntry {
   tp1At?: number | null;
   exitAt?: number | null;
   rulesVersion?: string;
+  pattern?: string | null; // figure japonaise dans le sens du trade au moment de la prise (null = aucune)
 }

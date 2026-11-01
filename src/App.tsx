@@ -71,9 +71,13 @@ export default function App() {
   const lossToday = todayLossPct(journal);
   const blocked = lossToday >= settings.dailyLossPct;
 
-  const addToJournal = (a: AnalysisResponse) => {
+  /** Ajoute le trade au suivi ; renvoie un message d'erreur si on refuse (analyse périmée, doublon). */
+  const addToJournal = (a: AnalysisResponse): string | null => {
     const p = a.final.plan;
-    if (!p) return;
+    if (!p) return 'Pas de plan à suivre.';
+    if (Date.now() - a.generatedAt > 10 * 60_000) return 'Analyse de plus de 10 minutes : relance l’analyse avant de prendre le trade.';
+    const dup = journal.some(j => isTracked(j) && j.pair === a.pair && j.direction === p.direction && Math.abs(j.entry - p.entry) < 1e-9);
+    if (dup) return 'Ce trade est déjà suivi dans le journal.';
     const costs = costsFor(a.pair, settings);
     setJournal([
       {
@@ -102,9 +106,11 @@ export default function App() {
         tp1At: null,
         exitAt: null,
         rulesVersion: a.rulesVersion,
+        pattern: (a.candlePatterns || []).find(cp => cp.dir === (p.direction === 'acheter' ? 'haussier' : 'baissier'))?.name ?? null,
       },
       ...journal,
     ]);
+    return null;
   };
 
   // Suivi automatique : l'app vérifie les trades ouverts sur les vraies bougies M15 toutes les minutes
@@ -129,7 +135,7 @@ export default function App() {
       clearInterval(id);
     };
   }, [openCount, reloadKey]);
-  const stats = strategyStats(journal);
+  const stats = strategyStats(journal, undefined, status?.rulesVersion);
 
   if (needCode) {
     return (
@@ -246,7 +252,7 @@ export default function App() {
         )}
         {tab === 'journal' && (
           <>
-            <JournalView journal={journal} setJournal={setJournal} />
+            <JournalView journal={journal} setJournal={setJournal} rulesVersion={status?.rulesVersion} />
             <BacktestCard pair={pair} settings={settings} />
           </>
         )}

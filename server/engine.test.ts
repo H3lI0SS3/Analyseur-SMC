@@ -180,6 +180,13 @@ ok('Samedi : marché fermé, signal = attendre', saturday.signal === 'attendre' 
   ok('AMD : clôture au-delà de l’extrême de la manipulation = cycle invalidé', inval.phase === 'Indéterminée' && inval.detail.includes('invalidé'), inval.detail);
   const notYet = amdPhase(swept, bear, t1 + 4_000_000, 5);
   ok('AMD : sans clôture au-delà, la distribution reste valide', notYet.phase === 'Distribution');
+  // invalidation définitive : clôture au-delà puis retour dans le range
+  const back = [...later, { t: t1 + 14 * 900_000, o: 1.1035, h: 1.1036, l: 1.0999, c: 1.1 }];
+  ok('AMD : invalidation définitive même si le prix revient', amdPhase(back, bear, t1 + 15 * 900_000, 5).detail.includes('invalidé'));
+  // distribution réussie : haut balayé, cassure baissière, puis bas asiatique atteint = distribution avancée
+  const done = [...swept, { t: t1 + 3_600_000, o: 1.1, h: 1.1001, l: 1.0985, c: 1.0987 }];
+  const ach = amdPhase(done, bear, t1 + 5_400_000, 5);
+  ok('AMD : bas atteint après la cassure baissière = distribution (objectif atteint)', ach.phase === 'Distribution' && ach.direction === 'baissière', ach.detail);
 }
 
 // ---------- Week-end : le cycle AMD décrit la séance de vendredi, pas une séance fantôme ----------

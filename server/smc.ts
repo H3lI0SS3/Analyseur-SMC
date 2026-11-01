@@ -512,27 +512,37 @@ export function amdPhase(m15: Candle[], m15Events: StructureEvent[], now: number
   if (!tHigh && !tLow) {
     return { phase: 'Accumulation', direction: null, detail: `Range asiatique ${r(lo)} – ${r(hi)} intact : en attente de la manipulation.`, asiaHigh: r(hi), asiaLow: r(lo) };
   }
-  if (tHigh && tLow) {
-    const first = tHigh < tLow ? 'haut' : 'bas';
-    return { phase: 'Indéterminée', direction: null, detail: `Les deux côtés du range asiatique ont été pris (d’abord le ${first}) : pas de cycle AMD exploitable aujourd’hui.`, asiaHigh: r(hi), asiaLow: r(lo) };
-  }
-  const highSwept = !!tHigh;
-  const manipT = (tHigh ?? tLow)!;
+  // le premier côté balayé est la manipulation
+  const highSwept = !!tHigh && (!tLow || tHigh <= tLow);
+  const manipT = (highSwept ? tHigh : tLow)!;
+  const otherT = highSwept ? tLow : tHigh; // l'autre côté du range pris plus tard (objectif de la distribution)
   const direction = highSwept ? 'baissière' : 'haussière';
-  const dist = m15Events.find(e => e.t > manipT && e.dir === (highSwept ? 'bear' : 'bull'));
-  // Cycle invalidé : après le balayage, le prix a clôturé au-delà de l'extrême de la manipulation
-  // (ex. bas asiatique balayé puis clôture sous le plus bas du balayage : la hausse attendue a échoué)
+  const dist = m15Events.find(e => e.t > manipT && e.t < now && e.dir === (highSwept ? 'bear' : 'bull'));
+  // Cycle invalidé (définitivement) : une bougie clôture au-delà de l'extrême de la manipulation après le balayage
   const manipCandles = after.filter(c => c.t >= manipT && c.t < manipT + 2 * HOUR);
   const manipExtreme = highSwept ? Math.max(...manipCandles.map(c => c.h)) : Math.min(...manipCandles.map(c => c.l));
-  const lastClosed = [...after].reverse().find(c => c.t < now);
-  if (lastClosed && lastClosed.t >= manipT + 2 * HOUR && (highSwept ? lastClosed.c > manipExtreme : lastClosed.c < manipExtreme)) {
+  const breach = after.find(c => c.t >= manipT + 2 * HOUR && c.t < now && (highSwept ? c.c > manipExtreme : c.c < manipExtreme));
+  if (breach) {
     return {
       phase: 'Indéterminée',
       direction: null,
-      detail: `${highSwept ? 'Haut' : 'Bas'} asiatique balayé à ${maTime(manipT)}, puis clôture ${highSwept ? 'au-dessus du plus haut' : 'sous le plus bas'} du balayage (${r(manipExtreme)}) : cycle AMD invalidé.`,
+      detail: `${highSwept ? 'Haut' : 'Bas'} asiatique balayé à ${maTime(manipT)}, puis clôture ${highSwept ? 'au-dessus du plus haut' : 'sous le plus bas'} du balayage (${r(manipExtreme)}) à ${maTime(breach.t)} : cycle AMD invalidé.`,
       asiaHigh: r(hi),
       asiaLow: r(lo),
     };
+  }
+  if (otherT) {
+    if (dist && dist.t <= otherT) {
+      return {
+        phase: 'Distribution',
+        direction,
+        detail: `${highSwept ? 'Haut' : 'Bas'} asiatique balayé à ${maTime(manipT)}, ${dist.kind} ${direction} à ${maTime(dist.t)}, puis ${highSwept ? 'bas' : 'haut'} asiatique atteint à ${maTime(otherT)} : distribution ${direction} avancée (objectif du range atteint).`,
+        asiaHigh: r(hi),
+        asiaLow: r(lo),
+      };
+    }
+    const first = highSwept ? 'haut' : 'bas';
+    return { phase: 'Indéterminée', direction: null, detail: `Les deux côtés du range asiatique ont été pris (d’abord le ${first}) sans cassure de confirmation entre les deux : pas de cycle AMD exploitable aujourd’hui.`, asiaHigh: r(hi), asiaLow: r(lo) };
   }
   if (dist) {
     return {

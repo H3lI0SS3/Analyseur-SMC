@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BookOpen, Download, Radar, Trash2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { BookOpen, Download, Radar, Trash2, Upload } from 'lucide-react';
 import type { JournalEntry, TradeResult } from '../types';
 import { cx, localDateTime } from '../lib/utils';
 import { isTracked, strategyStats } from '../lib/tracker';
@@ -7,6 +7,7 @@ import { isTracked, strategyStats } from '../lib/tracker';
 interface Props {
   journal: JournalEntry[];
   setJournal: (j: JournalEntry[]) => void;
+  rulesVersion?: string;
 }
 
 const RESULTS: { key: TradeResult; label: string; cls: string }[] = [
@@ -16,9 +17,14 @@ const RESULTS: { key: TradeResult; label: string; cls: string }[] = [
   { key: 'non_pris', label: 'Non pris', cls: 'border-mute text-mute' },
 ];
 
-export function JournalView({ journal, setJournal }: Props) {
+export function JournalView({ journal, setJournal, rulesVersion }: Props) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const tracked = (j: JournalEntry) => j.auto !== undefined;
   const [confirmReset, setConfirmReset] = useState(false);
-  const st = strategyStats(journal);
+  const st = strategyStats(journal, undefined, rulesVersion);
+  const withP = strategyStats(journal, j => !!j.pattern, rulesVersion);
+  const withoutP = strategyStats(journal, j => j.pattern === null, rulesVersion);
   const closed = journal.filter(j => j.rMultiple !== null && ['gagne', 'perdu', 'breakeven'].includes(j.result));
   const wins = closed.filter(j => (j.rMultiple as number) > 0).length;
   const totalR = closed.reduce((s, j) => s + (j.rMultiple as number), 0);
@@ -47,6 +53,29 @@ export function JournalView({ journal, setJournal }: Props) {
     URL.revokeObjectURL(a.href);
   };
 
+  // Sauvegarde complète (le journal n'existe que dans ce navigateur) : à garder sur ton téléphone ou ton Drive
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify({ app: 'analyseur-smc', version: 1, exportedAt: Date.now(), journal }, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `journal-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  const importJson = async (f: File) => {
+    try {
+      const data = JSON.parse(await f.text());
+      const list: JournalEntry[] = Array.isArray(data) ? data : data.journal;
+      if (!Array.isArray(list)) throw new Error();
+      const ids = new Set(journal.map(j => j.id));
+      const added = list.filter(j => j && typeof j.id === 'string' && !ids.has(j.id));
+      setJournal([...journal, ...added].sort((a, b) => b.createdAt - a.createdAt));
+      setMsg(`${added.length} trade(s) restauré(s).`);
+    } catch {
+      setMsg('Fichier de sauvegarde illisible.');
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">
@@ -71,6 +100,11 @@ export function JournalView({ journal, setJournal }: Props) {
           <div><div className="text-mute">Moyenne</div><div className={cx('text-sm font-semibold', (st.avgR ?? 0) > 0 ? 'text-up' : (st.avgR ?? 0) < 0 ? 'text-down' : '')}>{st.avgR === null ? '—' : `${st.avgR >= 0 ? '+' : ''}${st.avgR} R`}</div></div>
           <div><div className="text-mute">Viabilité</div><div className="text-sm font-semibold">{st.viability === null ? `${st.closed}/${st.minTrades}` : `${st.viability} %`}</div></div>
         </div>
+        {withP.closed + withoutP.closed > 0 && (
+          <p className="mt-2 text-[11px] leading-snug text-mute">
+            Bougies japonaises — avec figure : {withP.closed} trades{withP.avgR !== null ? `, ${withP.avgR >= 0 ? '+' : ''}${withP.avgR} R en moyenne` : ''} · sans figure : {withoutP.closed} trades{withoutP.avgR !== null ? `, ${withoutP.avgR >= 0 ? '+' : ''}${withoutP.avgR} R en moyenne` : ''}.
+          </p>
+        )}
       </section>
       {expectancy !== null && (
         <p className="px-1 text-[11px] text-mute">
@@ -85,22 +119,35 @@ export function JournalView({ journal, setJournal }: Props) {
             <BookOpen className="h-3.5 w-3.5 text-gold" /> Journal
           </div>
           <div className="flex items-center gap-1">
+            <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importJson(f); e.target.value = ''; }} />
             {journal.length > 0 && (
               <button onClick={exportCsv} className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-mute">
                 <Download className="h-3.5 w-3.5" /> CSV
               </button>
             )}
-            {journal.length > 0 &&
+            {journal.length > 0 && (
+              <button onClick={exportJson} className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-mute">
+                <Download className="h-3.5 w-3.5" /> Sauvegarder
+              </button>
+            )}
+            <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-mute">
+              <Upload className="h-3.5 w-3.5" /> Restaurer
+            </button>
+            {journal.some(j => !tracked(j)) &&
               (confirmReset ? (
                 <span className="flex items-center gap-2 text-[11px]">
-                  <button onClick={() => { setJournal([]); setConfirmReset(false); }} className="font-semibold text-down">Tout effacer</button>
+                  <button onClick={() => { setJournal(journal.filter(tracked)); setConfirmReset(false); }} className="font-semibold text-down">Effacer</button>
                   <button onClick={() => setConfirmReset(false)} className="text-mute">Annuler</button>
                 </span>
               ) : (
-                <button onClick={() => setConfirmReset(true)} className="rounded-md px-2 py-1 text-[11px] text-mute">Vider</button>
+                <button onClick={() => setConfirmReset(true)} className="rounded-md px-2 py-1 text-[11px] text-mute" title="Efface les trades notés à la main ; les trades suivis restent">Vider</button>
               ))}
           </div>
         </div>
+        {msg && <p className="mb-2 text-[11px] text-gold">{msg}</p>}
+        <p className="mb-2 text-[10px] leading-snug text-mute">
+          Les trades suivis ne peuvent pas être supprimés (sinon la viabilité serait faussée). Le journal est stocké dans ce navigateur : fais une sauvegarde de temps en temps.
+        </p>
 
         {!journal.length && (
           <p className="py-6 text-center text-sm text-mute">
@@ -118,6 +165,7 @@ export function JournalView({ journal, setJournal }: Props) {
                   </div>
                   <div className="text-[11px] text-mute">{localDateTime(j.createdAt)}</div>
                   <TrackBadge j={j} />
+                  {j.pattern && <div className="text-[10px] text-mute">Bougies japonaises : {j.pattern}</div>}
                 </div>
                 <div className="flex items-center gap-2">
                   {j.rMultiple !== null && (
@@ -126,9 +174,11 @@ export function JournalView({ journal, setJournal }: Props) {
                       {j.rMultiple.toFixed(1)} R
                     </span>
                   )}
-                  <button onClick={() => setJournal(journal.filter(x => x.id !== j.id))} className="p-1 text-mute" aria-label="Supprimer">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {!tracked(j) && (
+                    <button onClick={() => setJournal(journal.filter(x => x.id !== j.id))} className="p-1 text-mute" aria-label="Supprimer">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="num mt-2 grid grid-cols-3 gap-1 text-[11px]">
@@ -156,7 +206,7 @@ export function JournalView({ journal, setJournal }: Props) {
                       type="number"
                       step="0.1"
                       value={j.rMultiple ?? ''}
-                      onChange={e => update(j.id, { rMultiple: e.target.value === '' ? null : Number(e.target.value) })}
+                      onChange={e => update(j.id, { rMultiple: e.target.value === '' ? null : Number(e.target.value), auto: j.auto === undefined ? undefined : false })}
                       className="num w-14 rounded border border-line bg-bg px-1.5 py-0.5 text-ink"
                     />
                   </label>

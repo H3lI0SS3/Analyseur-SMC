@@ -29,6 +29,10 @@ export function evaluate(j: JournalEntry, candles: Candle[], now: number): Parti
   const entry = j.entryType === 'marché' && long ? j.entry + spread : j.entry;
   const risk = Math.abs(entry - j.sl);
   if (!risk) return null;
+  // historique incomplet (app fermée trop longtemps : le serveur ne garde qu'environ 7 jours de M15)
+  if (candles.length && candles[0].t > j.createdAt + 15 * M15 && now - j.createdAt > 6 * 24 * 3_600_000) {
+    return { auto: false, note: (j.note ? j.note + ' · ' : '') + 'Suivi interrompu (app fermée trop longtemps) : saisis le résultat depuis MT5.' };
+  }
   const commR = (j.commissionPerLot ?? 0) / Math.max(1e-9, risk * (j.contract ?? 1)); // commission en fraction de R
   const toR = (pnl: number) => Number(((pnl / risk - commR) / (1 + commR)).toFixed(2));
 
@@ -77,7 +81,9 @@ export function evaluate(j: JournalEntry, candles: Candle[], now: number): Parti
     }
     const slHit = long ? c.l <= sl : c.h >= sl - spread;
     if (slHit) {
-      pnl += remaining * (long ? sl - entry : entry - sl);
+      // gap au-delà du stop (réouverture, annonce) : sortie au prix d'ouverture, pas au stop
+      const exit = long ? Math.min(sl, c.o) : Math.max(sl, c.o + spread);
+      pnl += remaining * (long ? exit - entry : entry - exit);
       const r = toR(pnl);
       return { result: tp1At ? 'gagne' : Math.abs(sl - entry) < 1e-12 ? 'breakeven' : 'perdu', rMultiple: r, filledAt, tp1At, exitAt: c.t };
     }
@@ -131,14 +137,17 @@ export async function trackJournal(journal: JournalEntry[]): Promise<JournalEntr
   return changed ? next : null;
 }
 
-/** Statistiques de la stratégie sur les trades suivis et clôturés. */
+/** Statistiques de la stratégie sur les trades suivis automatiquement, clôturés et non modifiés à la main. */
 export interface StrategyStats {
   closed: number;
   wins: number;
   winRate: number | null;
   totalR: number;
   avgR: number | null;
-  /** probabilité (0-100) que la stratégie soit rentable sur la durée ; null sous 30 trades */
+  /** fourchette à 95 % de la moyenne en R (null sous 30 trades) */
+  ciLow: number | null;
+  ciHigh: number | null;
+  /** indice de confiance (0-100) que la moyenne en R soit positive ; null sous 30 trades. Ce n'est PAS une probabilité de gain. */
   viability: number | null;
   minTrades: number;
 }
@@ -153,19 +162,27 @@ function normCdf(x: number) {
   return x >= 0 ? 1 - p : p;
 }
 
-export function strategyStats(journal: JournalEntry[], filter?: (j: JournalEntry) => boolean): StrategyStats {
+export function strategyStats(journal: JournalEntry[], filter?: (j: JournalEntry) => boolean, rulesVersion?: string): StrategyStats {
   const rs = journal
-    .filter(j => j.auto !== undefined && j.rMultiple !== null && ['gagne', 'perdu', 'breakeven'].includes(j.result))
+    // uniquement les trades clôturés par le suivi automatique (auto === true) : une saisie ou une correction à la main les exclut
+    .filter(j => j.auto === true && j.rMultiple !== null && ['gagne', 'perdu', 'breakeven'].includes(j.result))
+    // uniquement la version actuelle des règles du moteur
+    .filter(j => !rulesVersion || j.rulesVersion === rulesVersion)
     .filter(j => !filter || filter(j))
     .map(j => j.rMultiple as number);
   const n = rs.length;
   const totalR = rs.reduce((s, r) => s + r, 0);
   const avgR = n ? totalR / n : null;
   let viability: number | null = null;
+  let ciLow: number | null = null;
+  let ciHigh: number | null = null;
   if (n >= MIN_TRADES && avgR !== null) {
     const sd = Math.sqrt(rs.reduce((s, r) => s + (r - avgR) ** 2, 0) / (n - 1));
-    viability = sd > 0 ? Math.round(normCdf(avgR / (sd / Math.sqrt(n))) * 100) : avgR > 0 ? 100 : 0;
+    const se = sd / Math.sqrt(n);
+    viability = sd > 0 ? Math.round(normCdf(avgR / se) * 100) : avgR > 0 ? 100 : 0;
+    ciLow = Number((avgR - 1.96 * se).toFixed(2));
+    ciHigh = Number((avgR + 1.96 * se).toFixed(2));
   }
   const wins = rs.filter(r => r > 0).length;
-  return { closed: n, wins, winRate: n ? Math.round((wins / n) * 100) : null, totalR: Number(totalR.toFixed(2)), avgR: avgR === null ? null : Number(avgR.toFixed(2)), viability, minTrades: MIN_TRADES };
+  return { closed: n, wins, winRate: n ? Math.round((wins / n) * 100) : null, totalR: Number(totalR.toFixed(2)), avgR: avgR === null ? null : Number(avgR.toFixed(2)), ciLow, ciHigh, viability, minTrades: MIN_TRADES };
 }

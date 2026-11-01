@@ -20,7 +20,7 @@ interface Props {
   settings: RiskSettings;
   analysis: AnalysisResponse | null;
   setAnalysis: (a: AnalysisResponse | null) => void;
-  onAddJournal: (a: AnalysisResponse) => void;
+  onAddJournal: (a: AnalysisResponse) => string | null;
   dailyBlocked: boolean;
   stats: StrategyStats;
 }
@@ -52,12 +52,14 @@ export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, o
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const run = async () => {
     setLoading(true);
     setError(null);
     setAdded(false);
+    setAddError(null);
     try {
       const provider = settings.aiProvider === 'auto' ? undefined : settings.aiProvider;
       const r = await api('/api/analyze', {
@@ -141,12 +143,12 @@ export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, o
         {error && <p className="rounded-lg bg-down/10 px-3 py-2 text-xs text-down">{error}</p>}
       </section>
 
-      {a && <Result a={a} settings={settings} stats={stats} added={added} dailyBlocked={dailyBlocked} onAdd={() => { onAddJournal(a); setAdded(true); }} />}
+      {a && <Result a={a} settings={settings} stats={stats} added={added} dailyBlocked={dailyBlocked} addError={addError} onAdd={() => { const err = onAddJournal(a); setAddError(err); setAdded(!err); }} />}
     </div>
   );
 }
 
-function Result({ a, settings, stats, added, onAdd, dailyBlocked }: { a: AnalysisResponse; settings: RiskSettings; stats: StrategyStats; added: boolean; onAdd: () => void; dailyBlocked: boolean }) {
+function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { a: AnalysisResponse; settings: RiskSettings; stats: StrategyStats; added: boolean; addError: string | null; onAdd: () => void; dailyBlocked: boolean }) {
   const { engine: e, final, ai } = a;
   const dec = a.decimals;
   const plan = final.plan;
@@ -272,8 +274,15 @@ function Result({ a, settings, stats, added, onAdd, dailyBlocked }: { a: Analysi
               {added ? 'Trade suivi automatiquement (Journal)' : dailyBlocked ? 'Limite de perte du jour atteinte' : 'Je prends ce trade → suivi automatique'}
             </button>
           )}
+          {addError && <p className="mt-2 text-[11px] text-warn">{addError}</p>}
+          {go && plan.entryType === 'limite' && (
+            <p className="mt-2 text-[10px] leading-snug text-mute">Dans MT5, annule toi-même l’ordre limite s’il n’est pas exécuté à l’heure indiquée : l’app l’annule dans son suivi, pas chez ton broker.</p>
+          )}
         </section>
       )}
+
+      {/* Bougies japonaises */}
+      <CandleBox a={a} />
 
       {/* Checklist */}
       <section className="card p-4">
@@ -417,7 +426,7 @@ function VerdictCard({ v, stats }: { v: NonNullable<AnalysisResponse['verdict']>
       <p className="mt-2 text-sm leading-snug">{v.summary}</p>
       <div className="mt-3 rounded-lg bg-card2 px-3 py-2">
         <div className="flex items-end justify-between">
-          <span className="text-xs text-mute">Viabilité (tes trades suivis)</span>
+          <span className="text-xs text-mute">Viabilité (indice de confiance, tes trades suivis)</span>
           <span className={cx('num text-2xl font-bold', ok ? 'text-up' : 'text-ink')}>{pct === null ? '—' : `${pct} %`}</span>
         </div>
         {pct === null ? (
@@ -436,7 +445,8 @@ function VerdictCard({ v, stats }: { v: NonNullable<AnalysisResponse['verdict']>
               <div className="absolute inset-y-0 w-0.5 bg-ink" style={{ left: `${v.threshold}%` }} />
             </div>
             <p className="mt-1 text-[11px] text-mute">
-              Sur {stats.closed} trades : {stats.winRate} % gagnants, {stats.avgR !== null && stats.avgR >= 0 ? '+' : ''}{stats.avgR} R en moyenne. Ton seuil : {v.threshold} %.
+              Sur {stats.closed} trades : {stats.winRate} % gagnants, {stats.avgR !== null && stats.avgR >= 0 ? '+' : ''}{stats.avgR} R en moyenne (fourchette 95 % : {stats.ciLow} à {stats.ciHigh} R). Ton seuil : {v.threshold} %.
+              {stats.ciLow !== null && stats.ciLow <= 0 && ' La fourchette inclut zéro : l’avantage n’est pas encore prouvé.'}
             </p>
           </>
         )}
@@ -462,7 +472,41 @@ function VerdictCard({ v, stats }: { v: NonNullable<AnalysisResponse['verdict']>
         </details>
       )}
       <p className="mt-3 text-[10px] leading-snug text-mute">
-        Le verdict vient uniquement des règles de ta stratégie. La viabilité est la probabilité, mesurée sur tes propres trades suivis par l’app, que la stratégie rapporte sur la durée : ce n’est pas la chance de gagner ce trade-là. Outil d’aide à la décision, pas un conseil en investissement.
+        Le verdict vient uniquement des règles de ta stratégie. La viabilité est un indice de confiance, calculé sur tes trades suivis automatiquement (version actuelle des règles), que la moyenne en R soit positive. Ce n’est ni la chance de gagner ce trade, ni une preuve : avec 30 trades, une stratégie sans avantage peut dépasser 85 % par hasard. Pour le réel, vise au moins 100 trades et une fourchette entièrement au-dessus de 0. Outil d’aide à la décision, pas un conseil en investissement.
+      </p>
+    </section>
+  );
+}
+
+function CandleBox({ a }: { a: AnalysisResponse }) {
+  const list = a.candlePatterns || [];
+  const dir = a.final.plan?.direction ?? a.engine.setup?.direction ?? null;
+  const want = dir === 'acheter' ? 'haussier' : dir === 'vendre' ? 'baissier' : null;
+  return (
+    <section className="card p-4">
+      <div className="label mb-2">Bougies japonaises (confirmation)</div>
+      {!list.length && <p className="text-xs text-mute">Aucune figure de retournement sur les 3 dernières bougies M15 et les 2 dernières H1.</p>}
+      <ul className="space-y-2">
+        {list.map(p => (
+          <li key={`${p.tf}-${p.t}-${p.name}`} className="rounded-lg bg-card2 px-3 py-2">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className={cx('font-semibold', p.dir === 'haussier' ? 'text-up' : 'text-down')}>{p.name}</span>
+              <span className="text-[10px] text-mute">
+                {p.tf} · {localTime(p.t)}
+                {p.inZone ? ' · dans la zone' : ''}
+              </span>
+            </div>
+            <p className="mt-0.5 text-[11px] leading-snug text-mute">{p.detail}</p>
+            {want && (
+              <p className={cx('mt-0.5 text-[10px] font-semibold', p.dir === want ? 'text-up' : 'text-down')}>
+                {p.dir === want ? 'Dans le sens du plan' : 'Contre le plan'}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[10px] leading-snug text-mute">
+        Information seulement : ne change pas le verdict de ta stratégie. Chaque trade suivi note si une figure était présente, pour mesurer sur tes résultats si elle aide.
       </p>
     </section>
   );
