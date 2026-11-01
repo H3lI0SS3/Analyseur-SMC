@@ -5,7 +5,12 @@ export interface NewsEvent {
   t: number;
   currency: string;
   title: string;
+  /** horaire non confirmé (« tentative » / toute la journée) : pas d'heure exacte à bloquer */
+  tentative?: boolean;
 }
+
+/** Une vraie annonce tombe à l'heure, au quart d'heure ou à 5 minutes près ; sinon l'horaire est un marqueur « à confirmer ». */
+export const isTentativeTime = (t: number) => new Date(t).getUTCMinutes() % 5 !== 0 || new Date(t).getUTCSeconds() !== 0;
 
 export interface NewsState {
   available: boolean;
@@ -29,7 +34,10 @@ export async function getNews(): Promise<NewsState> {
       if (!Array.isArray(json)) throw new Error('format inattendu');
       const events: NewsEvent[] = json
         .filter((e: any) => String(e.impact).toLowerCase() === 'high' && ['USD', 'EUR'].includes(String(e.country).toUpperCase()))
-        .map((e: any) => ({ t: Date.parse(e.date), currency: String(e.country).toUpperCase(), title: String(e.title || 'Annonce') }))
+        .map((e: any) => {
+          const t = Date.parse(e.date);
+          return { t, currency: String(e.country).toUpperCase(), title: String(e.title || 'Annonce'), tentative: isTentativeTime(t) || /tentative|all day/i.test(String(e.time || '')) };
+        })
         .filter((e: NewsEvent) => Number.isFinite(e.t))
         .sort((a: NewsEvent, b: NewsEvent) => a.t - b.t);
       cache = { available: true, events, fetchedAt: Date.now() };

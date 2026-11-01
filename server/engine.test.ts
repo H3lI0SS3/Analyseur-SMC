@@ -124,6 +124,9 @@ ok('Niveaux dans le bon ordre', allSetups.every(s => (s!.direction === 'acheter'
 const newsNow = analyze(series, 5, { now: tuesday, ...costs, news: { available: true, events: [{ t: tuesday + 10 * 60_000, currency: 'USD', title: 'CPI' }] }, newsCurrencies: ['USD'] });
 ok('Annonce dans 10 min : condition news en échec', newsNow.checklist.find(c => c.key === 'news')?.ok === false);
 ok('Annonce dans 10 min : signal = attendre', newsNow.signal === 'attendre');
+const tentative = analyze(series, 5, { now: tuesday, ...costs, news: { available: true, events: [{ t: tuesday + 6 * 60_000, currency: 'USD', title: 'Congressional Elections', tentative: true }] }, newsCurrencies: ['USD'] });
+ok('Annonce à horaire non confirmé : pas de blocage à une fausse heure', tentative.checklist.find(c => c.key === 'news')?.ok === true);
+ok('Annonce à horaire non confirmé : signalée pour la journée', tentative.tentativeNews.length === 1);
 const noCal = analyze(series, 5, { now: tuesday, ...costs, newsCurrencies: ['USD'] });
 ok('Calendrier indisponible : condition news en échec', noCal.checklist.find(c => c.key === 'news')?.ok === false);
 const saturday = analyze(series, 5, { now: Date.UTC(2026, 10, 7, 12), ...costs, news: { available: true, events: [] } });

@@ -188,6 +188,7 @@ export interface EngineResult {
   signal: Signal;
   waitCondition: string | null;
   nextNews: { t: number; currency: string; title: string } | null;
+  tentativeNews?: string[];
   newsAvailable: boolean;
   amd: AmdState;
   ict?: {

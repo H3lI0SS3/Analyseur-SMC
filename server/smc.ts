@@ -119,6 +119,8 @@ export interface EngineResult {
   signal: 'acheter' | 'vendre' | 'attendre';
   waitCondition: string | null;
   nextNews: { t: number; currency: string; title: string } | null;
+  /** annonces fortes du jour sans horaire confirmé */
+  tentativeNews: string[];
   newsAvailable: boolean;
   amd: AmdState;
   /** concepts ICT utilisés dans la décision */
@@ -141,7 +143,7 @@ export interface AnalyzeOptions {
   commissionPerLot?: number;
   /** taille d'un lot (100 000 EUR/USD, 100 oz or) */
   contract?: number;
-  news?: { available: boolean; events: { t: number; currency: string; title: string }[] };
+  news?: { available: boolean; events: { t: number; currency: string; title: string; tentative?: boolean }[] };
   newsCurrencies?: string[];
 }
 
@@ -773,7 +775,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
 
   // ----- Annonces économiques -----
   const curr = opts.newsCurrencies ?? ['USD'];
-  const relevant = (opts.news?.events ?? []).filter(e => curr.includes(e.currency));
+  // les annonces à horaire non confirmé ne bloquent pas une fausse heure : elles sont signalées pour la journée
+  const relevant = (opts.news?.events ?? []).filter(e => curr.includes(e.currency) && !e.tentative);
+  const tentativeToday = (opts.news?.events ?? []).filter(e => curr.includes(e.currency) && e.tentative && tradingDayStart(e.t) === tradingDayStart(now));
   const blocking = relevant.find(e => Math.abs(e.t - now) <= 30 * 60_000) || null;
   const nextNews = relevant.find(e => e.t >= now - 30 * 60_000) || null;
   const newsAvailable = !!opts.news?.available;
@@ -783,7 +787,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     : blocking
     ? `${blocking.title} (${blocking.currency}) à ${maTime(blocking.t)} : pas d’entrée entre ${maTime(blocking.t - 30 * 60_000)} et ${maTime(blocking.t + 30 * 60_000)}.`
     : nextNews
-    ? `Prochaine annonce forte : ${nextNews.title} (${nextNews.currency}), ${maDateTime(nextNews.t)}.`
+    ? `Prochaine annonce forte : ${nextNews.title} (${nextNews.currency}), ${maDateTime(nextNews.t)}.${tentativeToday.length ? ` Aujourd’hui, horaire non confirmé : ${tentativeToday.map(e => e.title).join(', ')} (prudence).` : ''}`
+    : tentativeToday.length
+    ? `Horaire non confirmé aujourd’hui : ${tentativeToday.map(e => e.title).join(', ')} (prudence toute la journée).`
     : 'Aucune autre annonce forte cette semaine.';
 
   // ----- Concepts ICT de la zone du plan -----
@@ -982,6 +988,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     signal,
     waitCondition,
     nextNews,
+    tentativeNews: tentativeToday.map(e => `${e.title} (${e.currency})`),
     newsAvailable,
     amd,
     ict: { ote, displacement, trendlines, candlePatterns },

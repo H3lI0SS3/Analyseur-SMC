@@ -33,3 +33,12 @@ if (failed) {
   process.exit(1);
 }
 console.log('\nTous les tests horaires passent.');
+
+// Annonces : horaire « à confirmer » repéré (minute non ronde), vrai horaire accepté
+import { isTentativeTime } from './news';
+{
+  const real = Date.UTC(2026, 10, 3, 13, 30);
+  const odd = Date.UTC(2026, 10, 3, 15, 16);
+  console.log(`${!isTentativeTime(real) && isTentativeTime(odd) ? 'OK ' : 'ÉCHEC'} Annonce à 15:16 = horaire non confirmé, 13:30 = vrai horaire`);
+  if (isTentativeTime(real) || !isTentativeTime(odd)) process.exit(1);
+}

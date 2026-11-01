@@ -197,6 +197,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   }
   if (marketIsClosed) warnings.push('Marché fermé : réouverture le dimanche à 17h00 New York.');
   if (!engine.newsAvailable) warnings.push('Calendrier économique indisponible : vérifie les annonces toi-même.');
+  if (engine.tentativeNews.length) warnings.push(`Annonce forte aujourd’hui sans horaire confirmé : ${engine.tentativeNews.join(', ')}. Vérifie l’heure sur ForexFactory avant d’entrer.`);
 
   let ai: AiReview | null = null;
   let aiError: string | null = null;
