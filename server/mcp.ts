@@ -153,6 +153,11 @@ function buildServer() {
           liquidite: e.liquidity.map(l => ({ niveau: l.label, prix: l.price, cote: l.side === 'buy' ? 'au-dessus (acheteuse)' : 'en dessous (vendeuse)', deja_pris: l.swept })),
           zones: e.zones.map(z => ({ type: z.kind, ut: z.tf, sens: z.dir === 'bull' ? 'haussier' : 'baissier', bas: z.bottom, haut: z.top, deja_teste: z.touched })),
           plans_alternatifs: e.alternatives,
+          concepts_ict: {
+            displacement_a_l_origine_de_la_zone: e.ict.displacement,
+            ote: e.ict.ote,
+            liquidite_trendline: e.ict.trendlines.map(t => ({ cote: t.side === 'buy' ? 'au-dessus (acheteuse)' : 'en dessous (vendeuse)', touches: t.touches, niveau_actuel: t.priceNow, intacte: t.intact })),
+          },
           bougies_japonaises: (a.candlePatterns || []).map(p => ({ figure: p.name, sens: p.dir, ut: p.tf, heure_utc: new Date(p.t).toISOString(), dans_la_zone: p.inZone, detail: p.detail })),
           notes: a.final.notes,
           ia_interne: a.ai ? { moteur: a.ai.engine, verdict: a.ai.verdict, resume: a.ai.resume, plan: a.ai.plan, invalidation: a.ai.invalidation } : a.aiError,

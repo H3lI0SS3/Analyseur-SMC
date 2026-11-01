@@ -1,8 +1,7 @@
 // Logique d'analyse partagée entre l'interface web (/api/analyze) et le connecteur MCP.
 import { PAIRS, TIMEFRAMES, getSeries, type Timeframe, type Candle } from './marketData';
 import { getNews, NEWS_CURRENCIES } from './news';
-import { findCandlePatterns, type CandlePattern } from './candlePatterns';
-import { TF_MS } from './marketData';
+import type { CandlePattern } from './candlePatterns';
 import { marketClosed, maTime } from './time';
 import { analyze, RULES_VERSION, type EngineResult } from './smc';
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
@@ -179,15 +178,8 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     newsCut = `Ordre limite à annuler avant ${maTime(engine.setup.validUntil)} (heure du Maroc) : annonce forte ${engine.nextNews.title} (${engine.nextNews.currency}) à ${maTime(engine.nextNews.t)}.`;
   }
 
-  // ----- Bougies japonaises : figures de retournement récentes (bougies clôturées), confirmation de la zone -----
-  const planZone = engine.setup ? engine.zones.find(z => z.id === engine.setup!.zoneId) : null;
-  const closedOnly = (tf: Timeframe) => series[tf].filter(c => c.t + TF_MS[tf] <= now);
-  const candlePatterns: CandlePattern[] = futuresProxy
-    ? []
-    : [
-        ...findCandlePatterns(closedOnly('M15'), 'M15', { recent: 3, zone: planZone }),
-        ...findCandlePatterns(closedOnly('H1'), 'H1', { recent: 2, zone: planZone }),
-      ];
+  // ----- Bougies japonaises (ebook) : calculées par le moteur, critère de confluence -----
+  const candlePatterns: CandlePattern[] = futuresProxy ? [] : engine.ict.candlePatterns;
 
   // ----- Garde-fous données -----
   const warnings: string[] = [];
@@ -300,15 +292,12 @@ function buildVerdict(
     else contre.push(`${c.label}${c.core ? ' (obligatoire)' : ''} — ${c.detail}`);
   }
   for (const b of blockers) contre.unshift(b);
-  // Bougies japonaises : confirmation (ou alerte) dans le sens du plan, sans changer la décision
+  // Bougies japonaises : la confirmation est un critère de la checklist ; ici on signale une figure CONTRE le plan
   const setupDir = final.plan?.direction ?? engine.setup?.direction ?? null;
   if (setupDir) {
     const want = setupDir === 'acheter' ? 'haussier' : 'baissier';
     const fmtP = (p: CandlePattern) => `${p.name} en ${p.tf} à ${maTime(p.t)}${p.inZone ? ', dans la zone d’entrée' : ''}`;
-    const conf = patterns.filter(p => p.dir === want);
     const against = patterns.filter(p => p.dir !== want);
-    if (conf.length) pour.push(`Bougies japonaises — ${conf.map(fmtP).join(' ; ')} : figure de retournement dans le sens du trade.`);
-    else contre.push('Bougies japonaises — aucune figure de retournement dans le sens du trade sur les dernières bougies M15/H1 (confirmation absente, information seulement).');
     if (against.length) contre.push(`Bougies japonaises — ${against.map(fmtP).join(' ; ')} : figure de retournement contre le trade.`);
   }
   if (ai) {

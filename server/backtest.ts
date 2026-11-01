@@ -5,7 +5,7 @@
 //  - « souple »  : le balayage n'est qu'un bonus de confluence.
 
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
-import { analyze, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
+import { analyze, MIN_CONFLUENCES, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
 import { HOUR, marketClosed, maDateTime, nyParts } from './time';
 
 export interface BacktestCosts {
@@ -320,7 +320,7 @@ export class BacktestRun {
       const souple = eng.signal !== 'attendre' && !!eng.setup;
       const sweepOk = !!eng.checklist.find(c => c.key === 'sweep')?.ok;
       const optionalOk = eng.checklist.filter(c => !c.core && c.ok).length;
-      const strict = souple && sweepOk && optionalOk - 1 >= 2;
+      const strict = souple && sweepOk && optionalOk - 1 >= MIN_CONFLUENCES;
 
       for (const variant of ['strict', 'souple'] as const) {
         const take = variant === 'strict' ? strict : souple;
@@ -601,19 +601,19 @@ export interface LabResult {
 
 // La règle de base reproduit exactement le signal actuel du moteur (« sweep en bonus »).
 const marketRule = (c: Candidate) => !(c.entryType === 'marché' && !c.ltf);
-const base = (c: Candidate) => c.optionalOk >= 2 && marketRule(c);
+const base = (c: Candidate) => c.optionalOk >= MIN_CONFLUENCES && marketRule(c);
 
 /** Liste FIGÉE à l'avance : on ne l'ajuste pas après avoir vu les résultats. */
 export const LAB_VARIANTS: { id: string; label: string; filter: (c: Candidate) => boolean; mode: Management }[] = [
   { id: 'base', label: 'Référence : règles actuelles (sweep en bonus)', filter: base, mode: 'partiel' },
-  { id: 'strict', label: 'Sweep obligatoire', filter: c => c.sweep && c.optionalOk - 1 >= 2 && marketRule(c), mode: 'partiel' },
+  { id: 'strict', label: 'Sweep obligatoire', filter: c => c.sweep && c.optionalOk - 1 >= MIN_CONFLUENCES && marketRule(c), mode: 'partiel' },
   { id: 'kz', label: 'Kill zone obligatoire', filter: c => base(c) && c.killzone, mode: 'partiel' },
   { id: 'pd', label: 'Premium/discount obligatoire', filter: c => base(c) && c.pd, mode: 'partiel' },
   { id: 'amd', label: 'Cycle AMD aligné obligatoire', filter: c => base(c) && c.amd, mode: 'partiel' },
   { id: 'ltf', label: 'Structure M15 alignée obligatoire', filter: c => base(c) && c.ltf, mode: 'partiel' },
   { id: 'h1', label: 'Zones H1 uniquement', filter: c => base(c) && c.zoneTf === 'H1', mode: 'partiel' },
   { id: 'fresh', label: 'Zones jamais testées uniquement', filter: c => base(c) && !c.touched, mode: 'partiel' },
-  { id: 'conf3', label: '3 confluences ou plus', filter: c => c.optionalOk >= 3 && marketRule(c), mode: 'partiel' },
+  { id: 'conf3', label: `${MIN_CONFLUENCES + 1} confluences ou plus`, filter: c => c.optionalOk >= MIN_CONFLUENCES + 1 && marketRule(c), mode: 'partiel' },
   { id: 'kzsweep', label: 'Kill zone + sweep obligatoires', filter: c => base(c) && c.killzone && c.sweep, mode: 'partiel' },
   { id: 'tp1', label: 'Gestion : tout à TP1', filter: base, mode: 'tp1' },
   { id: 'final', label: 'Gestion : tout à l’objectif final, sans point mort', filter: base, mode: 'final' },

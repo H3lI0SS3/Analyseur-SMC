@@ -65,7 +65,7 @@ export interface TfSummary {
 export interface Zone {
   id: string;
   tf: Timeframe;
-  kind: 'FVG' | 'OB';
+  kind: 'FVG' | 'OB' | 'Breaker';
   dir: 'bull' | 'bear';
   top: number;
   bottom: number;
@@ -189,6 +189,12 @@ export interface EngineResult {
   nextNews: { t: number; currency: string; title: string } | null;
   newsAvailable: boolean;
   amd: AmdState;
+  ict?: {
+    ote: { dir: 'bull' | 'bear'; legLow: number; legHigh: number; top: number; bottom: number; detail: string } | null;
+    displacement: boolean;
+    trendlines: { side: 'buy' | 'sell'; touches: number; priceNow: number; firstT: number; lastT: number; intact: boolean; label: string }[];
+    candlePatterns: CandlePattern[];
+  };
 }
 
 export interface AiReview {

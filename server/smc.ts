@@ -3,12 +3,16 @@
 
 import { TF_MS, type Candle, type Timeframe } from './marketData';
 import { HOUR, marketClosed, maDateTime, maTime, nyParts, nyToUtc, tradingDayStart, tradingWeekStart } from './time';
+import { findBreakers, findTrendlines, oteZone, zoneFromDisplacement, type OteZone, type TrendlineLiquidity } from './ictConcepts';
+import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.3';
-export const RULES_FROZEN_AT = Date.UTC(2026, 10, 1, 12, 0); // 01/11/2026 12:00 UTC (3.3 : invalidation du cycle AMD)
+export const RULES_VERSION = '3.4';
+// 3.4 : displacement, OTE, liquidité de trendline, breaker blocks, bougies japonaises (ebook) dans la décision ; 3 confluences sur 8
+export const MIN_CONFLUENCES = 3;
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 1, 21, 0); // 01/11/2026 21:00 UTC, avant la réouverture
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -32,7 +36,7 @@ export interface StructureEvent {
 export interface Zone {
   id: string;
   tf: Timeframe;
-  kind: 'FVG' | 'OB';
+  kind: 'FVG' | 'OB' | 'Breaker';
   dir: Dir;
   top: number;
   bottom: number;
@@ -116,6 +120,13 @@ export interface EngineResult {
   nextNews: { t: number; currency: string; title: string } | null;
   newsAvailable: boolean;
   amd: AmdState;
+  /** concepts ICT utilisés dans la décision */
+  ict: {
+    ote: OteZone | null;
+    displacement: boolean;
+    trendlines: TrendlineLiquidity[];
+    candlePatterns: CandlePattern[];
+  };
 }
 
 export interface AnalyzeOptions {
@@ -685,6 +696,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     ...findOrderBlocks(h1, 'H1', raw.H1.events, raw.H1.swings, atrH1),
     ...findFVGs(m15, 'M15', atrM15, 96),
     ...findOrderBlocks(m15, 'M15', raw.M15.events, raw.M15.swings, atrM15),
+    ...findBreakers(h1, 'H1', raw.H1.events, raw.H1.swings, atrH1),
+    ...findBreakers(m15, 'M15', raw.M15.events, raw.M15.swings, atrM15),
   ]
     .filter(z => Math.abs((z.top + z.bottom) / 2 - price) <= 4 * atrH1)
     .map(z => ({ ...z, top: r(z.top), bottom: r(z.bottom) }));
@@ -735,7 +748,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       rr1: Number(rr1.toFixed(2)),
       rr2: rr2 ? Number(rr2.toFixed(2)) : null,
       zoneId: z.id,
-      zoneLabel: `${z.kind === 'FVG' ? 'Fair Value Gap' : 'Order Block'} ${z.dir === 'bull' ? 'haussier' : 'baissier'} ${z.tf} (${r(z.bottom)} – ${r(z.top)})`,
+      zoneLabel: `${z.kind === 'FVG' ? 'Fair Value Gap' : z.kind === 'OB' ? 'Order Block' : 'Breaker Block'} ${z.dir === 'bull' ? 'haussier' : 'baissier'} ${z.tf} (${r(z.bottom)} – ${r(z.top)})`,
     };
   };
 
@@ -767,9 +780,27 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     ? `Prochaine annonce forte : ${nextNews.title} (${nextNews.currency}), ${maDateTime(nextNews.t)}.`
     : 'Aucune autre annonce forte cette semaine.';
 
-  // ----- Checklist -----
+  // ----- Concepts ICT de la zone du plan -----
   const finalRR = setup ? setup.rr2 ?? setup.rr1 : 0;
   const isLong = setup?.direction === 'acheter';
+  const setupZone = setup ? zones.find(z => z.id === setup.zoneId) || null : null;
+  const zc = setupZone ? (setupZone.tf === 'H1' ? h1 : m15) : null;
+  const zraw = setupZone ? raw[setupZone.tf] : null;
+  const displacement = !!setupZone && !!zc && zoneFromDisplacement(zc, setupZone);
+  const oteRaw = setupZone && zc && zraw ? oteZone(zc, zraw.events, zraw.swings, setupZone.dir) : null;
+  const ote = oteRaw ? { ...oteRaw, legLow: r(oteRaw.legLow), legHigh: r(oteRaw.legHigh), top: r(oteRaw.top), bottom: r(oteRaw.bottom) } : null;
+  const inOte = !!setup && !!setupZone && !!ote && setupZone.bottom <= ote.top && setupZone.top >= ote.bottom && setup.entry <= ote.top && setup.entry >= ote.bottom;
+  const trendlines = [...findTrendlines(m15, raw.M15.swings, atrM15, 'M15', 120), ...findTrendlines(h1, raw.H1.swings, atrH1, 'H1', 120)].map(t => ({ ...t, priceNow: r(t.priceNow) }));
+  const tlTarget = setup
+    ? trendlines.find(t => t.intact && (isLong ? t.side === 'buy' && t.priceNow > setup.entry : t.side === 'sell' && t.priceNow < setup.entry)) || null
+    : null;
+  const candlePatterns = [
+    ...findCandlePatterns(m15, 'M15', { recent: 3, zone: setupZone }),
+    ...findCandlePatterns(h1, 'H1', { recent: 2, zone: setupZone }),
+  ];
+  const patternForTrade = setup ? candlePatterns.find(p => p.dir === (isLong ? 'haussier' : 'baissier') && p.inZone) || null : null;
+
+  // ----- Checklist -----
   // un achat demande un balayage SOUS le prix (liquidité vendeuse), une vente un balayage AU-DESSUS
   const sweepForTrade = setup ? sweeps.find(sw => sw.side === (isLong ? 'sell' : 'buy')) || null : null;
   const ltfOk = !!setup && timeframes.M15.trend === (isLong ? 'haussier' : 'baissier');
@@ -783,9 +814,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     },
     {
       key: 'zone',
-      label: 'Zone d\'entrée (FVG/OB) dans le sens du biais',
+      label: 'Zone d\'entrée (FVG/OB/Breaker) dans le sens du biais',
       ok: !!setup,
-      detail: setup ? setup.zoneLabel : 'Aucun FVG/OB valide dans le sens du biais près du prix.',
+      detail: setup ? setup.zoneLabel : 'Aucun FVG/OB/Breaker valide dans le sens du biais près du prix.',
       core: true,
     },
     {
@@ -841,6 +872,44 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       detail: session.detail,
       core: false,
     },
+    {
+      key: 'displacement',
+      label: 'Zone créée par un displacement',
+      ok: displacement,
+      detail: setupZone
+        ? displacement
+          ? 'Bougie impulsive (corps ≥ 2x la moyenne, clôture près de l’extrême) à l’origine de la zone : intervention agressive.'
+          : 'Pas de bougie impulsive à l’origine de la zone : mouvement mou.'
+        : 'Pas de zone.',
+      core: false,
+    },
+    {
+      key: 'ote',
+      label: 'Entrée dans l’OTE (62–79 %)',
+      ok: inOte,
+      detail: ote
+        ? `OTE ${setupZone?.tf} : ${ote.bottom} – ${ote.top} (${ote.detail}, ${ote.legLow} → ${ote.legHigh}).${setup ? (inOte ? ' L’entrée est dedans.' : ` Entrée à ${setup.entry} : hors OTE.`) : ''}`
+        : 'Pas d’impulse de référence pour tracer l’OTE.',
+      core: false,
+    },
+    {
+      key: 'trendline',
+      label: 'Liquidité de trendline à prendre dans le sens du trade',
+      ok: !!tlTarget,
+      detail: tlTarget
+        ? `${tlTarget.label}, vers ${tlTarget.priceNow} : stops accumulés ${isLong ? 'au-dessus' : 'en dessous'}, carburant pour le mouvement.`
+        : 'Aucune trendline de 3 touches intacte du côté de l’objectif.',
+      core: false,
+    },
+    {
+      key: 'candle',
+      label: 'Bougie japonaise de retournement dans la zone',
+      ok: !!patternForTrade,
+      detail: patternForTrade
+        ? `${patternForTrade.name} en ${patternForTrade.tf} à ${maTime(patternForTrade.t)} : ${patternForTrade.detail}`
+        : 'Aucune figure de retournement (ebook) dans la zone sur les dernières bougies M15/H1.',
+      core: false,
+    },
   ];
 
   const coreOk = checklist.filter(c => c.core).every(c => c.ok);
@@ -848,9 +917,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   const score = Math.round((okCount / checklist.length) * 100);
   let signal: EngineResult['signal'] = 'attendre';
   let waitCondition: string | null = null;
-  // conditions obligatoires toutes remplies + au moins 2 conditions de confluence
+  // conditions obligatoires toutes remplies + au moins 3 confluences sur 8
   const optionalOk = checklist.filter(c => !c.core && c.ok).length;
-  if (coreOk && optionalOk >= 2 && setup) {
+  if (coreOk && optionalOk >= MIN_CONFLUENCES && setup) {
     signal = setup.direction;
     // au marché : seulement si la structure M15 confirme déjà le sens du trade
     if (setup.entryType === 'marché' && !ltfOk) {
@@ -893,5 +962,6 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     nextNews,
     newsAvailable,
     amd,
+    ict: { ote, displacement, trendlines, candlePatterns },
   };
 }

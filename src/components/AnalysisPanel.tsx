@@ -281,7 +281,8 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
         </section>
       )}
 
-      {/* Bougies japonaises */}
+      {/* Concepts ICT + bougies japonaises */}
+      <IctBox a={a} />
       <CandleBox a={a} />
 
       {/* Checklist */}
@@ -478,6 +479,37 @@ function VerdictCard({ v, stats }: { v: NonNullable<AnalysisResponse['verdict']>
   );
 }
 
+function IctBox({ a }: { a: AnalysisResponse }) {
+  const ict = a.engine.ict;
+  if (!ict) return null;
+  const dec = a.decimals;
+  return (
+    <section className="card p-4">
+      <div className="label mb-2">Concepts ICT de la zone</div>
+      <ul className="space-y-1.5 text-xs">
+        <li className="flex justify-between gap-2">
+          <span className="text-mute">Displacement à l’origine de la zone</span>
+          <span className={ict.displacement ? 'text-up' : 'text-mute'}>{ict.displacement ? 'oui' : 'non'}</span>
+        </li>
+        <li className="flex justify-between gap-2">
+          <span className="text-mute">OTE (62–79 %)</span>
+          <span className="num">{ict.ote ? `${fmt(ict.ote.bottom, dec)} – ${fmt(ict.ote.top, dec)}` : '—'}</span>
+        </li>
+        {ict.trendlines.map(t => (
+          <li key={`${t.side}-${t.firstT}`} className={cx('flex justify-between gap-2', !t.intact && 'opacity-50')}>
+            <span className="min-w-0 truncate">
+              <span className={t.side === 'buy' ? 'text-up' : 'text-down'}>{t.side === 'buy' ? '▲' : '▼'}</span> {t.label}
+              {!t.intact && <span className="ml-1 text-[10px]">(déjà prise)</span>}
+            </span>
+            <span className="num shrink-0">{fmt(t.priceNow, dec)}</span>
+          </li>
+        ))}
+        {!ict.trendlines.length && <li className="text-mute">Aucune trendline de 3 touches sur M15/H1.</li>}
+      </ul>
+    </section>
+  );
+}
+
 function CandleBox({ a }: { a: AnalysisResponse }) {
   const list = a.candlePatterns || [];
   const dir = a.final.plan?.direction ?? a.engine.setup?.direction ?? null;
@@ -506,7 +538,7 @@ function CandleBox({ a }: { a: AnalysisResponse }) {
         ))}
       </ul>
       <p className="mt-2 text-[10px] leading-snug text-mute">
-        Information seulement : ne change pas le verdict de ta stratégie. Chaque trade suivi note si une figure était présente, pour mesurer sur tes résultats si elle aide.
+        Critère de décision (ebook) : une figure dans le sens du plan, formée dans la zone d’entrée, compte comme une confluence. Une figure contre le plan est signalée dans le « Contre ».
       </p>
     </section>
   );
