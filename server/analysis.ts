@@ -2,6 +2,7 @@
 import { PAIRS, TIMEFRAMES, getSeries, type Timeframe, type Candle } from './marketData';
 import { getNews, NEWS_CURRENCIES } from './news';
 import type { CandlePattern } from './candlePatterns';
+import { auditEngine } from './audit';
 import { marketClosed, maTime } from './time';
 import { analyze, RULES_VERSION, type EngineResult } from './smc';
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
@@ -73,35 +74,31 @@ export function reconcile(eng: EngineResult, ai: AiReview | null, dec: number, c
       const tol = 0.1 * atrH1 + costs.spread;
       const onLiquidity = (p: number) => eng.liquidity.some(l => Math.abs(l.price - p) <= tol);
       const targetsOk = onLiquidity(n.tp1) && (!n.tp2 || onLiquidity(n.tp2));
-      const rrNet = (tp: number) => (Math.abs(tp - n.entree!) - commUnit) / (risk + commUnit);
+      // L'entrée reste celle de la zone du moteur (checklist, OTE et score sont calculés dessus) :
+      // l'IA peut seulement élargir le stop et déplacer les objectifs sur de la liquidité.
+      const r = (x: number) => Number(x.toFixed(dec));
+      const sameEntry = Math.abs(n.entree - plan.entry) <= 2 * Math.pow(10, -dec);
+      const riskR = Math.abs(plan.entry - r(n.stop_loss));
+      const rrNet = (tp: number) => (Math.abs(r(tp) - plan!.entry) - commUnit) / (riskR + commUnit);
       const rr1 = rrNet(n.tp1);
       const rr2 = n.tp2 ? rrNet(n.tp2) : null;
-      const changed = n.entree !== plan.entry || n.stop_loss !== plan.sl || n.tp1 !== plan.tp1 || (n.tp2 ?? null) !== plan.tp2;
+      const changed = !sameEntry || r(n.stop_loss) !== plan.sl || r(n.tp1) !== plan.tp1 || (n.tp2 ? r(n.tp2) : null) !== plan.tp2;
       if (changed) {
-        if (
-          ordered &&
-          stopNotTighter &&
-          targetsOk &&
-          Math.abs(n.entree - plan.entry) <= atrH1 &&
-          risk <= 2.5 * atrH1 &&
-          (rr2 ?? rr1) >= 2
-        ) {
-          const r = (x: number) => Number(x.toFixed(dec));
-          const inside = long ? n.entree >= eng.price : n.entree <= eng.price;
+        if (sameEntry && ordered && stopNotTighter && targetsOk && risk <= 2.5 * atrH1 && (rr2 ?? rr1) >= 2) {
           plan = {
             ...plan,
-            entry: r(n.entree),
             sl: r(n.stop_loss),
             tp1: r(n.tp1),
             tp2: n.tp2 ? r(n.tp2) : null,
             rr1: Number(rr1.toFixed(2)),
             rr2: rr2 ? Number(rr2.toFixed(2)) : null,
-            entryType: inside ? 'marché' : 'limite',
             origin: 'ajusté par l’IA',
           };
-          notes.push('Niveaux affinés par l’IA, vérifiés par le moteur (stop pas plus serré, objectifs sur la liquidité, R:R net ≥ 1:2).');
+          notes.push('Stop et objectifs affinés par l’IA, vérifiés par le moteur (stop pas plus serré, objectifs sur la liquidité, R:R net ≥ 1:2).');
         } else {
-          const why = !stopNotTighter
+          const why = !sameEntry
+            ? 'entrée hors de la zone du moteur'
+            : !stopNotTighter
             ? 'stop plus serré que celui du moteur'
             : !targetsOk
             ? 'objectif hors des niveaux de liquidité'
@@ -181,6 +178,10 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   // ----- Bougies japonaises (ebook) : calculées par le moteur, critère de confluence -----
   const candlePatterns: CandlePattern[] = futuresProxy ? [] : engine.ict.candlePatterns;
 
+  // ----- Contrôle de cohérence : aucune analyse contradictoire ne peut produire un trade -----
+  const incoherences = auditEngine(engine, { now, series, spread: costs.spread, commissionPerLot: costs.commissionPerLot, contract: costs.contract });
+  if (incoherences.length) console.error(`[Cohérence ${pair}] ${incoherences.join(' | ')}`);
+
   // ----- Garde-fous données -----
   const warnings: string[] = [];
   const blockers: string[] = [];
@@ -189,6 +190,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   if (futuresProxy) {
     blockers.push('Prix de l’or issu des futures (écart de 10 à 40 $ avec ton broker) : niveaux masqués. Ajoute la clé TWELVE_DATA_API_KEY pour le prix spot.');
   }
+  if (incoherences.length) blockers.push(`Incohérence détectée dans l’analyse (${incoherences[0]}) : pas de signal par sécurité.`);
   if (fromStaleCache) blockers.push('La source de données ne répond plus : données des dernières minutes seulement, pas de signal.');
   if (!marketIsClosed && now - lastT > 20 * 60_000) {
     blockers.push(`Données en retard : dernière bougie à ${maTime(lastT)} (heure du Maroc). Pas de signal tant qu’elles ne sont pas à jour.`);

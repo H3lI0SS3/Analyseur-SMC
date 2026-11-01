@@ -727,11 +727,12 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     // stop jamais plus serré que 0,3 ATR H1 ni que 4 spreads (sinon il saute sur le simple bruit)
     const minRisk = Math.max(0.3 * atrH1, 4 * spread);
     if (Math.abs(entry - sl) < minRisk) sl = long ? entry - minRisk : entry + minRisk;
-    const risk = Math.abs(entry - sl);
+    // R:R calculé sur les niveaux ARRONDIS, ceux qui sont affichés et passés chez le broker
+    const risk = Math.abs(r(entry) - r(sl));
     if (risk <= 0 || risk > 2.5 * atrH1) return null;
     // Objectif placé un spread AVANT la liquidité (pour être servi), R:R NET de commission.
     const tpOf = (lvl: number) => (long ? lvl - spread : lvl + spread);
-    const rrNet = (lvl: number) => (Math.abs(tpOf(lvl) - entry) - commUnit) / (risk + commUnit);
+    const rrNet = (lvl: number) => (Math.abs(r(tpOf(lvl)) - r(entry)) - commUnit) / (risk + commUnit);
     // Cibles = liquidité opposée non prise, au-delà d'1R net
     const targets = liquidity
       .filter(l => !l.swept && (long ? l.side === 'buy' && l.price > entry : l.side === 'sell' && l.price < entry) && rrNet(l.price) >= 1)

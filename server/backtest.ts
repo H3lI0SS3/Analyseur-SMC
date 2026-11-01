@@ -20,6 +20,7 @@ export interface BtTrade {
   filledAt: number | null;
   exitAt: number | null;
   direction: 'acheter' | 'vendre';
+  entryType?: 'marché' | 'limite';
   entry: number;
   sl: number;
   tp1: number;
@@ -151,7 +152,9 @@ export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: nu
     // stop d'abord (hypothèse prudente si stop et objectif dans la même bougie)
     const slHit = long ? c.l <= sl : c.h >= sl - spread;
     if (slHit) {
-      pnl += remaining * (long ? sl - entry : entry - sl);
+      // gap au-delà du stop (réouverture, annonce) : sortie au prix d'ouverture, comme le suivi du journal
+      const exit = long ? Math.min(sl, c.o) : Math.max(sl, c.o + spread);
+      pnl += remaining * (long ? exit - entry : entry - exit);
       const outcome = tp1Done ? ('gagné' as const) : Math.abs(sl - entry) < 1e-12 ? ('break-even' as const) : ('perdu' as const);
       return { filledAt, exitAt: c.t, pnl, outcome, risk };
     }
@@ -334,6 +337,7 @@ export class BacktestRun {
           filledAt: sim.filledAt,
           exitAt: sim.exitAt,
           direction: setup.direction,
+          entryType: setup.entryType,
           entry: setup.entry,
           sl: setup.sl,
           tp1: setup.tp1,

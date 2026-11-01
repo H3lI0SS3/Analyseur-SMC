@@ -147,6 +147,9 @@ ok('Samedi : marché fermé, signal = attendre', saturday.signal === 'attendre' 
   ok('IA : objectif hors liquidité refusé', offTarget.plan?.tp1 === 1.1059);
   const wider = reconcile(eng, ai({ entree: 1.1, stop_loss: 1.0985, tp1: 1.1059, tp2: 1.1079 }), 5, costs);
   ok('IA : stop plus large et objectifs sur liquidité acceptés', wider.plan?.sl === 1.0985 && wider.plan?.origin === 'ajusté par l’IA');
+  const moved = reconcile(eng, ai({ entree: 1.1003, stop_loss: 1.0985, tp1: 1.1059, tp2: 1.1079 }), 5, costs);
+  ok('IA : entrée déplacée hors de la zone refusée', moved.plan?.entry === 1.1 && moved.plan?.origin === 'moteur');
+  ok('IA : R:R recalculé sur les niveaux ajustés', !!wider.plan && Math.abs(wider.plan.rr1 - (Math.abs(wider.plan.tp1 - wider.plan.entry) - 7 / 100_000) / (Math.abs(wider.plan.entry - wider.plan.sl) + 7 / 100_000)) < 0.01);
   const rejected = reconcile(eng, { ...ai({ entree: null, stop_loss: null, tp1: null, tp2: null }), verdict: 'REJETÉ', signal: 'attendre' }, 5, costs);
   ok('IA : un rejet transforme le signal en attendre', rejected.signal === 'attendre');
   const forced = reconcile({ ...eng, signal: 'attendre' }, ai({ entree: 1.1, stop_loss: 1.099, tp1: 1.1059, tp2: null }), 5, costs);
