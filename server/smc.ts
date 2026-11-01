@@ -3,7 +3,7 @@
 
 import { TF_MS, type Candle, type Timeframe } from './marketData';
 import { HOUR, marketClosed, maDateTime, maTime, nyParts, nyToUtc, tradingDayStart, tradingWeekStart } from './time';
-import { findBreakers, findTrendlines, oteZone, zoneFromDisplacement, type OteZone, type TrendlineLiquidity } from './ictConcepts';
+import { findBreakers, findInversionFVGs, findTrendlines, oteZone, zoneFromDisplacement, type OteZone, type TrendlineLiquidity } from './ictConcepts';
 import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 
 // ---------------- Version des règles ----------------
@@ -36,7 +36,7 @@ export interface StructureEvent {
 export interface Zone {
   id: string;
   tf: Timeframe;
-  kind: 'FVG' | 'OB' | 'Breaker';
+  kind: 'FVG' | 'OB' | 'Breaker' | 'IFVG';
   dir: Dir;
   top: number;
   bottom: number;
@@ -114,7 +114,8 @@ export interface EngineResult {
   setup: Setup | null;
   alternatives: Setup[];
   checklist: CheckItem[];
-  score: number; // 0-100, score de confluence (pas une probabilité)
+  score: number; // 0-100, score de qualité de la grille SMC (pas une probabilité)
+  grade: 'A+' | 'B' | 'C';
   signal: 'acheter' | 'vendre' | 'attendre';
   waitCondition: string | null;
   nextNews: { t: number; currency: string; title: string } | null;
@@ -616,6 +617,8 @@ export function summarize(tf: Timeframe, c: Candle[]): { summary: TfSummary; swi
   };
 }
 
+const ZONE_NAMES: Record<Zone['kind'], string> = { FVG: 'Fair Value Gap', OB: 'Order Block', Breaker: 'Breaker Block', IFVG: 'Inversion FVG' };
+
 // ---------------- Moteur principal ----------------
 export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, opts: AnalyzeOptions = {}): EngineResult {
   const r = (x: number) => Number(x.toFixed(decimals));
@@ -698,6 +701,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     ...findOrderBlocks(m15, 'M15', raw.M15.events, raw.M15.swings, atrM15),
     ...findBreakers(h1, 'H1', raw.H1.events, raw.H1.swings, atrH1),
     ...findBreakers(m15, 'M15', raw.M15.events, raw.M15.swings, atrM15),
+    ...findInversionFVGs(h1, 'H1', atrH1),
+    ...findInversionFVGs(m15, 'M15', atrM15, 96),
   ]
     .filter(z => Math.abs((z.top + z.bottom) / 2 - price) <= 4 * atrH1)
     .map(z => ({ ...z, top: r(z.top), bottom: r(z.bottom) }));
@@ -748,7 +753,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       rr1: Number(rr1.toFixed(2)),
       rr2: rr2 ? Number(rr2.toFixed(2)) : null,
       zoneId: z.id,
-      zoneLabel: `${z.kind === 'FVG' ? 'Fair Value Gap' : z.kind === 'OB' ? 'Order Block' : 'Breaker Block'} ${z.dir === 'bull' ? 'haussier' : 'baissier'} ${z.tf} (${r(z.bottom)} – ${r(z.top)})`,
+      zoneLabel: `${ZONE_NAMES[z.kind]} ${z.dir === 'bull' ? 'haussier' : 'baissier'} ${z.tf} (${r(z.bottom)} – ${r(z.top)})`,
     };
   };
 
@@ -814,9 +819,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     },
     {
       key: 'zone',
-      label: 'Zone d\'entrée (FVG/OB/Breaker) dans le sens du biais',
+      label: 'Zone d\'entrée (OB/FVG/IFVG/Breaker) dans le sens du biais',
       ok: !!setup,
-      detail: setup ? setup.zoneLabel : 'Aucun FVG/OB/Breaker valide dans le sens du biais près du prix.',
+      detail: setup ? setup.zoneLabel : 'Aucune zone valide (OB/FVG/IFVG/Breaker) dans le sens du biais près du prix.',
       core: true,
     },
     {
@@ -913,13 +918,28 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   ];
 
   const coreOk = checklist.filter(c => c.core).every(c => c.ok);
-  const okCount = checklist.filter(c => c.ok).length;
-  const score = Math.round((okCount / checklist.length) * 100);
+  // Score de qualité (grille de la base de connaissance, §6) : mesure de confluence, pas une probabilité
+  const ok = (k: string) => !!checklist.find(c => c.key === k)?.ok;
+  const score = !setup
+    ? 0
+    : (bias !== 'neutre' ? (d1 === h4 ? 20 : 10) : 0) +
+      (ok('sweep') ? 20 : 0) +
+      (setupZone && !setupZone.touched ? 10 : 0) +
+      (ok('displacement') ? 5 : 0) +
+      (ok('ote') ? 10 : 0) +
+      (ok('session') ? 10 : 0) +
+      (ok('pd') ? 10 : 0) +
+      (ok('ltf') ? 5 : 0) +
+      (ok('candle') ? 5 : 0) +
+      (ok('amd') ? 5 : 0);
+  const grade: EngineResult['grade'] = score >= 80 ? 'A+' : score >= 60 ? 'B' : 'C';
   let signal: EngineResult['signal'] = 'attendre';
   let waitCondition: string | null = null;
   // conditions obligatoires toutes remplies + au moins 3 confluences sur 8
   const optionalOk = checklist.filter(c => !c.core && c.ok).length;
-  if (coreOk && optionalOk >= MIN_CONFLUENCES && setup) {
+  if (coreOk && optionalOk >= MIN_CONFLUENCES && setup && grade === 'C') {
+    waitCondition = `Conditions réunies mais qualité C (${score}/100) : pas de trade sous 60.`;
+  } else if (coreOk && optionalOk >= MIN_CONFLUENCES && setup) {
     signal = setup.direction;
     // au marché : seulement si la structure M15 confirme déjà le sens du trade
     if (setup.entryType === 'marché' && !ltfOk) {
@@ -957,6 +977,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     alternatives,
     checklist,
     score,
+    grade,
     signal,
     waitCondition,
     nextNews,

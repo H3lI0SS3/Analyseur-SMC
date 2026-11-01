@@ -122,3 +122,6 @@ export async function api(url: string, init: RequestInit = {}): Promise<Response
 }
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
+
+/** Risque à appliquer selon la classe du setup : classe B = risque divisé par deux (grille SMC). */
+export const riskForGrade = (riskPct: number, grade?: 'A+' | 'B' | 'C') => (grade === 'B' ? riskPct / 2 : riskPct);

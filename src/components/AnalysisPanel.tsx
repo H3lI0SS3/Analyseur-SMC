@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResponse, RiskSettings, Status, Timeframe } from '../types';
-import { api, costsFor, cx, distanceLabel, fmt, localDateTime, localTime, lotSize, realRiskUsd } from '../lib/utils';
+import { api, costsFor, cx, distanceLabel, fmt, localDateTime, localTime, lotSize, realRiskUsd, riskForGrade } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 
 interface Props {
@@ -155,13 +155,14 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
   const go = final.signal !== 'attendre';
   const okCount = e.checklist.filter(c => c.ok).length;
   const comm = a.costs?.commissionPerLot ?? 0;
-  const lots = plan ? lotSize(a.pair, settings.capital, settings.riskPct, plan.entry, plan.sl, comm) : null;
-  const riskUsd = plan && lots ? realRiskUsd(a.pair, lots, plan.entry, plan.sl, comm) : (settings.capital * settings.riskPct) / 100;
+  const riskPct = riskForGrade(settings.riskPct, e.grade);
+  const lots = plan ? lotSize(a.pair, settings.capital, riskPct, plan.entry, plan.sl, comm) : null;
+  const riskUsd = plan && lots ? realRiskUsd(a.pair, lots, plan.entry, plan.sl, comm) : (settings.capital * riskPct) / 100;
   const tfs: Timeframe[] = ['D1', 'H4', 'H1', 'M15'];
 
   return (
     <div className="space-y-3">
-      {a.verdict && <VerdictCard v={a.verdict} stats={stats} />}
+      {a.verdict && <VerdictCard v={a.verdict} stats={stats} score={e.setup ? e.score : null} grade={e.setup ? e.grade : undefined} />}
 
       {/* Verdict */}
       <section
@@ -245,7 +246,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
           </div>
           <div className="mt-3 rounded-lg bg-card2 px-3 py-2 text-xs">
             <div className="flex justify-between">
-              <span className="text-mute">Taille pour {settings.riskPct} % de risque</span>
+              <span className="text-mute">Taille pour {riskPct} % de risque{e.grade === 'B' ? ' (classe B : risque divisé par 2)' : ''}</span>
               <span className="num font-semibold">{lots === null ? '—' : `${lots.toFixed(2)} lot`}</span>
             </div>
             <div className="mt-1 flex justify-between">
@@ -414,7 +415,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
   );
 }
 
-function VerdictCard({ v, stats }: { v: NonNullable<AnalysisResponse['verdict']>; stats: StrategyStats }) {
+function VerdictCard({ v, stats, score, grade }: { v: NonNullable<AnalysisResponse['verdict']>; stats: StrategyStats; score: number | null; grade?: 'A+' | 'B' | 'C' }) {
   const take = v.action !== 'ATTENDRE';
   const pct = stats.viability;
   const ok = pct !== null && pct >= v.threshold;
@@ -425,6 +426,14 @@ function VerdictCard({ v, stats }: { v: NonNullable<AnalysisResponse['verdict']>
         {v.action}
       </div>
       <p className="mt-2 text-sm leading-snug">{v.summary}</p>
+      {score !== null && grade && (
+        <div className="mt-3 flex items-center justify-between rounded-lg bg-card2 px-3 py-2">
+          <span className="text-xs text-mute">Qualité du setup (grille SMC, pas une probabilité)</span>
+          <span className={cx('num text-sm font-bold', grade === 'A+' ? 'text-up' : grade === 'B' ? 'text-warn' : 'text-down')}>
+            {grade} · {score}/100
+          </span>
+        </div>
+      )}
       <div className="mt-3 rounded-lg bg-card2 px-3 py-2">
         <div className="flex items-end justify-between">
           <span className="text-xs text-mute">Viabilité (indice de confiance, tes trades suivis)</span>

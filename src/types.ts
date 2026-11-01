@@ -65,7 +65,7 @@ export interface TfSummary {
 export interface Zone {
   id: string;
   tf: Timeframe;
-  kind: 'FVG' | 'OB' | 'Breaker';
+  kind: 'FVG' | 'OB' | 'Breaker' | 'IFVG';
   dir: 'bull' | 'bear';
   top: number;
   bottom: number;
@@ -184,6 +184,7 @@ export interface EngineResult {
   alternatives: Setup[];
   checklist: CheckItem[];
   score: number;
+  grade?: 'A+' | 'B' | 'C';
   signal: Signal;
   waitCondition: string | null;
   nextNews: { t: number; currency: string; title: string } | null;

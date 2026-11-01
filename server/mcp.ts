@@ -129,6 +129,7 @@ function buildServer() {
           decision: a.final.signal,
           condition_attente: a.final.signal === 'attendre' ? e.waitCondition : null,
           score_confluence: `${e.checklist.filter(c => c.ok).length}/${e.checklist.length}`,
+          score_qualite: `${e.score}/100 (classe ${e.grade})`,
           plan: p
             ? {
                 ...p,

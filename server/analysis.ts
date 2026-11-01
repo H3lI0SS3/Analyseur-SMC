@@ -309,7 +309,7 @@ function buildVerdict(
   const take = final.signal !== 'attendre' && !!plan;
   const long = plan?.direction === 'acheter';
   const summary = take
-    ? `${long ? 'Achat' : 'Vente'} : toutes les conditions obligatoires de ta stratégie sont réunies (${engine.checklist.filter(c => c.ok).length}/${engine.checklist.length} critères). Ordre ${plan!.entryType === 'limite' ? 'limite' : 'au marché'} à ${plan!.entry}, stop ${plan!.sl}, TP1 ${plan!.tp1}${plan!.tp2 ? `, TP2 ${plan!.tp2}` : ''}.`
+    ? `${long ? 'Achat' : 'Vente'} : toutes les conditions obligatoires de ta stratégie sont réunies (${engine.checklist.filter(c => c.ok).length}/${engine.checklist.length} critères, qualité ${engine.grade} ${engine.score}/100${engine.grade === 'B' ? ', risque divisé par 2' : ''}). Ordre ${plan!.entryType === 'limite' ? 'limite' : 'au marché'} à ${plan!.entry}, stop ${plan!.sl}, TP1 ${plan!.tp1}${plan!.tp2 ? `, TP2 ${plan!.tp2}` : ''}.`
     : `On attend : ${final.notes[0] || engine.waitCondition || 'les conditions de ta stratégie ne sont pas réunies.'}`;
   const action: Verdict['action'] = !take ? 'ATTENDRE' : long ? 'ACHETER' : 'VENDRE';
   return { action, threshold: VIABILITY_THRESHOLD, summary, pour, contre };

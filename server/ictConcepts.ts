@@ -164,3 +164,52 @@ export function findBreakers(c: Candle[], tf: Timeframe, events: StructureEvent[
   return out.filter((z, i, arr) => arr.findIndex(o => o.id === z.id) === i);
 }
 
+
+/**
+ * Inversion FVG (IFVG) : un FVG traversé par une clôture change de polarité.
+ * FVG haussier cassé (clôture sous sa borne basse) = zone de vente au retest, et inversement.
+ */
+export function findInversionFVGs(c: Candle[], tf: Timeframe, atrVal: number, lookback = 120): Zone[] {
+  const out: Zone[] = [];
+  const start = Math.max(2, c.length - lookback);
+  for (let i = start; i < c.length; i++) {
+    const a = c[i - 2];
+    const b = c[i];
+    let dir: Dir | null = null;
+    let top = 0;
+    let bottom = 0;
+    if (b.l > a.h && b.l - a.h >= 0.15 * atrVal) {
+      dir = 'bull';
+      top = b.l;
+      bottom = a.h;
+    } else if (b.h < a.l && a.l - b.h >= 0.15 * atrVal) {
+      dir = 'bear';
+      top = a.l;
+      bottom = b.h;
+    }
+    if (!dir) continue;
+    // cassure par une clôture au-delà de la borne opposée
+    let brokeAt = -1;
+    for (let j = i + 1; j < c.length; j++) {
+      if (dir === 'bull' ? c[j].c < bottom : c[j].c > top) {
+        brokeAt = j;
+        break;
+      }
+    }
+    if (brokeAt < 0) continue;
+    const inv: Dir = dir === 'bull' ? 'bear' : 'bull';
+    const z: Zone = { id: `${tf}-IFVG-${c[i - 1].t}`, tf, kind: 'IFVG', dir: inv, top, bottom, t: c[i - 1].t, touched: false };
+    let valid = true;
+    for (let j = brokeAt + 1; j < c.length && valid; j++) {
+      if (inv === 'bear') {
+        if (c[j].c > top) valid = false;
+        else if (c[j].h >= bottom) z.touched = true;
+      } else {
+        if (c[j].c < bottom) valid = false;
+        else if (c[j].l <= top) z.touched = true;
+      }
+    }
+    if (valid) out.push(z);
+  }
+  return out;
+}

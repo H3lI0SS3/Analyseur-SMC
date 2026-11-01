@@ -1,5 +1,5 @@
 // Tests des concepts ICT : npx tsx server/ictConcepts.test.ts
-import { findBreakers, findTrendlines, isDisplacement, oteZone } from './ictConcepts';
+import { findBreakers, findInversionFVGs, findTrendlines, isDisplacement, oteZone } from './ictConcepts';
 import { findSwings, scanStructure } from './smc';
 import type { Candle } from './marketData';
 
@@ -63,6 +63,20 @@ const rst = scanStructure(rc, rsw, 2);
 {
   const brk = findBreakers(rc, 'M15', rst.events, rsw, 0.003);
   ok('Breaker baissier détecté après la cassure de l’OB haussier', brk.some(z => z.kind === 'Breaker' && z.dir === 'bear'), JSON.stringify(brk.map(z => [z.dir, z.bottom, z.top])));
+}
+
+// IFVG : FVG haussier (gap 1.1010-1.1020) traversé par une clôture sous 1.1010 = zone de vente
+{
+  const cs: Candle[] = [];
+  for (let i = 0; i < 10; i++) cs.push({ t: i * M, o: 1.1, h: 1.1005, l: 1.0995, c: 1.1 });
+  cs.push({ t: 10 * M, o: 1.1, h: 1.101, l: 1.0998, c: 1.1008 });
+  cs.push({ t: 11 * M, o: 1.1008, h: 1.1035, l: 1.1006, c: 1.1032 });
+  cs.push({ t: 12 * M, o: 1.1032, h: 1.104, l: 1.102, c: 1.1035 });
+  for (let i = 13; i < 18; i++) cs.push({ t: i * M, o: 1.103, h: 1.1032, l: 1.1012, c: 1.1015 });
+  cs.push({ t: 18 * M, o: 1.1015, h: 1.1016, l: 1.0995, c: 1.0998 });
+  cs.push({ t: 19 * M, o: 1.0998, h: 1.1002, l: 1.099, c: 1.0995 });
+  const z = findInversionFVGs(cs, 'M15', 0.002);
+  ok('FVG haussier cassé par une clôture = IFVG baissier', z.some(x => x.kind === 'IFVG' && x.dir === 'bear' && Math.abs(x.bottom - 1.101) < 1e-9 && Math.abs(x.top - 1.102) < 1e-9), JSON.stringify(z));
 }
 
 if (failed) {

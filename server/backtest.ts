@@ -377,6 +377,7 @@ export class BacktestRun {
       zoneTf,
       touched: !!eng.zones.find(z => z.id === s.zoneId)?.touched,
       optionalOk: eng.checklist.filter(c => !c.core && c.ok).length,
+      score: eng.score,
       sweep: ok('sweep'),
       amd: ok('amd'),
       pd: ok('pd'),
@@ -565,6 +566,7 @@ interface Candidate {
   zoneTf: string;
   touched: boolean;
   optionalOk: number;
+  score: number;
   sweep: boolean;
   amd: boolean;
   pd: boolean;
@@ -600,7 +602,8 @@ export interface LabResult {
 }
 
 // La règle de base reproduit exactement le signal actuel du moteur (« sweep en bonus »).
-const marketRule = (c: Candidate) => !(c.entryType === 'marché' && !c.ltf);
+// règles communes du moteur : entrée au marché seulement si M15 confirme ; jamais en qualité C (< 60)
+const marketRule = (c: Candidate) => !(c.entryType === 'marché' && !c.ltf) && c.score >= 60;
 const base = (c: Candidate) => c.optionalOk >= MIN_CONFLUENCES && marketRule(c);
 
 /** Liste FIGÉE à l'avance : on ne l'ajuste pas après avoir vu les résultats. */

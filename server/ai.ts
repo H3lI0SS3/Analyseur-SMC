@@ -1,3 +1,4 @@
+import { KNOWLEDGE_BASE } from './knowledge';
 // Couche IA : l'IA INTERPRÈTE les calculs du moteur, elle ne fournit pas les données.
 // Elle peut rejeter un plan ou affiner les niveaux, jamais inventer des prix ni forcer un trade.
 
@@ -47,14 +48,7 @@ Règles absolues :
 - Sois concret, court et en français simple. Pas de jargon gratuit, pas de promesses : aucune probabilité de gain.
 - Les "niveaux" que tu renvoies : reprends ceux du plan du moteur, ou propose un ajustement en t'appuyant sur une zone/liquidité fournie. Mets null si aucun trade.
 
-Base de connaissance de l'application (à appliquer en lisant les données et la capture) :
-- Structure : BOS = cassure dans le sens de la tendance ; CHoCH = première cassure contre la tendance (changement de caractère).
-- Displacement : bougies impulsives à grand corps qui cassent la structure et laissent un FVG ; une zone née d'un displacement est plus fiable.
-- OTE (Optimal Trade Entry) : retracement de 62 à 79 % de la jambe qui a cassé la structure ; l'entrée idéale est un FVG/OB situé dans l'OTE.
-- Order Block : dernière bougie opposée avant l'impulse. Breaker Block : order block cassé suivi d'un CHoCH ; l'ancien support devient résistance (et inversement), on le joue au retest.
-- Liquidité : stops au-delà des plus hauts/bas égaux, de la veille, de la semaine, du range asiatique et des trendlines de 3 touches (liquidité de trendline). Le prix va chercher cette liquidité : elle sert de cible, et son balayage (sweep) précède souvent le retournement.
-- Cycle AMD : accumulation (range asiatique), manipulation (balayage d'un côté), distribution (mouvement opposé confirmé par une cassure M15).
-- Bougies japonaises (ebook « Anticiper les marchés avec les bougies japonaises ») : figures de retournement valables seulement après un mouvement et idéalement dans la zone d'entrée — avalement, harami et harami en croix (doji, plus fort), structure pénétrante / couverture en nuage noir (clôture au-delà de la moitié du corps précédent), étoile du matin / du soir, bébé abandonné (bougie centrale isolée par deux gaps). Une figure contre le plan est un signal d'alerte. En forex intraday il n'y a pas de gap entre bougies : les figures à gap ne s'appliquent qu'à la réouverture.`;
+${KNOWLEDGE_BASE}`;
 
 const FIELDS_DESC = {
   verdict: 'VALIDÉ si le plan est exploitable tel quel, sinon REJETÉ',
@@ -85,6 +79,7 @@ function buildUserText(pair: string, eng: EngineResult, candlesH1: string, candl
     checklist: eng.checklist.map(c => ({ condition: c.label, ok: c.ok, detail: c.detail, obligatoire: c.core })),
     cycle_amd: eng.amd,
     concepts_ict: { displacement: eng.ict.displacement, ote: eng.ict.ote, trendlines: eng.ict.trendlines, bougies_japonaises: eng.ict.candlePatterns },
+    score_qualite: { score: eng.score, classe: eng.grade },
     signal_moteur: eng.signal,
     condition_attente_moteur: eng.waitCondition,
   };
