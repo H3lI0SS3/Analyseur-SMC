@@ -85,7 +85,7 @@ export function todayLossPct(journal: JournalEntry[]): number {
   return journal
     .filter(j => j.createdAt >= start.getTime())
     .reduce((s, j) => {
-      if (j.result === 'en_cours') return s + j.riskPct;
+      if (j.result === 'en_cours' || j.result === 'attente') return s + j.riskPct;
       if (j.rMultiple !== null && j.rMultiple < 0) return s + Math.abs(j.rMultiple) * j.riskPct;
       return s;
     }, 0);

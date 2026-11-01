@@ -7,8 +7,8 @@ import { HOUR, marketClosed, maDateTime, maTime, nyParts, nyToUtc, tradingDaySta
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.2';
-export const RULES_FROZEN_AT = Date.UTC(2026, 9, 31, 3, 0); // 31/10/2026 03:00 UTC
+export const RULES_VERSION = '3.3';
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 1, 12, 0); // 01/11/2026 12:00 UTC (3.3 : invalidation du cycle AMD)
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -520,6 +520,20 @@ export function amdPhase(m15: Candle[], m15Events: StructureEvent[], now: number
   const manipT = (tHigh ?? tLow)!;
   const direction = highSwept ? 'baissière' : 'haussière';
   const dist = m15Events.find(e => e.t > manipT && e.dir === (highSwept ? 'bear' : 'bull'));
+  // Cycle invalidé : après le balayage, le prix a clôturé au-delà de l'extrême de la manipulation
+  // (ex. bas asiatique balayé puis clôture sous le plus bas du balayage : la hausse attendue a échoué)
+  const manipCandles = after.filter(c => c.t >= manipT && c.t < manipT + 2 * HOUR);
+  const manipExtreme = highSwept ? Math.max(...manipCandles.map(c => c.h)) : Math.min(...manipCandles.map(c => c.l));
+  const lastClosed = [...after].reverse().find(c => c.t < now);
+  if (lastClosed && lastClosed.t >= manipT + 2 * HOUR && (highSwept ? lastClosed.c > manipExtreme : lastClosed.c < manipExtreme)) {
+    return {
+      phase: 'Indéterminée',
+      direction: null,
+      detail: `${highSwept ? 'Haut' : 'Bas'} asiatique balayé à ${maTime(manipT)}, puis clôture ${highSwept ? 'au-dessus du plus haut' : 'sous le plus bas'} du balayage (${r(manipExtreme)}) : cycle AMD invalidé.`,
+      asiaHigh: r(hi),
+      asiaLow: r(lo),
+    };
+  }
   if (dist) {
     return {
       phase: 'Distribution',

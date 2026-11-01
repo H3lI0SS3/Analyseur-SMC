@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { AnalysisResponse, RiskSettings, Status, Timeframe } from '../types';
 import { api, costsFor, cx, distanceLabel, fmt, localDateTime, localTime, lotSize, realRiskUsd } from '../lib/utils';
+import type { StrategyStats } from '../lib/tracker';
 
 interface Props {
   pair: string;
@@ -21,6 +22,7 @@ interface Props {
   setAnalysis: (a: AnalysisResponse | null) => void;
   onAddJournal: (a: AnalysisResponse) => void;
   dailyBlocked: boolean;
+  stats: StrategyStats;
 }
 
 async function downscale(file: File): Promise<{ base64: string; mediaType: string; preview: string }> {
@@ -44,7 +46,7 @@ async function downscale(file: File): Promise<{ base64: string; mediaType: strin
 
 const trendCls = (t: string) => (t === 'haussier' ? 'text-up' : t === 'baissier' ? 'text-down' : 'text-mute');
 
-export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, onAddJournal, dailyBlocked }: Props) {
+export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, onAddJournal, dailyBlocked, stats }: Props) {
   const [note, setNote] = useState('');
   const [image, setImage] = useState<{ base64: string; mediaType: string; preview: string } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -139,12 +141,12 @@ export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, o
         {error && <p className="rounded-lg bg-down/10 px-3 py-2 text-xs text-down">{error}</p>}
       </section>
 
-      {a && <Result a={a} settings={settings} added={added} dailyBlocked={dailyBlocked} onAdd={() => { onAddJournal(a); setAdded(true); }} />}
+      {a && <Result a={a} settings={settings} stats={stats} added={added} dailyBlocked={dailyBlocked} onAdd={() => { onAddJournal(a); setAdded(true); }} />}
     </div>
   );
 }
 
-function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisResponse; settings: RiskSettings; added: boolean; onAdd: () => void; dailyBlocked: boolean }) {
+function Result({ a, settings, stats, added, onAdd, dailyBlocked }: { a: AnalysisResponse; settings: RiskSettings; stats: StrategyStats; added: boolean; onAdd: () => void; dailyBlocked: boolean }) {
   const { engine: e, final, ai } = a;
   const dec = a.decimals;
   const plan = final.plan;
@@ -157,7 +159,7 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
 
   return (
     <div className="space-y-3">
-      {a.verdict && <VerdictCard v={a.verdict} />}
+      {a.verdict && <VerdictCard v={a.verdict} stats={stats} />}
 
       {/* Verdict */}
       <section
@@ -253,7 +255,6 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
             </div>
             {lots === 0 && <p className="mt-1 text-warn">Stop trop large pour ton capital : taille inférieure à 0,01 lot.</p>}
           </div>
-          {a.history && <HistoryBox h={a.history} />}
           {e.setup && <p className="mt-2 text-[11px] text-mute">Zone : {e.setup.zoneLabel}</p>}
           {e.setup?.validUntil && plan.entryType === 'limite' && (
             <p className="mt-1 text-[11px] text-mute">Ordre limite à annuler s’il n’est pas exécuté avant {localTime(e.setup.validUntil)}.</p>
@@ -268,7 +269,7 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-gold py-2.5 text-sm font-semibold text-gold disabled:opacity-50"
             >
               {added ? <Check className="h-4 w-4" /> : <BookPlus className="h-4 w-4" />}
-              {added ? 'Ajouté au journal' : dailyBlocked ? 'Limite de perte du jour atteinte' : 'Je prends ce trade → journal'}
+              {added ? 'Trade suivi automatiquement (Journal)' : dailyBlocked ? 'Limite de perte du jour atteinte' : 'Je prends ce trade → suivi automatique'}
             </button>
           )}
         </section>
@@ -403,27 +404,43 @@ function Result({ a, settings, added, onAdd, dailyBlocked }: { a: AnalysisRespon
   );
 }
 
-function VerdictCard({ v }: { v: NonNullable<AnalysisResponse['verdict']> }) {
+function VerdictCard({ v, stats }: { v: NonNullable<AnalysisResponse['verdict']>; stats: StrategyStats }) {
   const take = v.action !== 'ATTENDRE';
-  const pct = v.viability;
+  const pct = stats.viability;
+  const ok = pct !== null && pct >= v.threshold;
   return (
     <section className={cx('card border-2 p-4', v.action === 'ACHETER' ? 'border-up' : v.action === 'VENDRE' ? 'border-down' : 'border-warn/60')}>
-      <div className="label">Verdict</div>
+      <div className="label">Verdict de ta stratégie</div>
       <div className={cx('mt-1 text-3xl font-extrabold tracking-tight', v.action === 'ACHETER' ? 'text-up' : v.action === 'VENDRE' ? 'text-down' : 'text-warn')}>
         {v.action}
       </div>
-      <div className="mt-3">
-        <div className="flex items-end justify-between">
-          <span className="text-xs text-mute">Viabilité (rentabilité prouvée sur 2 ans)</span>
-          <span className={cx('num text-2xl font-bold', pct !== null && pct >= v.threshold ? 'text-up' : 'text-ink')}>{pct === null ? '—' : `${pct} %`}</span>
-        </div>
-        <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-full bg-card2">
-          <div className={cx('h-full', pct !== null && pct >= v.threshold ? 'bg-up' : 'bg-warn')} style={{ width: `${pct ?? 0}%` }} />
-          <div className="absolute inset-y-0 w-0.5 bg-ink" style={{ left: `${v.threshold}%` }} />
-        </div>
-        <div className="mt-0.5 text-right text-[10px] text-mute">seuil {v.threshold} %</div>
-      </div>
       <p className="mt-2 text-sm leading-snug">{v.summary}</p>
+      <div className="mt-3 rounded-lg bg-card2 px-3 py-2">
+        <div className="flex items-end justify-between">
+          <span className="text-xs text-mute">Viabilité (tes trades suivis)</span>
+          <span className={cx('num text-2xl font-bold', ok ? 'text-up' : 'text-ink')}>{pct === null ? '—' : `${pct} %`}</span>
+        </div>
+        {pct === null ? (
+          <>
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-bg">
+              <div className="h-full bg-gold" style={{ width: `${Math.min(100, (stats.closed / stats.minTrades) * 100)}%` }} />
+            </div>
+            <p className="mt-1 text-[11px] text-mute">
+              {stats.closed}/{stats.minTrades} trades clôturés : la viabilité s’affichera à partir de {stats.minTrades} trades suivis.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-full bg-bg">
+              <div className={cx('h-full', ok ? 'bg-up' : 'bg-warn')} style={{ width: `${pct}%` }} />
+              <div className="absolute inset-y-0 w-0.5 bg-ink" style={{ left: `${v.threshold}%` }} />
+            </div>
+            <p className="mt-1 text-[11px] text-mute">
+              Sur {stats.closed} trades : {stats.winRate} % gagnants, {stats.avgR !== null && stats.avgR >= 0 ? '+' : ''}{stats.avgR} R en moyenne. Ton seuil : {v.threshold} %.
+            </p>
+          </>
+        )}
+      </div>
       {v.pour.length > 0 && (
         <details className="mt-3 rounded-lg bg-card2 px-3 py-2" open={take}>
           <summary className="cursor-pointer text-xs font-semibold text-up">Pour ({v.pour.length})</summary>
@@ -445,56 +462,9 @@ function VerdictCard({ v }: { v: NonNullable<AnalysisResponse['verdict']> }) {
         </details>
       )}
       <p className="mt-3 text-[10px] leading-snug text-mute">
-        La viabilité n’est pas la chance de gagner CE trade (25 à 40 % pour ce type de stratégie) : c’est la probabilité, mesurée sur les vrais résultats passés, que ce type de setup rapporte sur la durée. Outil d’aide à la décision, pas un conseil en investissement.
+        Le verdict vient uniquement des règles de ta stratégie. La viabilité est la probabilité, mesurée sur tes propres trades suivis par l’app, que la stratégie rapporte sur la durée : ce n’est pas la chance de gagner ce trade-là. Outil d’aide à la décision, pas un conseil en investissement.
       </p>
     </section>
-  );
-}
-
-function HistoryBox({ h }: { h: NonNullable<AnalysisResponse['history']> }) {
-  if (h.status !== 'disponible') {
-    return (
-      <div className="mt-3 rounded-lg border border-line px-3 py-2 text-[11px] text-mute">
-        <div className="mb-0.5 font-semibold text-ink">Résultat passé de ce type de setup</div>
-        {h.message}
-        {h.status === 'en préparation' && (
-          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-card2">
-            <div className="h-full bg-gold" style={{ width: `${h.progress}%` }} />
-          </div>
-        )}
-      </div>
-    );
-  }
-  const tone = h.verdict === 'favorable' ? 'border-up/60 text-up' : h.verdict === 'défavorable' ? 'border-down/60 text-down' : 'border-warn/60 text-warn';
-  const pos = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2)} R`;
-  return (
-    <div className={cx('mt-3 rounded-lg border px-3 py-2', tone.split(' ')[0])}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-ink">Résultat passé de ce type de setup</span>
-        <span className={cx('rounded px-1.5 py-0.5 text-[10px] font-bold', tone.split(' ')[1], 'bg-white/5')}>
-          {h.verdict === 'favorable' ? 'AVANTAGE PROUVÉ' : h.verdict === 'défavorable' ? 'HISTORIQUEMENT PERDANT' : 'AVANTAGE NON PROUVÉ'}
-        </span>
-      </div>
-      <div className="num mt-2 grid grid-cols-3 gap-1 text-center text-[11px]">
-        <div>
-          <div className="text-mute">Trades</div>
-          <div className="text-sm font-semibold">{h.trades}</div>
-        </div>
-        <div>
-          <div className="text-mute">Réussite</div>
-          <div className="text-sm font-semibold">{h.winRate} %</div>
-        </div>
-        <div>
-          <div className="text-mute">Moyenne</div>
-          <div className={cx('text-sm font-semibold', h.avgR > 0 ? 'text-up' : h.avgR < 0 ? 'text-down' : '')}>{pos(h.avgR)}</div>
-        </div>
-      </div>
-      <p className="mt-2 text-[11px] leading-snug text-ink/90">{h.message}</p>
-      <p className="mt-1 text-[10px] leading-snug text-mute">
-        Comparé à : {h.criteria}. Période {localDateTime(h.period.from)} → {localDateTime(h.period.to)}, bougies M15 réelles, coûts inclus
-        {h.fillRate !== null ? `, ordres limite exécutés ${h.fillRate} % du temps` : ''}.
-      </p>
-    </div>
   );
 }
 

@@ -2,9 +2,7 @@
 import { PAIRS, TIMEFRAMES, getSeries, type Timeframe, type Candle } from './marketData';
 import { getNews, NEWS_CURRENCIES } from './news';
 import { marketClosed, maTime } from './time';
-import { setupFeatures } from './backtest';
-import { advanceAll, historyForSignal } from './backtestJobs';
-import { analyze, type EngineResult } from './smc';
+import { analyze, RULES_VERSION, type EngineResult } from './smc';
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
 
 export const compact = (c: Candle[], n: number, dec: number) =>
@@ -222,12 +220,6 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
 
   const final = reconcile(engine, ai, info.decimals, costs);
 
-  // Résultat réel passé des setups similaires (backtest sur l'historique M15)
-  advanceAll(1500);
-  const history = futuresProxy ? null : historyForSignal(pair, setupFeatures(engine, now));
-  if (history && history.status === 'disponible' && history.verdict === 'défavorable' && final.signal !== 'attendre') {
-    final.notes.unshift(`Attention : ${history.message}`);
-  }
   if (blockers.length || marketIsClosed) {
     final.signal = 'attendre';
     final.plan = futuresProxy ? null : final.plan;
@@ -239,10 +231,11 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     engine.alternatives = [];
   }
   warnings.unshift(...blockers);
-  const verdict = buildVerdict(engine, final, history, ai, blockers);
+  const verdict = buildVerdict(engine, final, ai, blockers);
 
   return {
     verdict,
+    rulesVersion: RULES_VERSION,
     pair,
     label: info.label,
     decimals: info.decimals,
@@ -257,17 +250,15 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     ai,
     aiError,
     final,
-    history,
   };
 }
 
-// ---------- Verdict final : une action claire, un pourcentage, des justificatifs ----------
+// ---------- Verdict final : l'action à faire, tirée uniquement de ta stratégie ----------
+// La viabilité (%) n'est plus calculée ici : elle vient des trades réellement suivis dans le journal de l'app.
 export const VIABILITY_THRESHOLD = 85;
 
 export interface Verdict {
   action: 'ACHETER' | 'VENDRE' | 'ATTENDRE';
-  /** probabilité (0-100) que ce type de setup soit rentable sur la durée ; null si non calculable */
-  viability: number | null;
   threshold: number;
   summary: string;
   pour: string[];
@@ -277,7 +268,6 @@ export interface Verdict {
 function buildVerdict(
   engine: EngineResult,
   final: { signal: 'acheter' | 'vendre' | 'attendre'; plan: FinalPlan | null; notes: string[] },
-  history: ReturnType<typeof historyForSignal>,
   ai: AiReview | null,
   blockers: string[]
 ): Verdict {
@@ -288,38 +278,17 @@ function buildVerdict(
     else contre.push(`${c.label}${c.core ? ' (obligatoire)' : ''} — ${c.detail}`);
   }
   for (const b of blockers) contre.unshift(b);
-
-  let viability: number | null = null;
-  if (history && history.status === 'disponible') {
-    viability = history.viability;
-    const line = `Historique : ${history.trades} setups comparables (${history.criteria}), ${history.winRate} % gagnants, ${history.avgR >= 0 ? '+' : ''}${history.avgR} R en moyenne par trade.`;
-    if (viability !== null && viability >= VIABILITY_THRESHOLD) pour.unshift(line);
-    else contre.unshift(line);
-  } else if (history) {
-    contre.unshift(history.message);
-  } else if (engine.setup) {
-    contre.unshift('Historique des setups indisponible : viabilité non mesurable.');
-  }
   if (ai) {
     const l = `Relecture IA (${ai.engine}) : ${ai.verdict}. ${ai.resume}`;
     (ai.verdict === 'VALIDÉ' ? pour : contre).push(l);
   }
 
-  const direction = final.plan?.direction ?? null;
-  const signalOk = final.signal !== 'attendre' && !!final.plan;
-  const viable = viability !== null && viability >= VIABILITY_THRESHOLD;
-  const take = signalOk && viable;
-
-  let summary: string;
-  if (take) {
-    summary = `${direction === 'acheter' ? 'Achat' : 'Vente'} validé${direction === 'acheter' ? '' : 'e'} : toutes les conditions du moteur sont réunies et ce type de setup a ${viability} % de chances d’être rentable sur la durée (seuil ${VIABILITY_THRESHOLD} %).`;
-  } else if (!signalOk) {
-    summary = `On attend : ${final.notes.find(n => !n.startsWith('Attention')) || engine.waitCondition || 'les conditions du moteur ne sont pas réunies.'}`;
-  } else if (viability === null) {
-    summary = 'On attend : le setup est valide techniquement, mais sa rentabilité passée ne peut pas être mesurée.';
-  } else {
-    summary = `On attend : setup techniquement valide, mais sa viabilité est de ${viability} %, sous ton seuil de ${VIABILITY_THRESHOLD} %. Rien ne prouve que ce type de setup rapporte sur la durée.`;
-  }
-  const action: Verdict['action'] = !take ? 'ATTENDRE' : direction === 'acheter' ? 'ACHETER' : 'VENDRE';
-  return { action, viability, threshold: VIABILITY_THRESHOLD, summary, pour, contre };
+  const plan = final.plan;
+  const take = final.signal !== 'attendre' && !!plan;
+  const long = plan?.direction === 'acheter';
+  const summary = take
+    ? `${long ? 'Achat' : 'Vente'} : toutes les conditions obligatoires de ta stratégie sont réunies (${engine.checklist.filter(c => c.ok).length}/${engine.checklist.length} critères). Ordre ${plan!.entryType === 'limite' ? 'limite' : 'au marché'} à ${plan!.entry}, stop ${plan!.sl}, TP1 ${plan!.tp1}${plan!.tp2 ? `, TP2 ${plan!.tp2}` : ''}.`
+    : `On attend : ${final.notes[0] || engine.waitCondition || 'les conditions de ta stratégie ne sont pas réunies.'}`;
+  const action: Verdict['action'] = !take ? 'ATTENDRE' : long ? 'ACHETER' : 'VENDRE';
+  return { action, threshold: VIABILITY_THRESHOLD, summary, pour, contre };
 }

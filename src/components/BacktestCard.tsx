@@ -71,7 +71,7 @@ export function BacktestCard({ pair, settings }: Props) {
         </button>
       </div>
       <p className="text-[11px] leading-snug text-mute">
-        Rejoue le moteur toutes les 15 minutes sur les vraies bougies M15 (jusqu’à 2 ans), avec tes coûts, sans jamais voir le futur. Calcul de plusieurs minutes : garde cet écran ouvert, il fait avancer le calcul.
+        À titre d’information seulement : n’entre pas dans le verdict ni dans la viabilité (calculée sur tes trades suivis). Rejoue le moteur sur les vraies bougies M15 passées (jusqu’à 2 ans), avec tes coûts. Calcul de plusieurs minutes : garde cet écran ouvert.
       </p>
       {error && <p className="text-xs text-down">{error}</p>}
       {job.status === 'erreur' && <p className="text-xs text-down">Erreur : {job.error}</p>}

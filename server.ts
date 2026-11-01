@@ -3,7 +3,7 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
-import { PAIRS, TIMEFRAMES, getSeries, getQuotes, dataSourceName, type Timeframe } from './server/marketData';
+import { PAIRS, TIMEFRAMES, getSeries, getQuotes, dataSourceName, TF_MS, type Timeframe } from './server/marketData';
 import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './server/ai';
 import { runAnalysis, AnalysisError } from './server/analysis';
 import { mountMcp } from './server/mcp';
@@ -55,7 +55,10 @@ app.get('/api/candles', async (req, res) => {
   if (!TIMEFRAMES.includes(tf)) return res.status(400).json({ error: 'Unité de temps invalide.' });
   try {
     const s = await getSeries(pair, tf);
-    res.json({ pair, tf, candles: s.candles.slice(-150), source: s.source, futuresProxy: s.futuresProxy, fetchedAt: s.fetchedAt });
+    // ?since=<ms> : toutes les bougies depuis cette date (suivi automatique des trades du journal)
+    const since = Number(req.query.since);
+    const candles = Number.isFinite(since) && since > 0 ? s.candles.filter(c => c.t >= since - TF_MS[tf]).slice(-700) : s.candles.slice(-150);
+    res.json({ pair, tf, candles, source: s.source, futuresProxy: s.futuresProxy, fetchedAt: s.fetchedAt });
   } catch (err: any) {
     res.status(502).json({ error: `Données indisponibles : ${err.message}` });
   }

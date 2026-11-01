@@ -171,6 +171,15 @@ ok('Samedi : marché fermé, signal = attendre', saturday.signal === 'attendre' 
   ok('AMD : cassure baissière après le balayage = distribution', dist.phase === 'Distribution');
   const both = [...swept, { t: t1 + 900_000, o: 1.1, h: 1.1, l: 1.098, c: 1.099 }];
   ok('AMD : deux côtés balayés = indéterminé', amdPhase(both, [], t1 + 3_600_000, 5).phase === 'Indéterminée');
+  // bas jamais repris, mais haut balayé puis clôture au-dessus du plus haut du balayage 3 h plus tard
+  const later = [...swept];
+  for (let i = 1; i <= 12; i++) later.push({ t: t1 + i * 900_000, o: 1.1, h: 1.1004, l: 1.0992, c: 1.1002 });
+  later.push({ t: t1 + 13 * 900_000, o: 1.1002, h: 1.104, l: 1.1002, c: 1.1035 });
+  const bear = [{ kind: 'CHoCH' as const, dir: 'bear' as const, level: 1.0995, t: t1 + 3_600_000, idx: 0 }];
+  const inval = amdPhase(later, bear, t1 + 14 * 900_000, 5);
+  ok('AMD : clôture au-delà de l’extrême de la manipulation = cycle invalidé', inval.phase === 'Indéterminée' && inval.detail.includes('invalidé'), inval.detail);
+  const notYet = amdPhase(swept, bear, t1 + 4_000_000, 5);
+  ok('AMD : sans clôture au-delà, la distribution reste valide', notYet.phase === 'Distribution');
 }
 
 // ---------- Week-end : le cycle AMD décrit la séance de vendredi, pas une séance fantôme ----------

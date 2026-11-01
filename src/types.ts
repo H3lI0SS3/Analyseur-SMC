@@ -240,7 +240,6 @@ export type SignalHistory =
 
 export interface Verdict {
   action: 'ACHETER' | 'VENDRE' | 'ATTENDRE';
-  viability: number | null;
   threshold: number;
   summary: string;
   pour: string[];
@@ -248,6 +247,7 @@ export interface Verdict {
 }
 
 export interface AnalysisResponse {
+  rulesVersion?: string;
   verdict?: Verdict;
   history?: SignalHistory | null;
   pair: string;
@@ -279,7 +279,8 @@ export interface RiskSettings {
   commissionPerLot: number;
 }
 
-export type TradeResult = 'en_cours' | 'gagne' | 'perdu' | 'breakeven' | 'non_pris';
+/** attente = ordre limite pas encore exécuté ; expire = ordre limite jamais exécuté (annulé) */
+export type TradeResult = 'attente' | 'en_cours' | 'gagne' | 'perdu' | 'breakeven' | 'expire' | 'non_pris';
 
 export interface JournalEntry {
   id: string;
@@ -288,11 +289,24 @@ export interface JournalEntry {
   direction: 'acheter' | 'vendre';
   entry: number;
   sl: number;
-  tp: number;
+  tp: number; // objectif final (TP2 sinon TP1)
   rrPlanned: number;
   riskPct: number;
   lots: number | null;
   result: TradeResult;
-  rMultiple: number | null; // résultat réel en R (ex : +2, -1)
+  rMultiple: number | null; // résultat en R (ex : +2, -1)
   note: string;
+  // ---- suivi automatique (trades pris depuis l'analyse) ----
+  auto?: boolean; // true = l'app suit le trade sur les bougies M15 ; false dès que tu saisis le résultat toi-même
+  entryType?: 'limite' | 'marché';
+  tp1?: number;
+  tp2?: number | null;
+  validUntil?: number; // ordre limite annulé après cette heure s'il n'est pas exécuté
+  spread?: number;
+  commissionPerLot?: number;
+  contract?: number;
+  filledAt?: number | null;
+  tp1At?: number | null;
+  exitAt?: number | null;
+  rulesVersion?: string;
 }

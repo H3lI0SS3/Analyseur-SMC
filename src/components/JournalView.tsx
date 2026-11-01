@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { BookOpen, Download, Trash2 } from 'lucide-react';
+import { BookOpen, Download, Radar, Trash2 } from 'lucide-react';
 import type { JournalEntry, TradeResult } from '../types';
 import { cx, localDateTime } from '../lib/utils';
+import { isTracked, strategyStats } from '../lib/tracker';
 
 interface Props {
   journal: JournalEntry[];
@@ -17,7 +18,8 @@ const RESULTS: { key: TradeResult; label: string; cls: string }[] = [
 
 export function JournalView({ journal, setJournal }: Props) {
   const [confirmReset, setConfirmReset] = useState(false);
-  const closed = journal.filter(j => j.rMultiple !== null && j.result !== 'non_pris');
+  const st = strategyStats(journal);
+  const closed = journal.filter(j => j.rMultiple !== null && ['gagne', 'perdu', 'breakeven'].includes(j.result));
   const wins = closed.filter(j => (j.rMultiple as number) > 0).length;
   const totalR = closed.reduce((s, j) => s + (j.rMultiple as number), 0);
   const winRate = closed.length ? Math.round((wins / closed.length) * 100) : null;
@@ -28,7 +30,8 @@ export function JournalView({ journal, setJournal }: Props) {
   const setResult = (j: JournalEntry, r: TradeResult) => {
     // Valeur proposée, à corriger avec le R réel (sortie partielle, slippage…)
     const rMultiple = r === 'gagne' ? j.rrPlanned : r === 'perdu' ? -1 : r === 'breakeven' ? 0 : null;
-    update(j.id, { result: r, rMultiple });
+    // saisie manuelle : l'app arrête de suivre ce trade
+    update(j.id, { result: r, rMultiple, auto: j.auto === undefined ? undefined : false });
   };
 
   const exportCsv = () => {
@@ -55,6 +58,20 @@ export function JournalView({ journal, setJournal }: Props) {
           cls={totalR > 0 ? 'text-up' : totalR < 0 ? 'text-down' : ''}
         />
       </div>
+      <section className="card p-3">
+        <div className="label flex items-center gap-1.5">
+          <Radar className="h-3.5 w-3.5 text-gold" /> Suivi de ta stratégie
+        </div>
+        <p className="mt-1 text-[11px] leading-snug text-mute">
+          Chaque trade pris avec « Je prends ce trade » est suivi tout seul sur les vraies bougies M15 : exécution de l’ordre, TP1 (50 % encaissés, stop au point d’entrée), TP2 ou stop.
+          Résultats en R, spread et commission compris. Le suivi tourne quand l’app est ouverte et rattrape jusqu’à 7 jours d’absence.
+        </p>
+        <div className="num mt-2 grid grid-cols-3 gap-1 text-center text-[11px]">
+          <div><div className="text-mute">Suivis clos</div><div className="text-sm font-semibold">{st.closed}</div></div>
+          <div><div className="text-mute">Moyenne</div><div className={cx('text-sm font-semibold', (st.avgR ?? 0) > 0 ? 'text-up' : (st.avgR ?? 0) < 0 ? 'text-down' : '')}>{st.avgR === null ? '—' : `${st.avgR >= 0 ? '+' : ''}${st.avgR} R`}</div></div>
+          <div><div className="text-mute">Viabilité</div><div className="text-sm font-semibold">{st.viability === null ? `${st.closed}/${st.minTrades}` : `${st.viability} %`}</div></div>
+        </div>
+      </section>
       {expectancy !== null && (
         <p className="px-1 text-[11px] text-mute">
           Espérance : <span className={cx('num', expectancy >= 0 ? 'text-up' : 'text-down')}>{expectancy >= 0 ? '+' : ''}{expectancy.toFixed(2)} R</span> par trade.
@@ -100,6 +117,7 @@ export function JournalView({ journal, setJournal }: Props) {
                     <span className={j.direction === 'acheter' ? 'text-up' : 'text-down'}>{j.direction === 'acheter' ? 'Achat' : 'Vente'}</span> {j.pair}
                   </div>
                   <div className="text-[11px] text-mute">{localDateTime(j.createdAt)}</div>
+                  <TrackBadge j={j} />
                 </div>
                 <div className="flex items-center gap-2">
                   {j.rMultiple !== null && (
@@ -116,7 +134,7 @@ export function JournalView({ journal, setJournal }: Props) {
               <div className="num mt-2 grid grid-cols-3 gap-1 text-[11px]">
                 <span>E {j.entry}</span>
                 <span className="text-down">SL {j.sl}</span>
-                <span className="text-up">TP {j.tp}</span>
+                <span className="text-up">{j.tp1 !== undefined && j.tp2 ? `TP1 ${j.tp1} · TP2 ${j.tp2}` : `TP ${j.tp}`}</span>
               </div>
               <div className="mt-1 text-[11px] text-mute">
                 R:R prévu 1:{j.rrPlanned.toFixed(1)} · risque {j.riskPct} %{j.lots ? ` · ${j.lots.toFixed(2)} lot` : ''}
@@ -156,6 +174,22 @@ export function JournalView({ journal, setJournal }: Props) {
       </section>
     </div>
   );
+}
+
+function TrackBadge({ j }: { j: JournalEntry }) {
+  if (j.auto === undefined) return null;
+  const label = isTracked(j)
+    ? j.result === 'attente'
+      ? `Suivi auto : ordre limite en attente${j.validUntil ? ` (jusqu’à ${localDateTime(j.validUntil)})` : ''}`
+      : j.tp1At
+      ? 'Suivi auto : TP1 touché, stop au point d’entrée'
+      : 'Suivi auto : position ouverte'
+    : j.result === 'expire'
+    ? 'Ordre jamais exécuté (annulé) : ne compte pas'
+    : j.auto
+    ? `Clôturé automatiquement${j.exitAt ? ` le ${localDateTime(j.exitAt)}` : ''}`
+    : 'Résultat saisi à la main';
+  return <div className={cx('mt-0.5 text-[10px]', isTracked(j) ? 'text-gold' : 'text-mute')}>{label}</div>;
 }
 
 function Stat({ label, value, cls }: { label: string; value: string; cls?: string }) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BookOpen, KeyRound, LineChart, Settings2, ShieldAlert } from 'lucide-react';
 import { CandleChart } from './components/CandleChart';
 import { AnalysisPanel } from './components/AnalysisPanel';
@@ -6,7 +6,8 @@ import { JournalView } from './components/JournalView';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
-import { api, costsFor, cx, fmt, getAccessCode, load, loadArray, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct } from './lib/utils';
+import { api, CONTRACT, costsFor, cx, fmt, getAccessCode, load, loadArray, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct } from './lib/utils';
+import { isTracked, strategyStats, trackJournal } from './lib/tracker';
 
 type Tab = 'analyse' | 'journal' | 'reglages';
 
@@ -73,6 +74,7 @@ export default function App() {
   const addToJournal = (a: AnalysisResponse) => {
     const p = a.final.plan;
     if (!p) return;
+    const costs = costsFor(a.pair, settings);
     setJournal([
       {
         id: 'j_' + Date.now(),
@@ -84,14 +86,50 @@ export default function App() {
         tp: p.tp2 ?? p.tp1,
         rrPlanned: p.rr2 ?? p.rr1,
         riskPct: settings.riskPct,
-        lots: lotSize(a.pair, settings.capital, settings.riskPct, p.entry, p.sl, costsFor(a.pair, settings).commissionPerLot),
-        result: 'en_cours',
+        lots: lotSize(a.pair, settings.capital, settings.riskPct, p.entry, p.sl, costs.commissionPerLot),
+        result: p.entryType === 'limite' ? 'attente' : 'en_cours',
         rMultiple: null,
         note: '',
+        auto: true,
+        entryType: p.entryType,
+        tp1: p.tp1,
+        tp2: p.tp2,
+        validUntil: a.engine.setup?.validUntil,
+        spread: costs.spread,
+        commissionPerLot: costs.commissionPerLot,
+        contract: a.contract ?? CONTRACT[a.pair],
+        filledAt: null,
+        tp1At: null,
+        exitAt: null,
+        rulesVersion: a.rulesVersion,
       },
       ...journal,
     ]);
   };
+
+  // Suivi automatique : l'app vérifie les trades ouverts sur les vraies bougies M15 toutes les minutes
+  const journalRef = useRef(journal);
+  journalRef.current = journal;
+  const openCount = journal.filter(isTracked).length;
+  useEffect(() => {
+    if (!openCount) return;
+    let alive = true;
+    const tick = async () => {
+      const next = await trackJournal(journalRef.current);
+      // on applique seulement aux trades encore suivis, sans écraser une saisie faite entre-temps
+      if (alive && next) {
+        const byId = new Map(next.map(j => [j.id, j]));
+        setJournal(cur => cur.map(j => (isTracked(j) && byId.has(j.id) ? byId.get(j.id)! : j)));
+      }
+    };
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [openCount, reloadKey]);
+  const stats = strategyStats(journal);
 
   if (needCode) {
     return (
@@ -202,13 +240,14 @@ export default function App() {
               setAnalysis={a => setAnalyses(prev => ({ ...prev, [pair]: a }))}
               onAddJournal={addToJournal}
               dailyBlocked={blocked}
+              stats={stats}
             />
           </>
         )}
         {tab === 'journal' && (
           <>
-            <BacktestCard pair={pair} settings={settings} />
             <JournalView journal={journal} setJournal={setJournal} />
+            <BacktestCard pair={pair} settings={settings} />
           </>
         )}
         {tab === 'reglages' && <SettingsView settings={settings} setSettings={setSettings} status={status} />}
