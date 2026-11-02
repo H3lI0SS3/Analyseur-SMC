@@ -9,10 +9,10 @@ import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.5';
+export const RULES_VERSION = '3.6';
 // 3.4 : displacement, OTE, liquidité de trendline, breaker blocks, bougies japonaises (ebook) dans la décision ; 3 confluences sur 8
 export const MIN_CONFLUENCES = 3;
-export const RULES_FROZEN_AT = Date.UTC(2026, 10, 1, 23, 0); // 01/11/2026 23:00 UTC (3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 2, 17, 0); // 02/11/2026 17:00 UTC (3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -639,6 +639,23 @@ export function summarize(tf: Timeframe, c: Candle[]): { summary: TfSummary; swi
 const ZONE_NAMES: Record<Zone['kind'], string> = { FVG: 'Fair Value Gap', OB: 'Order Block', Breaker: 'Breaker Block', IFVG: 'Inversion FVG' };
 
 // ---------------- Moteur principal ----------------
+/** Amplitude M15 (en ATR M15) au-delà de laquelle une bougie est un choc. */
+export const SHOCK_ATR = 3;
+/** Durée pendant laquelle un choc contraire bloque le trade (sauf structure M15 retournée). */
+export const SHOCK_WINDOW = 2 * HOUR;
+
+/** Dernière bougie M15 (en cours comprise) des 2 dernières heures qui forme un choc CONTRE le sens du trade. */
+export function findShock(m15: Candle[], now: number, atrM15: number, long: boolean): Candle | null {
+  if (!(atrM15 > 0)) return null;
+  for (let i = m15.length - 1; i >= 0; i--) {
+    const c = m15[i];
+    if (c.t > now) continue;
+    if (c.t < now - SHOCK_WINDOW) break;
+    if (c.h - c.l >= SHOCK_ATR * atrM15 && (long ? c.c < c.o : c.c > c.o)) return c;
+  }
+  return null;
+}
+
 export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, opts: AnalyzeOptions = {}): EngineResult {
   const r = (x: number) => Number(x.toFixed(decimals));
   const now = opts.now ?? Date.now();
@@ -979,6 +996,14 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       : bias === 'neutre'
       ? 'Attendre une structure H4 claire (cassure confirmée) avant de chercher une entrée.'
       : `Attendre un retour du prix dans une zone ${bias === 'haussier' ? 'haussière (discount)' : 'baissière (premium)'} avec de la place jusqu'à la prochaine liquidité.`;
+  }
+  // Choc de volatilité contre le plan (annonce imprévue, gros titre…) : on ne vend pas dans une impulsion haussière,
+  // on n'achète pas dans une chute, tant que la structure M15 n'a pas repris le sens du trade.
+  const shock = setup ? findShock(series.M15, now, atrM15, isLong) : null;
+  if (shock && !ltfOk && signal !== 'attendre') {
+    signal = 'attendre';
+    const move = shock.c - shock.o;
+    waitCondition = `Impulsion ${move > 0 ? 'haussière' : 'baissière'} violente à ${maTime(shock.t)} (${move > 0 ? '+' : ''}${r(move)} en 15 min, plus de ${SHOCK_ATR} fois la volatilité normale) contre le plan : on attend une cassure M15 ${isLong ? 'haussière' : 'baissière'} avant d’entrer.`;
   }
   if (blocking && signal !== 'attendre') {
     signal = 'attendre';

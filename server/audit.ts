@@ -1,7 +1,7 @@
 // Contrôleur de cohérence du moteur : vérifie qu'une analyse ne se contredit pas elle-même.
 // Utilisé par les tests (données synthétiques et réelles). Renvoie la liste des incohérences trouvées.
 import { TF_MS, type Candle, type Timeframe } from './marketData';
-import { MIN_CONFLUENCES, type EngineResult } from './smc';
+import { MIN_CONFLUENCES, findShock, type EngineResult } from './smc';
 import { marketClosed } from './time';
 
 export interface AuditContext {
@@ -109,6 +109,7 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
     if (e.grade === 'C') err('signal en classe C');
     if (marketClosed(ctx.now)) err('signal marché fermé');
     if (s?.entryType === 'marché' && !ok('ltf')) err('entrée au marché sans confirmation M15');
+    if (s && !ok('ltf') && findShock(ctx.series.M15, ctx.now, e.timeframes.M15.atr14, s.direction === 'acheter')) err('signal contre une impulsion violente récente');
   } else if (!e.waitCondition) err('« attendre » sans raison affichée');
 
   // ---- 6. Données ----
