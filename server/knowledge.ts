@@ -46,7 +46,7 @@ Figures de retournement valables après un mouvement, idéalement dans la zone d
 - Cycle AMD : accumulation (range asiatique), manipulation (sweep d'un côté du range), distribution (cassure M15 dans l'autre sens). Invalidé si le prix clôture au-delà de l'extrême de la manipulation.
 - Premium / Discount (règles 3.7) : mesuré sur la vague impulsive du déclencheur (de l'extrême du balayage jusqu'au bout du mouvement). Une vente se prend sur une zone dans la moitié premium (> 50 %), un achat dans la moitié discount (< 50 %). C'est obligatoire. Pas de Fibonacci figé (l'OTE est affichée à titre indicatif seulement).
 
-## 5. Protocole du trader (règles 3.7) — toutes les étapes sont obligatoires
+## 5. Protocole du trader (règles 3.8) — toutes les étapes sont obligatoires
 1. Contexte HTF : biais H4/D1 clair, trade dans son sens ; le prix vient de balayer une liquidité HTF (veille, semaine, Asie, swing H1/H4/D1, égaux), sort d'une zone H1/H4, ou court vers une liquidité externe. Jamais « au milieu de nulle part ».
 2. Déclencheur, dans cet ordre sur M15 : balayage (mèche au-delà d'un sommet/creux, clôture revenue) → displacement (bougie impulsive) → CHoCH/MSS net dans le sens du trade. Annulé si une bougie clôture au-delà de l'extrême du balayage ou si la structure M15 se retourne.
 3. Zone : le FVG (ou l'OB) né de l'impulsion du CHoCH, dans la moitié premium (vente) ou discount (achat) de la vague. Bonus si elle repose sur un OB/FVG H1 ou H4.

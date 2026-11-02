@@ -222,7 +222,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   if (chosen === 'gemini' && !futuresProxy && !image) {
     // Gemini : pipeline SMC strict en JSON structuré, recontrôlé par le serveur (double validation)
     pipeline = await runPipeline({ symbol: pair, decimals: info.decimals, now, series, engine, costs, timeoutMs: PIPELINE_TIMEOUT_MS });
-    if (pipeline.status === 'INDISPONIBLE') aiError = pipeline.message;
+    // (l'indisponibilité est affichée dans la carte du pipeline, pas en double dans « Lecture de l'IA »)
   } else if (chosen) {
     try {
       const img = image && typeof image.base64 === 'string' && image.base64.length < 11_000_000 ? image : undefined;
@@ -345,6 +345,7 @@ function buildVerdict(
   const summary = take
     ? `${long ? 'Achat' : 'Vente'} : toutes les conditions obligatoires de ta stratégie sont réunies (${engine.checklist.filter(c => c.ok).length}/${engine.checklist.length} critères, qualité ${engine.grade} ${engine.score}/100${engine.grade === 'B' ? ', risque divisé par 2' : ''}). Ordre ${plan!.entryType === 'limite' ? 'limite' : 'au marché'} à ${plan!.entry}, stop ${plan!.sl}, TP1 ${plan!.tp1}${plan!.tp2 ? `, TP2 ${plan!.tp2}` : ''}.`
     : `On attend : ${final.notes[0] || engine.waitCondition || 'les conditions de ta stratégie ne sont pas réunies.'}`;
+  const confirmation = !take || !pipeline ? '' : pipeline.status === 'VALIDÉ' ? ' Plan confirmé par le pipeline Gemini.' : ' Pipeline Gemini indisponible : plan du moteur seul, vérifie-le toi-même.';
   const action: Verdict['action'] = !take ? 'ATTENDRE' : long ? 'ACHETER' : 'VENDRE';
-  return { action, threshold: VIABILITY_THRESHOLD, summary, pour, contre };
+  return { action, threshold: VIABILITY_THRESHOLD, summary: summary + confirmation, pour, contre };
 }

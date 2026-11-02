@@ -41,14 +41,18 @@ engine.liquidity.push({ id: 'PWL-test', label: 'Plus bas semaine précédente (P
   const tr = engine.trigger!;
   const entry = engine.setup!.entry;
   const sl = engine.setup!.sl;
-  const target = engine.liquidity.filter(l => !l.swept && l.side === 'sell' && l.price < entry).sort((a, b) => b.price - a.price).find(l => netRR('SELL', entry, sl, l.price + 0.24, 0.24, 0) >= 2.5)!;
+  const target = engine.liquidity.filter(l => !l.swept && l.side === 'sell' && l.price < entry).sort((a, b) => b.price - a.price).find(l => netRR(entry, sl, l.price + 0.24, 0) >= 2.5)!;
   const tp = +(target.price + 0.24).toFixed(2);
   const zone = engine.zones.find(z => z.id === engine.setup!.zoneId)!;
   const pos = ((zone.top + zone.bottom) / 2 - tr.legLow) / (tr.legHigh - tr.legLow);
+  // on simule le cas où le moteur donne le trade (TP2 sur cette liquidité, R:R ≥ 2,5)
+  engine.setup!.tp2 = tp;
+  engine.setup!.rr2 = +netRR(entry, sl, tp, 0).toFixed(2);
+  engine.signal = 'vendre';
   const steps = { htf: { ok: true, detail: 'x' }, declencheur: { ok: true, detail: 'x' }, zone: { ok: true, detail: 'x' }, risque: { ok: true, detail: 'x' } };
   const good: PipelineValidated = {
     statut: 'VALIDÉ', etape_echec: null, raison: 'Sweep du swing high puis CHoCH baissier.', symbole: 'XAU/USD', timeframe: 'M15', direction: 'SELL',
-    entree: entry, stop_loss: sl, take_profit: tp, rr: +netRR('SELL', entry, sl, tp, 0.24, 0).toFixed(2),
+    entree: entry, stop_loss: sl, take_profit: tp, rr: +netRR(entry, sl, tp, 0).toFixed(2),
     fvg: { haut: zone.top, bas: zone.bottom, position_vague: +pos.toFixed(2) }, etapes: steps,
   };
   {
@@ -104,12 +108,19 @@ engine.liquidity.push({ id: 'PWL-test', label: 'Plus bas semaine précédente (P
     ok('Stop sous l’extrême du sweep : REJETÉ', slInside.decision === 'REJETÉ', slInside.reason);
     const fakeRR = verifyPipeline({ ...good, rr: 4.5 }, ctx);
     ok('R:R annoncé faux : REJETÉ', fakeRR.decision === 'REJETÉ' && fakeRR.reason.includes('R:R'), fakeRR.reason);
-    const shortTp = verifyPipeline({ ...good, take_profit: entry - 20, rr: +netRR('SELL', entry, sl, entry - 20, 0.24, 0).toFixed(2) }, ctx);
+    const shortTp = verifyPipeline({ ...good, take_profit: entry - 20, rr: +netRR(entry, sl, entry - 20, 0).toFixed(2) }, ctx);
     ok('TP sans liquidité ou R:R < 2,5 : REJETÉ', shortTp.decision === 'REJETÉ', shortTp.reason);
-    const invented = verifyPipeline({ ...good, take_profit: 3000, rr: +netRR('SELL', entry, sl, 3000, 0.24, 0).toFixed(2) }, ctx);
+    const invented = verifyPipeline({ ...good, take_profit: 3000, rr: +netRR(entry, sl, 3000, 0).toFixed(2) }, ctx);
     ok('Prix inventé hors des bougies : REJETÉ', invented.decision === 'REJETÉ', invented.reason);
     const discount = verifyPipeline({ ...good, fvg: { haut: tr.legLow + 2, bas: tr.legLow + 1, position_vague: 0.9 }, entree: tr.legLow + 1 }, ctx);
     ok('FVG en discount pour une vente : REJETÉ', discount.decision === 'REJETÉ', discount.reason);
+    const other = verifyPipeline({ ...good, entree: entry + 3, rr: +netRR(entry + 3, sl, tp, 0).toFixed(2) }, ctx);
+    ok('Plan différent de celui du moteur : REJETÉ', other.decision === 'REJETÉ' && other.reason.includes('Même plan'), other.reason);
+    const saved = engine.signal;
+    engine.signal = 'attendre';
+    const noTrade = verifyPipeline(good, ctx);
+    engine.signal = saved;
+    ok('Moteur sans trade : Gemini ne peut pas en créer un', noTrade.decision === 'REJETÉ' && noTrade.reason.includes('Même plan'), noTrade.reason);
     const rejected = verifyPipeline({ ...good, statut: 'REJETÉ', etape_echec: 'declencheur', raison: 'Pas de CHoCH.' } as any, ctx);
     ok('REJETÉ par Gemini : reste REJETÉ', rejected.decision === 'REJETÉ' && rejected.reason.includes('declencheur'));
   }

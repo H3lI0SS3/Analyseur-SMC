@@ -35,6 +35,7 @@ export async function runPipeline(input: RunPipelineInput): Promise<PipelineRepo
     decimals: input.decimals,
     now: input.now,
     spread: input.costs.spread,
+    commissionPerUnit: input.costs.commissionPerLot / (input.costs.contract || 1),
     series: input.series,
     engine: input.engine,
     windows: input.windows,

@@ -32,13 +32,14 @@ export interface GuardContext {
   rangeHigh: number;
 }
 
-/** R:R net : spread et commission compris (même formule que le moteur et le journal). */
-export function netRR(dir: 'BUY' | 'SELL', entry: number, sl: number, tp: number, spread: number, commUnit: number): number {
+/**
+ * R:R net, formule identique au moteur et au journal : le spread est déjà intégré dans les niveaux
+ * (stop d'une vente + spread, TP placé un spread avant la liquidité), seule la commission est déduite.
+ */
+export function netRR(entry: number, sl: number, tp: number, commUnit: number): number {
   const risk = Math.abs(entry - sl);
-  const reward = Math.abs(tp - entry);
   if (!(risk > 0)) return 0;
-  void dir;
-  return (reward - spread - commUnit) / (risk + spread + commUnit);
+  return (Math.abs(tp - entry) - commUnit) / (risk + commUnit);
 }
 
 export function verifyPipeline(res: PipelineResult, ctx: GuardContext): GuardVerdict {
@@ -51,7 +52,7 @@ export function verifyPipeline(res: PipelineResult, ctx: GuardContext): GuardVer
   const atrM15 = e.timeframes.M15.atr14;
   const tol = Math.max(ctx.spread * 2, 0.05 * atrM15, 10 ** -ctx.decimals * 5);
   const commUnit = ctx.commissionPerLot / (ctx.contract || 1);
-  const rr = netRR(v.direction, v.entree, v.stop_loss, v.take_profit, ctx.spread, commUnit);
+  const rr = netRR(v.entree, v.stop_loss, v.take_profit, commUnit);
   const tr = e.trigger;
   const checks: GuardCheck[] = [];
   const add = (key: string, label: string, ok: boolean, detail: string) => checks.push({ key, label, ok, detail });
@@ -64,6 +65,25 @@ export function verifyPipeline(res: PipelineResult, ctx: GuardContext): GuardVer
     'Déclencheur confirmé par le moteur (sweep → displacement → CHoCH)',
     !!tr && (tr.dir === 'bull') === buy,
     tr ? `Moteur : sweep ${tr.sweep.label}, CHoCH ${tr.dir === 'bull' ? 'haussier' : 'baissier'}.` : 'Le moteur ne voit pas de déclencheur complet.'
+  );
+  // Le plan exécuté est celui du moteur : Gemini doit valider CE plan, pas un autre.
+  const st = e.setup;
+  const engineTrade = !!st && e.signal !== 'attendre';
+  const same =
+    !!st &&
+    (st.direction === 'acheter') === buy &&
+    Math.abs(st.entry - v.entree) <= tol &&
+    Math.abs(st.sl - v.stop_loss) <= tol &&
+    [st.tp1, st.tp2].some(t => t !== null && Math.abs(t - v.take_profit) <= tol);
+  add(
+    'accord',
+    'Même plan que le moteur',
+    engineTrade && same,
+    !engineTrade
+      ? `Le moteur ne donne pas de trade (${e.waitCondition ?? 'conditions non réunies'}) : Gemini ne peut pas en créer un.`
+      : same
+      ? `Entrée ${st!.entry}, stop ${st!.sl} : identiques au moteur.`
+      : `Moteur : entrée ${st!.entry}, stop ${st!.sl}, TP ${st!.tp2 ?? st!.tp1} — Gemini : ${v.entree}, ${v.stop_loss}, ${v.take_profit}.`
   );
   const inRange = [v.entree, v.stop_loss, v.take_profit, v.fvg.haut, v.fvg.bas].every(x => x >= ctx.rangeLow - 3 * atrM15 && x <= ctx.rangeHigh + 3 * atrM15);
   add('prix', 'Prix issus des bougies fournies', inRange, inRange ? 'Tous les niveaux sont dans la plage des données.' : 'Un niveau sort de la plage des bougies : prix inventé.');

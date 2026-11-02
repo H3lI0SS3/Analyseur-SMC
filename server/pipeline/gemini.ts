@@ -14,11 +14,12 @@ Données : fenêtres OHLCV en heure UTC (bougies clôturées ; "current" = bougi
 Étape 1 — htf : le prix doit provenir d'une zone clé HTF (Order Block ou FVG H1/H4 de facts.htfZones) ou d'une liquidité externe (facts.liquidity : veille, semaine, Asie, égaux, swings H4/D1), et le trade doit aller dans le sens de facts.bias. Prix « au milieu de nulle part » ou biais neutre : REJETÉ.
 Étape 2 — declencheur (M15) : dans cet ordre, (a) sweep : mèche au-delà d'un sommet/creux puis clôture revenue, (b) displacement : bougie impulsive nette dans le sens du trade, (c) CHoCH : clôture au-delà du dernier swing opposé. Si une bougie clôture au-delà de l'extrême du sweep après le CHoCH : REJETÉ.
 Étape 3 — zone : un FVG créé par l'impulsion. position_vague = (milieu du FVG − bas de la vague) / (haut − bas). BUY seulement si position_vague < 0,5 (discount), SELL seulement si > 0,5 (premium).
-Étape 4 — risque : entrée au début du FVG ; stop derrière l'extrême du sweep + rules.slBuffer (+ spread pour un SELL) ; TP sur la liquidité opposée non prise la plus proche qui donne le R:R requis ; rr = (|TP − entrée| − spread) / (|entrée − SL| + spread). rr < rules.minRR : REJETÉ.
+Étape 4 — risque : entrée au début du FVG ; stop derrière l'extrême du sweep + rules.slBuffer (+ spread pour un SELL) ; TP placé un spread avant la liquidité opposée non prise ; rr = (|TP − entrée| − rules.commissionPerUnit) / (|entrée − SL| + rules.commissionPerUnit) (le spread est déjà dans le stop et le TP). rr < rules.minRR : REJETÉ.
 
 Règles absolues :
 - N'invente AUCUN prix : entrée, SL, TP et FVG viennent des bougies fournies ou des facts.
 - facts.newsBlocked = true : REJETÉ à l'étape htf (« annonce imminente »).
+- enginePlan = plan calculé par le moteur déterministe. S'il existe, tu valides ou rejettes CE plan : tu reprends exactement sa direction, son entrée, son stop, son TP et son rr (ne propose pas d'autres niveaux). S'il est null, il n'y a pas de plan exploitable : REJETÉ à la première étape qui manque (en général « declencheur »).
 - Si facts.engineTrigger est null, il n'y a très probablement pas de déclencheur : ne le valide que si tu le vois sans ambiguïté dans les bougies M15.
 - Chaque étape : ok + détail court en français, avec les prix et heures UTC utilisés. Les étapes non atteintes : ok=false, détail "non évaluée (fail-fast)".
 - Si statut = "VALIDÉ" : etape_echec = null, tous les champs du plan sont remplis. Si "REJETÉ" : renseigne au moins etape_echec et raison.`;

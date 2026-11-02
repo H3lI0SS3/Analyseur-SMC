@@ -64,7 +64,17 @@ export interface MarketPayload {
       legLow: number;
     } | null;
   };
-  rules: { minRR: number; slBuffer: number; ltf: Timeframe };
+  /** plan calculé par le moteur : c'est CE plan que Gemini valide ou rejette (il n'en propose pas d'autre) */
+  enginePlan: {
+    direction: 'BUY' | 'SELL';
+    entryType: 'limite' | 'marché';
+    entry: number;
+    stopLoss: number;
+    takeProfit: number;
+    rr: number;
+    zone: string;
+  } | null;
+  rules: { minRR: number; slBuffer: number; ltf: Timeframe; commissionPerUnit: number };
 }
 
 const iso = (t: number) => new Date(t).toISOString().slice(0, 16).replace('T', ' ');
@@ -89,6 +99,8 @@ export interface PayloadInput {
   decimals: number;
   now: number;
   spread: number;
+  /** commission aller-retour par lot / taille du contrat (même unité que le prix) */
+  commissionPerUnit?: number;
   series: Record<Timeframe, Candle[]>;
   engine: EngineResult;
   windows?: WindowSpec[];
@@ -129,6 +141,23 @@ export function buildMarketPayload(input: PayloadInput): MarketPayload {
   const last = engine.timeframes.M15.lastEvent;
   if (last) facts.m15Breaks.push({ kind: last.kind, dir: word(last.dir), level: r(last.level), timeUtc: iso(last.t) });
 
+  // le plan n'est transmis que s'il vient du déclencheur complet (zone née de l'impulsion)
+  const st = engine.setup;
+  const fromTrigger = !!st && !!engine.checklist.find(c => c.key === 'zone')?.ok;
+  const finalTp = st ? st.tp2 ?? st.tp1 : 0;
+  const enginePlan: MarketPayload['enginePlan'] =
+    st && fromTrigger
+      ? {
+          direction: st.direction === 'acheter' ? 'BUY' : 'SELL',
+          entryType: st.entryType,
+          entry: st.entry,
+          stopLoss: st.sl,
+          takeProfit: finalTp,
+          rr: st.rr2 ?? st.rr1,
+          zone: st.zoneLabel,
+        }
+      : null;
+
   const make = (): MarketPayload => ({
     symbol,
     decimals: dec,
@@ -138,7 +167,8 @@ export function buildMarketPayload(input: PayloadInput): MarketPayload {
     volumeAvailable: false,
     windows: specs.map(w => ({ tf: w.tf, role: w.role, ...slidingWindow(series[w.tf], w.tf, w.bars, now, dec) })),
     facts,
-    rules: { minRR: MIN_RR, slBuffer: r(Math.max(0.1 * engine.timeframes.M15.atr14, spread)), ltf: 'M15' },
+    enginePlan,
+    rules: { minRR: MIN_RR, slBuffer: r(Math.max(0.1 * engine.timeframes.M15.atr14, spread)), ltf: 'M15', commissionPerUnit: input.commissionPerUnit ?? 0 },
   });
 
   // Budget de tokens : on raccourcit d'abord les fenêtres HTF (le moteur fournit déjà zones et liquidité HTF),
