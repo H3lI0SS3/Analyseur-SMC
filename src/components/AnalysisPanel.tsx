@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResponse, RiskSettings, Status, Timeframe } from '../types';
-import { api, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotSize, realRiskUsd, riskForGrade } from '../lib/utils';
+import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotSize, realRiskUsd, riskForGrade } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 
 interface Props {
@@ -143,7 +143,7 @@ export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, o
         {error && <p className="rounded-lg bg-down/10 px-3 py-2 text-xs text-down">{error}</p>}
       </section>
 
-      {a && <Result a={a} settings={settings} stats={stats} added={added} dailyBlocked={dailyBlocked} addError={addError} onAdd={() => { const err = onAddJournal(a); setAddError(err); setAdded(!err); }} />}
+      {a && <div key={a.generatedAt}><Result a={a} settings={settings} stats={stats} added={added} dailyBlocked={dailyBlocked} addError={addError} onAdd={() => { const err = onAddJournal(a); setAddError(err); setAdded(!err); }} /></div>}
     </div>
   );
 }
@@ -159,6 +159,8 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
   const lots = plan ? lotSize(a.pair, settings.capital, riskPct, plan.entry, plan.sl, comm) : null;
   const riskUsd = plan && lots ? realRiskUsd(a.pair, lots, plan.entry, plan.sl, comm) : (settings.capital * riskPct) / 100;
   const tfs: Timeframe[] = ['D1', 'H4', 'H1', 'M15'];
+  const broker = useBrokerOffset(a);
+  const shift = (v: number | null) => (v === null ? null : v + broker.offset);
 
   return (
     <div className="space-y-3">
@@ -241,12 +243,18 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
             <div className="label">{go ? 'Plan de trade' : 'Plan en préparation (pas d’entrée pour l’instant)'}</div>
             <span className="text-[10px] text-mute">{plan.origin}</span>
           </div>
+          <BrokerPriceBox a={a} broker={broker} />
           <div className="grid grid-cols-2 gap-2">
-            <Level label="Entrée" value={fmt(plan.entry, dec)} cls="text-gold" />
-            <Level label="Stop loss" value={fmt(plan.sl, dec)} sub={distanceLabel(a.pair, plan.entry, plan.sl)} cls="text-down" />
-            <Level label="TP1" value={fmt(plan.tp1, dec)} sub={`R:R 1:${plan.rr1.toFixed(1)}`} cls="text-up" />
-            <Level label="TP2" value={fmt(plan.tp2, dec)} sub={plan.rr2 ? `R:R 1:${plan.rr2.toFixed(1)}` : 'pas de 2e cible'} cls="text-up" />
+            <Level label="Entrée" value={fmt(shift(plan.entry), dec)} cls="text-gold" />
+            <Level label="Stop loss" value={fmt(shift(plan.sl), dec)} sub={distanceLabel(a.pair, plan.entry, plan.sl)} cls="text-down" />
+            <Level label="TP1" value={fmt(shift(plan.tp1), dec)} sub={`R:R 1:${plan.rr1.toFixed(1)}`} cls="text-up" />
+            <Level label="TP2" value={fmt(shift(plan.tp2), dec)} sub={plan.rr2 ? `R:R 1:${plan.rr2.toFixed(1)}` : 'pas de 2e cible'} cls="text-up" />
           </div>
+          {broker.offset !== 0 && (
+            <p className="mt-1.5 text-[10px] leading-snug text-mute">
+              Niveaux recalés sur ton broker ({broker.offset > 0 ? '+' : ''}{fmt(broker.offset, dec)}). Niveaux de l’app (flux Twelve Data, utilisés par le suivi du journal) : entrée {fmt(plan.entry, dec)}, stop {fmt(plan.sl, dec)}, TP1 {fmt(plan.tp1, dec)}{plan.tp2 !== null ? `, TP2 ${fmt(plan.tp2, dec)}` : ''}.
+            </p>
+          )}
           <div className="mt-3 rounded-lg bg-card2 px-3 py-2 text-xs">
             {(settings.broker ?? 'etoro') === 'etoro' && lots !== null && lots > 0 ? (
               (() => {
@@ -611,5 +619,47 @@ function Fold({ title, text, open }: { title: string; text: string; open?: boole
       </summary>
       <p className="mt-1.5 whitespace-pre-line text-[13px] leading-relaxed text-ink/90">{text}</p>
     </details>
+  );
+}
+
+function useBrokerOffset(a: AnalysisResponse) {
+  const [text, setText] = useState('');
+  const [enteredAt, setEnteredAt] = useState<number | null>(null);
+  const { offset, error } = brokerOffset(a.pair, a.engine.price, text, a.costs?.spread ?? 0);
+  return {
+    text,
+    setText: (v: string) => {
+      setText(v);
+      setEnteredAt(v.trim() ? Date.now() : null);
+    },
+    offset,
+    error,
+    enteredAt,
+  };
+}
+
+function BrokerPriceBox({ a, broker }: { a: AnalysisResponse; broker: ReturnType<typeof useBrokerOffset> }) {
+  const ref = a.livePriceAt ?? a.generatedAt;
+  const late = broker.enteredAt !== null && broker.enteredAt - ref > 60_000;
+  return (
+    <div className="mb-3 rounded-lg bg-card2 px-3 py-2">
+      <label className="flex items-center justify-between gap-2 text-xs">
+        <span className="text-mute">Prix « Sell » affiché chez ton broker maintenant</span>
+        <input
+          inputMode="decimal"
+          value={broker.text}
+          onChange={ev => broker.setText(ev.target.value)}
+          placeholder={fmt(a.engine.price, a.decimals)}
+          className="num w-28 rounded border border-line bg-bg px-2 py-1 text-right text-sm"
+        />
+      </label>
+      <p className="mt-1 text-[10px] leading-snug text-mute">
+        Optionnel. Les niveaux ci-dessous sont alors recalés sur le prix de ton broker (même distances, même R:R). Saisis-le juste après l’analyse.
+      </p>
+      {broker.error && <p className="mt-1 text-[11px] text-warn">{broker.error}</p>}
+      {late && !broker.error && (
+        <p className="mt-1 text-[11px] text-warn">Analyse faite il y a plus d’une minute : relance l’analyse puis saisis le prix tout de suite, sinon le recalage peut être faux.</p>
+      )}
+    </div>
   );
 }

@@ -133,3 +133,23 @@ export function etoroSize(pair: string, lots: number, price: number, leverage: n
   const lev = Math.max(1, leverage || 1);
   return { units, exposure, amount: exposure / lev, leverage: lev };
 }
+
+/** Écart maximal accepté entre le prix du broker et celui de l'app (au-delà : faute de frappe ou mauvais actif). */
+export const MAX_BROKER_GAP: Record<string, number> = { 'XAU/USD': 15, 'EUR/USD': 0.001 };
+
+/**
+ * Décalage entre le prix du broker et celui de l'app.
+ * Le trader saisit le prix « Sell » (bid) affiché chez son broker ; on ajoute un demi-spread pour obtenir le prix moyen,
+ * comparable au prix du flux de l'app. Tous les niveaux du plan sont décalés de cet écart (distances et R:R inchangés).
+ */
+export function brokerOffset(pair: string, appPrice: number, bidText: string, spread: number): { offset: number; error: string | null } {
+  const t = bidText.trim().replace(/\s/g, '').replace(',', '.');
+  if (!t) return { offset: 0, error: null };
+  const bid = Number(t);
+  if (!Number.isFinite(bid) || bid <= 0) return { offset: 0, error: 'Prix invalide.' };
+  const offset = bid + spread / 2 - appPrice;
+  const max = MAX_BROKER_GAP[pair] ?? appPrice * 0.004;
+  if (Math.abs(offset) > max) return { offset: 0, error: `Écart de ${Math.abs(offset).toFixed(pair === 'XAU/USD' ? 2 : 5)} avec l’app : trop grand, vérifie l’actif et le prix saisi (niveaux non recalés).` };
+  const dec = pair === 'XAU/USD' ? 2 : 5;
+  return { offset: Number(offset.toFixed(dec)), error: null };
+}
