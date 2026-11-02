@@ -1,6 +1,7 @@
 // Tests du suivi automatique : npx tsx src/lib/tracker.test.mts
 import { evaluate, strategyStats, MIN_TRADES } from './tracker';
 import type { JournalEntry } from '../types';
+import { etoroSize } from './utils';
 
 let failed = 0;
 const ok = (label: string, cond: boolean, info = '') => {
@@ -85,6 +86,14 @@ const late = t0 + 20 * M;
   const old = { ...base, createdAt: t0 - 9 * 86_400_000 };
   const r = evaluate(old, [c(1, 1.1005, 1.1006, 1.1003, 1.1004)], late);
   ok('Historique manquant = suivi interrompu, saisie manuelle demandée', r?.auto === false, JSON.stringify(r));
+}
+
+// Taille eToro : 0,10 lot EUR/USD à 1,10 avec levier 1:30 = 10 000 unités, 11 000 $ exposés, ≈ 367 $ à investir
+{
+  const z = etoroSize('EUR/USD', 0.1, 1.1, 30);
+  ok('Conversion eToro EUR/USD', z.units === 10000 && Math.abs(z.exposure - 11000) < 1e-6 && Math.abs(z.amount - 366.67) < 0.01, JSON.stringify(z));
+  const g = etoroSize('XAU/USD', 0.05, 4000, 20);
+  ok('Conversion eToro or (0,05 lot = 5 onces, 20 000 $ exposés, 1 000 $ à investir)', g.units === 5 && Math.abs(g.amount - 1000) < 1e-6, JSON.stringify(g));
 }
 
 if (failed) {

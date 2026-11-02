@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResponse, RiskSettings, Status, Timeframe } from '../types';
-import { api, costsFor, cx, distanceLabel, fmt, localDateTime, localTime, lotSize, realRiskUsd, riskForGrade } from '../lib/utils';
+import { api, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotSize, realRiskUsd, riskForGrade } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 
 interface Props {
@@ -245,10 +245,32 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
             <Level label="TP2" value={fmt(plan.tp2, dec)} sub={plan.rr2 ? `R:R 1:${plan.rr2.toFixed(1)}` : 'pas de 2e cible'} cls="text-up" />
           </div>
           <div className="mt-3 rounded-lg bg-card2 px-3 py-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-mute">Taille pour {riskPct} % de risque{e.grade === 'B' ? ' (classe B : risque divisé par 2)' : ''}</span>
-              <span className="num font-semibold">{lots === null ? '—' : `${lots.toFixed(2)} lot`}</span>
-            </div>
+            {(settings.broker ?? 'etoro') === 'etoro' && lots !== null && lots > 0 ? (
+              (() => {
+                const z = etoroSize(a.pair, lots, plan.entry, a.pair === 'XAU/USD' ? settings.leverageGold ?? 20 : settings.leverageEur ?? 30);
+                return (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-mute">eToro, pour {riskPct} % de risque{e.grade === 'B' ? ' (classe B : risque /2)' : ''}</span>
+                      <span className="num font-semibold">{z.units.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} {a.pair === 'XAU/USD' ? 'onces' : 'unités'}</span>
+                    </div>
+                    <div className="mt-1 flex justify-between">
+                      <span className="text-mute">Montant à investir (levier 1:{z.leverage})</span>
+                      <span className="num">≈ {z.amount.toFixed(0)} $</span>
+                    </div>
+                    <div className="mt-1 flex justify-between">
+                      <span className="text-mute">Valeur exposée</span>
+                      <span className="num">≈ {z.exposure.toFixed(0)} $</span>
+                    </div>
+                  </>
+                );
+              })()
+            ) : (
+              <div className="flex justify-between">
+                <span className="text-mute">Taille pour {riskPct} % de risque{e.grade === 'B' ? ' (classe B : risque divisé par 2)' : ''}</span>
+                <span className="num font-semibold">{lots === null ? '—' : `${lots.toFixed(2)} lot`}</span>
+              </div>
+            )}
             <div className="mt-1 flex justify-between">
               <span className="text-mute">Perte réelle si SL touché</span>
               <span className="num">≈ {riskUsd.toFixed(0)} $</span>
@@ -256,7 +278,10 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
             <div className="mt-1 text-[10px] text-mute">
               R:R nets : spread {a.pair === 'XAU/USD' ? `${a.costs.spread.toFixed(2)} $` : `${(a.costs.spread / 0.0001).toFixed(1)} pip`} et commission {comm} $/lot inclus.
             </div>
-            {lots === 0 && <p className="mt-1 text-warn">Stop trop large pour ton capital : taille inférieure à 0,01 lot.</p>}
+            {lots === 0 && <p className="mt-1 text-warn">Stop trop large pour ton capital : taille inférieure au minimum.</p>}
+            {(settings.broker ?? 'etoro') === 'etoro' && (
+              <p className="mt-1 text-[10px] text-mute">Sur eToro : saisis le montant avec ce levier, vérifie que le nombre d’unités affiché correspond, puis pose le stop loss et le take profit aux niveaux ci-dessus.</p>
+            )}
           </div>
           {e.setup && <p className="mt-2 text-[11px] text-mute">Zone : {e.setup.zoneLabel}</p>}
           {e.setup?.validUntil && plan.entryType === 'limite' && (

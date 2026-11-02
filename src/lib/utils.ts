@@ -125,3 +125,11 @@ export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Bool
 
 /** Risque à appliquer selon la classe du setup : classe B = risque divisé par deux (grille SMC). */
 export const riskForGrade = (riskPct: number, grade?: 'A+' | 'B' | 'C') => (grade === 'B' ? riskPct / 2 : riskPct);
+
+/** Taille au format eToro : unités (EUR ou onces), valeur exposée en $ et montant à investir selon le levier. */
+export function etoroSize(pair: string, lots: number, price: number, leverage: number) {
+  const units = lots * (CONTRACT[pair] || 0);
+  const exposure = units * price; // EUR x cours EUR/USD = $ ; onces x prix de l'once = $
+  const lev = Math.max(1, leverage || 1);
+  return { units, exposure, amount: exposure / lev, leverage: lev };
+}

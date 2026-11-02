@@ -18,7 +18,10 @@ const DEFAULT_SETTINGS: RiskSettings = {
   aiProvider: 'auto',
   spreadEurPips: 1,
   spreadGold: 0.3,
-  commissionPerLot: 7,
+  commissionPerLot: 0,
+  broker: 'etoro',
+  leverageEur: 30,
+  leverageGold: 20,
 };
 const FALLBACK_PAIRS = [
   { id: 'EUR/USD', label: 'EUR/USD', decimals: 5, pipSize: 0.0001 },
@@ -32,7 +35,9 @@ export default function App() {
   const [pair, setPair] = useState<string>(() => load('sa_ui', { pair: 'XAU/USD' }).pair);
   const [settings, setSettings] = useState<RiskSettings>(() => {
     const s = load('sa_settings', DEFAULT_SETTINGS);
-    return { ...s, riskPct: Math.min(2, s.riskPct) }; // risque plafonné à 2 % par trade
+    // broker par défaut : eToro (sans commission séparée)
+    const migrated = s.broker ? s : { ...s, broker: 'etoro' as const, commissionPerLot: 0 };
+    return { ...migrated, riskPct: Math.min(2, migrated.riskPct) }; // risque plafonné à 2 % par trade
   });
   const [needCode, setNeedCode] = useState(false);
   const [codeInput, setCodeInput] = useState('');

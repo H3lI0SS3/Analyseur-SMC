@@ -297,6 +297,11 @@ export interface RiskSettings {
   spreadGold: number;
   /** commission aller-retour par lot, en $ */
   commissionPerLot: number;
+  /** broker utilisé : change l'affichage de la taille de position */
+  broker?: 'etoro' | 'mt5';
+  /** levier choisi sur eToro (ex. 30 pour 1:30) */
+  leverageEur?: number;
+  leverageGold?: number;
 }
 
 /** attente = ordre limite pas encore exécuté ; expire = ordre limite jamais exécuté (annulé) */

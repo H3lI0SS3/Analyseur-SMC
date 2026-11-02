@@ -27,10 +27,28 @@ export function SettingsView({ settings, setSettings, status }: Props) {
       </section>
 
       <section className="card space-y-4 p-4">
-        <div className="label">Coûts de ton broker</div>
+        <div className="label">Broker</div>
+        <div className="grid grid-cols-2 gap-2">
+          {([['etoro', 'eToro'], ['mt5', 'MT5 (lots)']] as const).map(([k, l]) => (
+            <button
+              key={k}
+              onClick={() => set(k === 'etoro' ? { broker: k, commissionPerLot: 0 } : { broker: k })}
+              className={cx('rounded-lg border py-2 text-sm', (settings.broker ?? 'etoro') === k ? 'border-gold bg-gold/10 text-gold' : 'border-line text-mute')}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+        {(settings.broker ?? 'etoro') === 'etoro' && (
+          <>
+            <Field label="Levier eToro EUR/USD (1:x)" value={settings.leverageEur ?? 30} step={1} min={1} max={400} onChange={v => set({ leverageEur: v })} hint="Mets le levier que tu choisis sur eToro au moment d’ouvrir la position." />
+            <Field label="Levier eToro or (1:x)" value={settings.leverageGold ?? 20} step={1} min={1} max={400} onChange={v => set({ leverageGold: v })} />
+          </>
+        )}
+        <div className="label pt-2">Coûts de ton broker</div>
         <Field label="Spread EUR/USD (pips)" value={settings.spreadEurPips} step={0.1} min={0} max={10} onChange={v => set({ spreadEurPips: v })} />
         <Field label="Spread or ($)" value={settings.spreadGold} step={0.05} min={0} max={5} onChange={v => set({ spreadGold: v })} />
-        <Field label="Commission aller-retour par lot ($)" value={settings.commissionPerLot} step={0.5} min={0} max={50} onChange={v => set({ commissionPerLot: v })} hint="Pris en compte dans le stop, les objectifs, le R:R net et la taille de lot." allowZero />
+        <Field label="Commission aller-retour par lot ($)" value={settings.commissionPerLot} step={0.5} min={0} max={50} onChange={v => set({ commissionPerLot: v })} hint={(settings.broker ?? 'etoro') === 'etoro' ? 'eToro se rémunère en général par le spread : 0 sauf frais affichés sur ton compte.' : 'Pris en compte dans le stop, les objectifs, le R:R net et la taille de lot.'} allowZero />
       </section>
 
       <section className="card space-y-3 p-4">
