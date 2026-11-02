@@ -9,12 +9,14 @@ import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.7';
+export const RULES_VERSION = '3.8';
 // 3.4 : displacement, OTE, liquidité de trendline, breaker blocks, bougies japonaises (ebook) dans la décision ; 3 confluences sur 8
 export const MIN_CONFLUENCES = 3; // (règles ≤ 3.6, conservé pour le laboratoire du backtest)
+/** R:R net minimal (spread et commission compris) pour qu'un plan soit exploitable. */
+export const MIN_RR = 2.5;
 /** Score minimal pour la classe A+ (en dessous : classe B, risque divisé par 2). */
 export const GRADE_A = 70;
-export const RULES_FROZEN_AT = Date.UTC(2026, 10, 2, 19, 0); // 02/11/2026 19:00 UTC (3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 2, 20, 0); // 02/11/2026 20:00 UTC (3.8 : R:R net minimal 1:2,5, double validation moteur + Gemini ; 3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -129,6 +131,10 @@ export interface EngineResult {
   tentativeNews: string[];
   newsAvailable: boolean;
   amd: AmdState;
+  /** déclencheur balayage → displacement → CHoCH retenu (règles ≥ 3.7), ou null */
+  trigger: Trigger | null;
+  /** zones H1/H4 (OB/FVG) utilisées pour le contexte HTF */
+  htfZones: Zone[];
   /** concepts ICT utilisés dans la décision */
   ict: {
     ote: OteZone | null;
@@ -870,7 +876,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       .sort((a, b) => (long ? a.price - b.price : b.price - a.price));
     if (!targets.length) return null;
     const t1 = targets[0];
-    const t2 = targets.find(t => rrNet(t.price) >= 2 && t !== t1) || null;
+    const t2 = targets.find(t => rrNet(t.price) >= MIN_RR && t !== t1) || null;
     const rr1 = rrNet(t1.price);
     const rr2 = t2 ? rrNet(t2.price) : null;
     return {
@@ -969,7 +975,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
           .sort((a, b) => (long ? a.price - b.price : b.price - a.price));
         if (targets.length) {
           const t1 = targets[0];
-          const t2 = targets.find(t => rrNet(t.price) >= 2 && t !== t1) || null;
+          const t2 = targets.find(t => rrNet(t.price) >= MIN_RR && t !== t1) || null;
           trigSetup = {
             direction: long ? 'acheter' : 'vendre',
             entryType: inside ? 'marché' : 'limite',
@@ -990,7 +996,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     }
   }
   // Plan proposé : celui du déclencheur ; sinon le plan « en préparation » sur la zone la plus proche (pas de signal possible)
-  const setup = trigSetup || aligned.find(c => (c.rr2 ?? c.rr1) >= 2) || aligned[0] || null;
+  const setup = trigSetup || aligned.find(c => (c.rr2 ?? c.rr1) >= MIN_RR) || aligned[0] || null;
   if (setup) setup.validUntil = now + 4 * HOUR;
   const alternatives = candidates.filter(c => c !== setup && c.zoneId !== setup?.zoneId).slice(0, 3);
   const finalTarget = trigSetup ? liquidity.find(l => l.label === (trigSetup!.tp2Label ?? trigSetup!.tp1Label) && Math.abs(l.price - (trigSetup!.tp2Label ? trigSetup!.tp2! : trigSetup!.tp1)) <= spread + 10 ** -decimals * 2) : null;
@@ -1112,8 +1118,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     },
     {
       key: 'rr',
-      label: 'Ratio risque/rendement net ≥ 1:2',
-      ok: finalRR >= 2,
+      label: `Ratio risque/rendement net ≥ 1:${MIN_RR}`,
+      ok: finalRR >= MIN_RR,
       detail: setup ? `R:R net (spread et commission compris) 1:${finalRR.toFixed(2)} (TP1 1:${setup.rr1.toFixed(2)})` : 'Pas de plan.',
       core: true,
     },
@@ -1184,7 +1190,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
           (ok('zone') && trigZone && !trigZone.touched ? 10 : 0) +
           (ok('htfzone') ? 15 : 0) +
           (session.killzone ? 10 : 0) +
-          (finalRR >= 3 ? 10 : 0) +
+          (finalRR >= 3.5 ? 10 : 0) +
           (ok('amd') ? 5 : 0) +
           (ok('candle') ? 5 : 0) +
           (ok('trendline') ? 5 : 0)
@@ -1241,6 +1247,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     tentativeNews: tentativeToday.map(e => `${e.title} (${e.currency})`),
     newsAvailable,
     amd,
+    trigger,
+    htfZones: htfZones.map(z => ({ ...z, top: r(z.top), bottom: r(z.bottom) })),
     ict: { ote, displacement, trendlines, candlePatterns },
   };
 }

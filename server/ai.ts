@@ -11,10 +11,10 @@ export type AiProvider = 'claude' | 'gemini';
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 // Si un modèle est retiré par Google, on essaie automatiquement le suivant.
-const GEMINI_FALLBACKS = [...new Set([GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-flash-latest'])];
+export const GEMINI_FALLBACKS = [...new Set([GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-flash-latest'])];
 let geminiWorking: string | null = null;
-const isBusy = (e: any) => /\b(503|429)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand/i.test(String(e?.message || e));
-const isModelGone = (e: any) => /\b404\b|not found|no longer available|is not supported/i.test(String(e?.message || e));
+export const isBusy = (e: any) => /\b(503|429)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand/i.test(String(e?.message || e));
+export const isModelGone = (e: any) => /\b404\b|not found|no longer available|is not supported/i.test(String(e?.message || e));
 
 export function availableProviders(): AiProvider[] {
   const out: AiProvider[] = [];
@@ -43,7 +43,7 @@ const SYSTEM = `Tu es un analyste senior SMC/ICT et risk manager. Tu reçois des
 Règles absolues :
 - Tu n'inventes AUCUN prix. Tous les niveaux que tu cites doivent venir des données fournies (zones, liquidité, swings, bougies).
 - Tu ne peux pas transformer un signal "attendre" du moteur en trade. Tu peux en revanche REJETER un plan du moteur si tu vois un problème (ex : entrée juste sous une liquidité majeure, contre-tendance D1, annonce, structure confuse).
-- Un plan n'est VALIDÉ que si le R:R final est d'au moins 1:2, que le biais H4 est dans le sens du trade et que le stop est derrière une invalidation logique.
+- Un plan n'est VALIDÉ que si le R:R final est d'au moins 1:2,5, que le biais H4 est dans le sens du trade et que le stop est derrière une invalidation logique.
 - Si une capture d'écran est fournie, décris ce que tu y vois dans "lecture_capture" et signale toute contradiction avec les données. Les prix de la capture peuvent venir d'un autre broker : ne les utilise pas pour fixer les niveaux.
 - Sois concret, court et en français simple. Pas de jargon gratuit, pas de promesses : aucune probabilité de gain.
 - Les "niveaux" que tu renvoies : reprends ceux du plan du moteur, ou propose un ajustement en t'appuyant sur une zone/liquidité fournie. Mets null si aucun trade.

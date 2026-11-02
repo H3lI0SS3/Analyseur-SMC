@@ -44,11 +44,12 @@ const run = (all: Record<Timeframe, Candle[]>, now: number) => {
   // 06:16 : FVG encore sous le milieu de l'impulsion (4009.62 → 3987.40) : pas de vente
   const early = run(all, Date.parse('2026-10-30T06:16:00Z'));
   ok('30/10 06:16 : zone en discount de l’impulsion, pas de vente', early.e.signal === 'attendre' && !early.e.checklist.find(c => c.key === 'pd')!.ok, early.e.waitCondition ?? '');
-  // 06:46 : l'impulsion s'est prolongée (3981.84), le FVG est maintenant dans la moitié premium
+  // 06:46 : l'impulsion s'est prolongée (3981.84), le FVG est maintenant dans la moitié premium.
+  // Toutes les étapes sont réunies SAUF le R:R : 1:2,3 jusqu'au TP2, sous le minimum de 1:2,5 (règles 3.8).
   const { e, errs } = run(all, Date.parse('2026-10-30T06:46:00Z'));
-  ok('30/10 06:46 : vente proposée', e.signal === 'vendre', e.waitCondition ?? '');
   const ck = (k: string) => e.checklist.find(c => c.key === k)!;
-  ok('Toutes les étapes obligatoires validées', e.checklist.filter(c => c.core).every(c => c.ok));
+  const missing = e.checklist.filter(c => c.core && !c.ok).map(c => c.key);
+  ok('30/10 06:46 : seul le R:R manque (1:2,5 exigé), pas de vente', e.signal === 'attendre' && missing.join() === 'rr', `${missing.join()} — ${ck('rr').detail}`);
   ok('Stop au-dessus du plus haut du balayage (4009.62)', !!e.setup && e.setup.sl > 4009.62, `${e.setup?.sl}`);
   ok('Zone en premium de l’impulsion', ck('pd').ok, ck('pd').detail);
   ok('Ordre : balayage puis CHoCH', ck('sweep').detail.includes('05:45') && ck('choch').detail.includes('06:00'));

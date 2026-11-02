@@ -162,6 +162,7 @@ function buildServer() {
           bougies_japonaises: (a.candlePatterns || []).map(p => ({ figure: p.name, sens: p.dir, ut: p.tf, heure_utc: new Date(p.t).toISOString(), dans_la_zone: p.inZone, detail: p.detail })),
           notes: a.final.notes,
           ia_interne: a.ai ? { moteur: a.ai.engine, verdict: a.ai.verdict, resume: a.ai.resume, plan: a.ai.plan, invalidation: a.ai.invalidation } : a.aiError,
+          pipeline_gemini: a.pipeline ? { statut: a.pipeline.status, message: a.pipeline.message, gemini: a.pipeline.gemini, controles: a.pipeline.guard?.checks ?? [] } : null,
         });
       } catch (err: any) {
         return fail(err instanceof AnalysisError ? err.message : `Erreur : ${err.message}`);

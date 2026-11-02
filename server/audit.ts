@@ -1,7 +1,7 @@
 // Contrôleur de cohérence du moteur : vérifie qu'une analyse ne se contredit pas elle-même.
 // Utilisé par les tests (données synthétiques et réelles). Renvoie la liste des incohérences trouvées.
 import { TF_MS, type Candle, type Timeframe } from './marketData';
-import { GRADE_A, findShock, type EngineResult } from './smc';
+import { GRADE_A, MIN_RR, findShock, type EngineResult } from './smc';
 import { marketClosed } from './time';
 
 export interface AuditContext {
@@ -77,7 +77,7 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
     if (ok('amd') && e.amd.direction !== (long ? 'haussière' : 'baissière')) err('AMD coché contre le sens du cycle');
     if (ok('trendline') && !e.ict.trendlines.some(t => t.intact && (long ? t.side === 'buy' && t.priceNow > s.entry : t.side === 'sell' && t.priceNow < s.entry))) err('trendline cochée sans trendline valide');
     if (ok('candle') && !e.ict.candlePatterns.some(p => p.inZone && p.dir === (long ? 'haussier' : 'baissier'))) err('bougie japonaise cochée sans figure dans la zone');
-    if (ok('rr') !== ((s.rr2 ?? s.rr1) >= 2)) err('case R:R incohérente avec le plan');
+    if (ok('rr') !== ((s.rr2 ?? s.rr1) >= MIN_RR)) err('case R:R incohérente avec le plan');
   } else {
     for (const k of ['zone', 'rr', 'sweep', 'choch', 'htf', 'amd', 'pd', 'ltf', 'displacement', 'trendline', 'candle', 'htfzone']) if (ok(k)) err(`critère « ${k} » coché sans plan`);
   }

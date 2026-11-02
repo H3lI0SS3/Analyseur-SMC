@@ -51,7 +51,7 @@ Figures de retournement valables après un mouvement, idéalement dans la zone d
 2. Déclencheur, dans cet ordre sur M15 : balayage (mèche au-delà d'un sommet/creux, clôture revenue) → displacement (bougie impulsive) → CHoCH/MSS net dans le sens du trade. Annulé si une bougie clôture au-delà de l'extrême du balayage ou si la structure M15 se retourne.
 3. Zone : le FVG (ou l'OB) né de l'impulsion du CHoCH, dans la moitié premium (vente) ou discount (achat) de la vague. Bonus si elle repose sur un OB/FVG H1 ou H4.
 4. Timing : balayage ou cassure en kill zone de Londres ou de New York, aucune annonce forte à ±30 min.
-Exécution : ordre limite au début du FVG (ou au marché si le prix est déjà dedans), stop juste au-delà de l'extrême du balayage, objectif sur la liquidité opposée avec un R:R net d'au moins 1:2.
+Exécution : ordre limite au début du FVG (ou au marché si le prix est déjà dedans), stop juste au-delà de l'extrême du balayage, objectif sur la liquidité opposée avec un R:R net d'au moins 1:2,5 (règles 3.8).
 
 ## 6. Score de qualité (0 à 100, pas une probabilité)
 - D1 et H4 alignés : 20 (H4 seul, D1 neutre : 10)

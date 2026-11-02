@@ -284,7 +284,34 @@ export interface AnalysisResponse {
   engine: EngineResult;
   ai: AiReview | null;
   aiError: string | null;
+  /** pipeline Gemini (JSON structuré) recontrôlé par le serveur */
+  pipeline?: PipelineReport | null;
   final: { signal: Signal; plan: FinalPlan | null; notes: string[] };
+}
+
+export type PipelineStepKey = 'htf' | 'declencheur' | 'zone' | 'risque';
+export interface PipelineGemini {
+  statut: 'VALIDÉ' | 'REJETÉ';
+  etape_echec: PipelineStepKey | null;
+  raison: string;
+  symbole: string;
+  timeframe: 'M15';
+  direction: 'BUY' | 'SELL' | null;
+  entree: number | null;
+  stop_loss: number | null;
+  take_profit: number | null;
+  rr: number | null;
+  fvg: { haut: number; bas: number; position_vague: number } | null;
+  etapes: Record<PipelineStepKey, { ok: boolean; detail: string }>;
+}
+export interface PipelineReport {
+  status: 'VALIDÉ' | 'REJETÉ' | 'INDISPONIBLE';
+  message: string;
+  gemini: PipelineGemini | null;
+  guard: { decision: 'VALIDÉ' | 'REJETÉ'; reason: string; checks: { key: string; label: string; ok: boolean; detail: string }[]; rrServer: number | null } | null;
+  model: string | null;
+  latencyMs: number;
+  payloadTokens: number;
 }
 
 export interface RiskSettings {

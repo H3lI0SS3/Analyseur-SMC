@@ -8,6 +8,7 @@ import { analyze, RULES_VERSION, type EngineResult } from './smc';
 /** Délai maximal de la relecture IA (au-delà, le prix « en direct » vieillit et l'analyse paraît bloquée). */
 export const AI_TIMEOUT_MS = 35_000;
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
+import { runPipeline, PIPELINE_TIMEOUT_MS, type PipelineReport } from './pipeline';
 
 export const compact = (c: Candle[], n: number, dec: number) =>
   c
@@ -217,7 +218,12 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
       : providers.includes('claude')
       ? 'claude'
       : providers[0] || null;
-  if (chosen) {
+  let pipeline: PipelineReport | null = null;
+  if (chosen === 'gemini' && !futuresProxy && !image) {
+    // Gemini : pipeline SMC strict en JSON structuré, recontrôlé par le serveur (double validation)
+    pipeline = await runPipeline({ symbol: pair, decimals: info.decimals, now, series, engine, costs, timeoutMs: PIPELINE_TIMEOUT_MS });
+    if (pipeline.status === 'INDISPONIBLE') aiError = pipeline.message;
+  } else if (chosen) {
     try {
       const img = image && typeof image.base64 === 'string' && image.base64.length < 11_000_000 ? image : undefined;
       // l'IA ne doit jamais bloquer l'analyse : au-delà de AI_TIMEOUT_MS on rend le résultat du moteur seul
@@ -245,6 +251,12 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   }
 
   const final = reconcile(engine, ai, info.decimals, costs);
+  // Double validation : un trade du moteur refusé par le pipeline Gemini (ou par le contrôle serveur) n'est pas pris.
+  if (pipeline && final.signal !== 'attendre' && pipeline.status === 'REJETÉ') {
+    final.signal = 'attendre';
+    final.notes.unshift(`Pipeline Gemini : ${pipeline.message}`);
+  }
+  if (pipeline?.status === 'INDISPONIBLE' && final.signal !== 'attendre') warnings.push(pipeline.message);
 
   if (newsCut) final.notes.push(newsCut);
   if (blockers.length || marketIsClosed) {
@@ -258,7 +270,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     engine.alternatives = [];
   }
   warnings.unshift(...blockers);
-  const verdict = buildVerdict(engine, final, ai, blockers, candlePatterns);
+  const verdict = buildVerdict(engine, final, ai, blockers, candlePatterns, pipeline);
 
   return {
     verdict,
@@ -277,6 +289,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     engine,
     ai,
     aiError,
+    pipeline,
     final,
     candlePatterns,
   };
@@ -299,7 +312,8 @@ function buildVerdict(
   final: { signal: 'acheter' | 'vendre' | 'attendre'; plan: FinalPlan | null; notes: string[] },
   ai: AiReview | null,
   blockers: string[],
-  patterns: CandlePattern[] = []
+  patterns: CandlePattern[] = [],
+  pipeline: PipelineReport | null = null
 ): Verdict {
   const pour: string[] = [];
   const contre: string[] = [];
@@ -315,6 +329,10 @@ function buildVerdict(
     const fmtP = (p: CandlePattern) => `${p.name} en ${p.tf} à ${maTime(p.t)}${p.inZone ? ', dans la zone d’entrée' : ''}`;
     const against = patterns.filter(p => p.dir !== want);
     if (against.length) contre.push(`Bougies japonaises — ${against.map(fmtP).join(' ; ')} : figure de retournement contre le trade.`);
+  }
+  if (pipeline && pipeline.status !== 'INDISPONIBLE') {
+    const l = `Pipeline Gemini (${pipeline.model}) : ${pipeline.status}. ${pipeline.message}`;
+    (pipeline.status === 'VALIDÉ' ? pour : contre).push(l);
   }
   if (ai) {
     const l = `Relecture IA (${ai.engine}) : ${ai.verdict}. ${ai.resume}`;

@@ -10,7 +10,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import type { AnalysisResponse, RiskSettings, Status, Timeframe } from '../types';
+import type { AnalysisResponse, PipelineReport, RiskSettings, Status, Timeframe } from '../types';
 import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 
@@ -167,6 +167,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
   return (
     <div className="space-y-3">
       {a.verdict && <VerdictCard v={a.verdict} stats={stats} score={e.setup ? e.score : null} grade={e.setup ? e.grade : undefined} />}
+      {a.pipeline && <PipelineCard p={a.pipeline} dec={dec} />}
 
       {/* Verdict */}
       <section
@@ -679,5 +680,68 @@ function BrokerPriceBox({ a, broker }: { a: AnalysisResponse; broker: ReturnType
         <p className="mt-1 text-[11px] text-warn">Analyse faite il y a plus d’une minute : relance l’analyse puis saisis le prix tout de suite, sinon le recalage peut être faux.</p>
       )}
     </div>
+  );
+}
+
+const STEP_LABELS: Record<'htf' | 'declencheur' | 'zone' | 'risque', string> = {
+  htf: '1. Contexte HTF',
+  declencheur: '2. Sweep → displacement → CHoCH',
+  zone: '3. FVG en premium / discount',
+  risque: '4. Stop, TP et R:R',
+};
+
+/** Résultat du pipeline Gemini, tel que recontrôlé par le serveur. Les niveaux affichés sont ceux du contrôle. */
+function PipelineCard({ p, dec }: { p: PipelineReport; dec: number }) {
+  const g = p.gemini;
+  const tone = p.status === 'VALIDÉ' ? 'bg-up/15 text-up' : p.status === 'REJETÉ' ? 'bg-down/15 text-down' : 'bg-warn/15 text-warn';
+  const disagree = g && g.statut === 'VALIDÉ' && p.status === 'REJETÉ';
+  return (
+    <section className="card p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="label flex items-center gap-1.5">
+          <Sparkles className="h-3.5 w-3.5 text-gold" /> Pipeline SMC Gemini (double validation)
+        </div>
+        <span className={cx('rounded px-1.5 py-0.5 text-[10px] font-bold', tone)}>{p.status}</span>
+      </div>
+      <p className="text-xs leading-snug text-ink/90">{p.message}</p>
+      {disagree && <p className="mt-1 text-[11px] text-warn">Gemini avait validé, le contrôle serveur sur les vraies bougies a refusé : on ne trade pas.</p>}
+      {g && (
+        <ul className="mt-3 space-y-1.5 text-[11px]">
+          {(Object.keys(STEP_LABELS) as (keyof typeof STEP_LABELS)[]).map(k => (
+            <li key={k} className="flex gap-2">
+              <span className={g.etapes[k].ok ? 'text-up' : 'text-down'}>{g.etapes[k].ok ? '✓' : '✗'}</span>
+              <span>
+                <span className="font-semibold">{STEP_LABELS[k]}</span> — <span className="text-mute">{g.etapes[k].detail}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {g?.statut === 'VALIDÉ' && g.direction && g.entree !== null && (
+        <div className="mt-3 grid grid-cols-4 gap-2 rounded-lg bg-card2 px-3 py-2 text-[11px]">
+          <div><div className="text-mute">Sens</div><div className="num font-semibold">{g.direction === 'BUY' ? 'Achat' : 'Vente'}</div></div>
+          <div><div className="text-mute">Entrée</div><div className="num">{fmt(g.entree, dec)}</div></div>
+          <div><div className="text-mute">Stop</div><div className="num">{fmt(g.stop_loss, dec)}</div></div>
+          <div><div className="text-mute">TP</div><div className="num">{fmt(g.take_profit, dec)}</div></div>
+          <div className="col-span-4 text-mute">R:R recalculé par le serveur : 1:{p.guard?.rrServer?.toFixed(2) ?? '—'} (Gemini : 1:{g.rr?.toFixed(2)})</div>
+        </div>
+      )}
+      {p.guard && p.guard.checks.length > 0 && (
+        <details className="mt-2 text-[11px]">
+          <summary className="cursor-pointer text-mute">Contrôles serveur ({p.guard.checks.filter(c => c.ok).length}/{p.guard.checks.length})</summary>
+          <ul className="mt-1 space-y-1">
+            {p.guard.checks.map(c => (
+              <li key={c.key} className="flex gap-2">
+                <span className={c.ok ? 'text-up' : 'text-down'}>{c.ok ? '✓' : '✗'}</span>
+                <span>{c.label} — <span className="text-mute">{c.detail}</span></span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <p className="mt-2 text-[10px] text-mute">
+        {p.model ? `${p.model} · ` : ''}{(p.latencyMs / 1000).toFixed(1)} s · ~{p.payloadTokens} tokens envoyés. Un trade n’est proposé que si le moteur ET Gemini sont d’accord.
+      </p>
+    </section>
   );
 }
