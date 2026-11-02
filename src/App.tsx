@@ -67,8 +67,14 @@ export default function App() {
         .then(j => setQuotes(j.quotes || {}))
         .catch(() => {});
     get();
-    const id = setInterval(get, 30_000);
-    return () => clearInterval(id);
+    // onglet caché : pas de rafraîchissement (économise le quota de données), reprise dès qu'il redevient visible
+    const id = setInterval(() => document.visibilityState === 'visible' && get(), 30_000);
+    const onVis = () => document.visibilityState === 'visible' && get();
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [reloadKey]);
 
   const pairs = status?.pairs || FALLBACK_PAIRS;
@@ -134,7 +140,7 @@ export default function App() {
       }
     };
     tick();
-    const id = setInterval(tick, 60_000);
+    const id = setInterval(() => document.visibilityState === 'visible' && tick(), 60_000);
     return () => {
       alive = false;
       clearInterval(id);

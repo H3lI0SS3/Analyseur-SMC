@@ -50,7 +50,7 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 60_000);
+    const id = setInterval(() => document.visibilityState === 'visible' && load(), 60_000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pair, tf, reload]);

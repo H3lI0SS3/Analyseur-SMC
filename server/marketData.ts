@@ -68,7 +68,9 @@ export interface SeriesResult {
 }
 
 // Offre gratuite Twelve Data : 800 crédits/jour. M15 rafraîchi toutes les 2 min, H1 toutes les 5 min.
-const CACHE_TTL: Record<'M15' | 'H1', number> = { M15: 120_000, H1: 300_000 };
+// Crédits Twelve Data limités (800 / jour) : M15 rafraîchi toutes les 5 min pour l'affichage (une analyse force 30 s),
+// H1 toutes les 15 min. Avec l'app ouverte toute la journée : ~30 crédits / heure au lieu de ~85.
+const CACHE_TTL: Record<'M15' | 'H1', number> = { M15: 300_000, H1: 900_000 };
 const cache = new Map<string, SeriesResult>();
 const inflight = new Map<string, Promise<SeriesResult>>();
 
@@ -103,6 +105,7 @@ export async function getLivePrice(pairId: string): Promise<{ price: number; at:
   try {
     await twelveSlot();
     const res = await fetch(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(pair.twelveSymbol)}&apikey=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(6_000) });
+    if (res.status === 429) await twelveCheck(res); // bloque les appels suivants
     const json: any = await res.json();
     const price = Number(json?.price);
     if (!res.ok || !Number.isFinite(price) || price <= 0) return null;
@@ -172,7 +175,32 @@ async function getRaw(pairId: string, tf: 'M15' | 'H1', maxAgeMs?: number): Prom
 
 // ---------- Limiteur Twelve Data (offre gratuite : 8 requêtes / minute) ----------
 const twelveCalls: number[] = [];
+/** Twelve Data a répondu 429 : plus d'appel avant cette heure (fin de minute, ou minuit UTC si le quota du jour est épuisé). */
+let twelveBlockedUntil = 0;
+let twelveBlockedMsg = '';
+const nextUtcMidnight = (t: number) => Math.floor(t / 86_400_000) * 86_400_000 + 86_400_000;
+
+export function twelveLimitMessage(): string | null {
+  return Date.now() < twelveBlockedUntil ? twelveBlockedMsg : null;
+}
+
+/** Lève une erreur claire et bloque les appels suivants si Twelve Data refuse pour quota. */
+async function twelveCheck(res: Response): Promise<void> {
+  if (res.status !== 429) {
+    if (!res.ok) throw new Error(`Twelve Data HTTP ${res.status}`);
+    return;
+  }
+  const body = await res.text().catch(() => '');
+  const daily = /day|daily|jour/i.test(body);
+  twelveBlockedUntil = daily ? nextUtcMidnight(Date.now()) + 60_000 : Date.now() + 61_000;
+  twelveBlockedMsg = daily
+    ? 'Quota quotidien de Twelve Data épuisé (800 requêtes / jour sur l’offre gratuite) : nouvelles données à minuit UTC (00h00 au Maroc).'
+    : 'Limite de Twelve Data par minute atteinte : réessaie dans une minute.';
+  throw new Error(twelveBlockedMsg);
+}
+
 async function twelveSlot() {
+  if (Date.now() < twelveBlockedUntil) throw new Error(twelveBlockedMsg);
   for (;;) {
     const now = Date.now();
     while (twelveCalls.length && now - twelveCalls[0] > 60_000) twelveCalls.shift();
@@ -191,7 +219,7 @@ async function fetchTwelve(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string, siz
     `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair.twelveSymbol)}` +
     `&interval=${interval}&outputsize=${size}&timezone=UTC&order=ASC&apikey=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) throw new Error(`Twelve Data HTTP ${res.status}`);
+  await twelveCheck(res);
   const json: any = await res.json();
   if (json.status === 'error' || !Array.isArray(json.values)) {
     throw new Error(`Twelve Data : ${json.message || 'réponse invalide'}`);
@@ -269,7 +297,7 @@ async function fetchTwelveDeep(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string,
       `&interval=${interval}&outputsize=5000&timezone=UTC&order=ASC&apikey=${encodeURIComponent(apiKey)}` +
       (endDate ? `&end_date=${encodeURIComponent(endDate)}` : '');
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-    if (!res.ok) throw new Error(`Twelve Data HTTP ${res.status}`);
+    await twelveCheck(res);
     const json: any = await res.json();
     if (json.status === 'error' || !Array.isArray(json.values) || !json.values.length) {
       if (page === 0) throw new Error(`Twelve Data : ${json.message || 'réponse invalide'}`);
