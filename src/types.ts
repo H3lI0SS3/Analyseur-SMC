@@ -299,7 +299,7 @@ export interface RiskSettings {
   /** commission aller-retour par lot, en $ */
   commissionPerLot: number;
   /** broker utilisé : change l'affichage de la taille de position */
-  broker?: 'etoro' | 'mt5';
+  broker?: 'etoro' | 'mt5' | 'cent';
   /** levier choisi sur eToro (ex. 30 pour 1:30) */
   leverageEur?: number;
   leverageGold?: number;

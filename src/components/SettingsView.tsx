@@ -22,24 +22,29 @@ export function SettingsView({ settings, setSettings, status }: Props) {
     <div className="space-y-3">
       <section className="card space-y-4 p-4">
         <div className="label">Gestion du risque</div>
-        <Field label="Capital du compte ($)" value={settings.capital} step={100} min={100} onChange={v => set({ capital: v })} />
+        <Field label="Capital du compte ($)" value={settings.capital} step={10} min={10} onChange={v => set({ capital: v })} />
         <Field label="Risque par trade (%)" value={settings.riskPct} step={0.25} min={0.1} max={2} onChange={v => set({ riskPct: Math.min(2, v) })} hint="Recommandé : 0,5 à 1 %. Plafonné à 2 %." />
         <Field label="Perte max par jour (%)" value={settings.dailyLossPct} step={0.5} min={0.5} max={10} onChange={v => set({ dailyLossPct: v })} hint="Compte les pertes du jour + le risque des trades encore ouverts. Au-delà, plus de nouveau trade au journal." />
       </section>
 
       <section className="card space-y-4 p-4">
         <div className="label">Broker</div>
-        <div className="grid grid-cols-2 gap-2">
-          {([['etoro', 'eToro'], ['mt5', 'MT5 (lots)']] as const).map(([k, l]) => (
+        <div className="grid grid-cols-3 gap-2">
+          {([['etoro', 'eToro'], ['mt5', 'MT5 (lots)'], ['cent', 'Compte cent']] as const).map(([k, l]) => (
             <button
               key={k}
-              onClick={() => set(k === 'etoro' ? { broker: k, commissionPerLot: 0 } : { broker: k })}
+              onClick={() => set(k === 'mt5' ? { broker: k } : { broker: k, commissionPerLot: 0 })}
               className={cx('rounded-lg border py-2 text-sm', (settings.broker ?? 'etoro') === k ? 'border-gold bg-gold/10 text-gold' : 'border-line text-mute')}
             >
               {l}
             </button>
           ))}
         </div>
+        {settings.broker === 'cent' && (
+          <p className="text-[11px] leading-snug text-mute">
+            Compte cent (ex. Exness Standard Cent) : saisis ton capital en dollars (5 000 USC = 50 $). Les tailles sont données en lots cent (1 lot cent = 1/100 de lot standard). Vérifie dans la « Spécification » du symbole que c’est bien le cas chez ton broker.
+          </p>
+        )}
         {(settings.broker ?? 'etoro') === 'etoro' && (
           <>
             <Field label="Levier eToro EUR/USD (1:x)" value={settings.leverageEur ?? 30} step={1} min={1} max={400} onChange={v => set({ leverageEur: v })} hint="1 = sans levier. Le levier ne change pas ton risque (fixé par le stop et ton % de risque) : il change seulement le montant à bloquer." />

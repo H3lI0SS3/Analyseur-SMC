@@ -28,19 +28,32 @@ export function costsFor(pair: string, s: RiskSettings) {
  * Lots arrondis à 0,01 vers le bas pour ne jamais dépasser le risque choisi.
  * Perte par lot si le stop est touché = distance x contrat + commission.
  */
-export function lotSize(pair: string, capital: number, riskPct: number, entry: number, sl: number, commissionPerLot = 0): number | null {
-  const contract = CONTRACT[pair];
+/** Compte cent (Exness Standard Cent…) : 1 lot cent = 1/100 de lot standard. */
+export const CENT_SCALE = 100;
+export const lotScale = (broker?: string) => (broker === 'cent' ? CENT_SCALE : 1);
+
+/**
+ * Taille de position (en lots du compte : standard, ou cent si scale = 100), arrondie à 0,01 vers le bas.
+ * Renvoie 0 si même le lot minimum dépasse le risque autorisé.
+ */
+export function lotSize(pair: string, capital: number, riskPct: number, entry: number, sl: number, commissionPerLot = 0, scale = 1): number | null {
+  const contract = (CONTRACT[pair] || 0) / scale;
   const dist = Math.abs(entry - sl);
   if (!contract || !dist || capital <= 0 || riskPct <= 0) return null;
   const riskUsd = (capital * riskPct) / 100;
-  const lossPerLot = dist * contract + Math.max(0, commissionPerLot);
-  const lots = Math.floor((riskUsd / lossPerLot) * 100) / 100;
+  const lossPerLot = dist * contract + Math.max(0, commissionPerLot) / scale;
+  const lots = Math.floor((riskUsd / lossPerLot) * 100 + 1e-9) / 100;
   return lots > 0 ? lots : 0;
 }
 
-/** Perte réelle en $ si le stop est touché, avec la taille arrondie. */
-export function realRiskUsd(pair: string, lots: number, entry: number, sl: number, commissionPerLot = 0): number {
-  return lots * (Math.abs(entry - sl) * (CONTRACT[pair] || 0) + Math.max(0, commissionPerLot));
+/** Perte réelle en $ si le stop est touché, avec la taille arrondie (lots du compte). */
+export function realRiskUsd(pair: string, lots: number, entry: number, sl: number, commissionPerLot = 0, scale = 1): number {
+  return lots * (Math.abs(entry - sl) * ((CONTRACT[pair] || 0) / scale) + Math.max(0, commissionPerLot) / scale);
+}
+
+/** Perte en $ avec le lot minimum (0,01) : sert à expliquer pourquoi la taille tombe à 0. */
+export function minLotRiskUsd(pair: string, entry: number, sl: number, commissionPerLot = 0, scale = 1): number {
+  return realRiskUsd(pair, 0.01, entry, sl, commissionPerLot, scale);
 }
 
 export function distanceLabel(pair: string, a: number, b: number): string {

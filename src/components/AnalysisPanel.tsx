@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResponse, RiskSettings, Status, Timeframe } from '../types';
-import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotSize, realRiskUsd, riskForGrade } from '../lib/utils';
+import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 
 interface Props {
@@ -156,8 +156,10 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
   const okCount = e.checklist.filter(c => c.ok).length;
   const comm = a.costs?.commissionPerLot ?? 0;
   const riskPct = riskForGrade(settings.riskPct, e.grade);
-  const lots = plan ? lotSize(a.pair, settings.capital, riskPct, plan.entry, plan.sl, comm) : null;
-  const riskUsd = plan && lots ? realRiskUsd(a.pair, lots, plan.entry, plan.sl, comm) : (settings.capital * riskPct) / 100;
+  const scale = lotScale(settings.broker);
+  const cent = settings.broker === 'cent';
+  const lots = plan ? lotSize(a.pair, settings.capital, riskPct, plan.entry, plan.sl, comm, scale) : null;
+  const riskUsd = plan && lots ? realRiskUsd(a.pair, lots, plan.entry, plan.sl, comm, scale) : (settings.capital * riskPct) / 100;
   const tfs: Timeframe[] = ['D1', 'H4', 'H1', 'M15'];
   const broker = useBrokerOffset(a);
   const shift = (v: number | null) => (v === null ? null : v + broker.offset);
@@ -288,18 +290,22 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
               })()
             ) : (
               <div className="flex justify-between">
-                <span className="text-mute">Taille pour {riskPct} % de risque{e.grade === 'B' ? ' (classe B : risque divisé par 2)' : ''}</span>
-                <span className="num font-semibold">{lots === null ? '—' : `${lots.toFixed(2)} lot`}</span>
+                <span className="text-mute">{cent ? 'Compte cent, taille' : 'Taille'} pour {riskPct} % de risque{e.grade === 'B' ? ' (classe B : risque divisé par 2)' : ''}</span>
+                <span className="num font-semibold">{lots === null ? '—' : `${lots.toFixed(2)} lot${cent ? ' cent' : ''}`}</span>
               </div>
             )}
             <div className="mt-1 flex justify-between">
               <span className="text-mute">Perte réelle si SL touché</span>
-              <span className="num">≈ {riskUsd.toFixed(0)} $</span>
+              <span className="num">≈ {riskUsd < 10 ? riskUsd.toFixed(2) : riskUsd.toFixed(0)} ${cent ? ` (${(riskUsd * 100).toFixed(0)} USC)` : ''}</span>
             </div>
             <div className="mt-1 text-[10px] text-mute">
               R:R nets : spread {a.pair === 'XAU/USD' ? `${a.costs.spread.toFixed(2)} $` : `${(a.costs.spread / 0.0001).toFixed(1)} pip`} et commission {comm} $/lot inclus.
             </div>
-            {lots === 0 && <p className="mt-1 text-warn">Stop trop large pour ton capital : taille inférieure au minimum.</p>}
+            {lots === 0 && (
+              <p className="mt-1 text-warn">
+                Stop trop large pour ton capital : même 0,01 lot{cent ? ' cent' : ''} ferait perdre ≈ {minLotRiskUsd(a.pair, plan.entry, plan.sl, comm, scale).toFixed(2)} $ ({((minLotRiskUsd(a.pair, plan.entry, plan.sl, comm, scale) / settings.capital) * 100).toFixed(1)} % du compte, au lieu de {riskPct} %). Ne prends pas ce trade{cent ? '' : ', ou passe sur un compte cent'}.
+              </p>
+            )}
             {(settings.broker ?? 'etoro') === 'etoro' && (
               <p className="mt-1 text-[10px] text-mute">Sur eToro : saisis le montant avec ce levier, vérifie que le nombre d’unités affiché correspond, puis pose le stop loss et le take profit aux niveaux ci-dessus.</p>
             )}

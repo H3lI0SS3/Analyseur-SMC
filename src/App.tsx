@@ -6,7 +6,7 @@ import { JournalView } from './components/JournalView';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
-import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct } from './lib/utils';
+import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct } from './lib/utils';
 import { isTracked, strategyStats, trackJournal } from './lib/tracker';
 
 type Tab = 'analyse' | 'journal' | 'reglages';
@@ -95,7 +95,7 @@ export default function App() {
         tp: p.tp2 ?? p.tp1,
         rrPlanned: p.rr2 ?? p.rr1,
         riskPct: riskForGrade(settings.riskPct, a.engine.grade),
-        lots: lotSize(a.pair, settings.capital, riskForGrade(settings.riskPct, a.engine.grade), p.entry, p.sl, costs.commissionPerLot),
+        lots: lotSize(a.pair, settings.capital, riskForGrade(settings.riskPct, a.engine.grade), p.entry, p.sl, costs.commissionPerLot, lotScale(settings.broker)),
         result: p.entryType === 'limite' ? 'attente' : 'en_cours',
         rMultiple: null,
         note: '',
