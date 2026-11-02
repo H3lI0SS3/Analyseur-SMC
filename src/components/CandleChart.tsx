@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { AnalysisResponse, Candle, Timeframe } from '../types';
-import { api, cx, fmt, localDateTime } from '../lib/utils';
+import { api, cx, fmt, localDateTime, readJson } from '../lib/utils';
 
 interface Props {
   pair: string;
@@ -35,7 +35,7 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
     setLoading(true);
     try {
       const r = await api(`/api/candles?pair=${encodeURIComponent(pair)}&tf=${tf}`);
-      const j = await r.json();
+      const j = await readJson(r);
       if (!r.ok) throw new Error(j.error || 'Erreur');
       setCandles(j.candles);
       setMeta({ source: j.source, fetchedAt: j.fetchedAt });

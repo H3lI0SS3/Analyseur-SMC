@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FlaskConical, Loader2 } from 'lucide-react';
 import type { BacktestJob, LabStats, RiskSettings, VariantStats } from '../types';
-import { api, costsFor, cx, localDateTime } from '../lib/utils';
+import { api, costsFor, cx, localDateTime, readJson } from '../lib/utils';
 
 interface Props {
   pair: string;
@@ -17,7 +17,7 @@ export function BacktestCard({ pair, settings }: Props) {
   const poll = async () => {
     try {
       const r = await api(`/api/backtest?pair=${encodeURIComponent(pair)}`);
-      const j: BacktestJob = await r.json();
+      const j: BacktestJob = await readJson(r);
       setJob(j);
       if (j.status === 'en cours' && !timer.current) timer.current = setInterval(poll, 3000);
       if (j.status !== 'en cours' && timer.current) {
@@ -45,7 +45,7 @@ export function BacktestCard({ pair, settings }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pair, ...costsFor(pair, settings) }),
       });
-      const j = await r.json();
+      const j = await readJson(r);
       if (!r.ok) throw new Error(j.error || 'Erreur');
       setJob(j);
       if (!timer.current) timer.current = setInterval(poll, 3000);

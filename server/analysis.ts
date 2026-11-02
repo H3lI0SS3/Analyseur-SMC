@@ -154,7 +154,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   } catch (err: any) {
     throw new AnalysisError(
       `Impossible de récupérer les données de marché réelles (${err.message}). Aucune analyse n'est produite sans vraies données.`,
-      502
+      424
     );
   }
   const source = results[0].source;
@@ -173,7 +173,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
       newsCurrencies: NEWS_CURRENCIES[pair],
     });
   } catch (err: any) {
-    throw new AnalysisError(`Analyse impossible : ${err.message}`, 502);
+    throw new AnalysisError(`Analyse impossible : ${err.message}`, 424);
   }
 
   // ----- Ordre limite et annonces : l'ordre doit être annulé 30 min avant la prochaine annonce forte -----

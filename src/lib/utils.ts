@@ -134,6 +134,23 @@ export async function api(url: string, init: RequestInit = {}): Promise<Response
   return res;
 }
 
+/**
+ * Lit une réponse JSON de l'API. Si le serveur renvoie autre chose (page HTML d'un proxy, serveur qui redémarre),
+ * lève une erreur claire au lieu de « Unexpected token '<' ».
+ */
+export async function readJson<T = any>(res: Response): Promise<T> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(
+      res.status >= 500 || text.trimStart().startsWith('<')
+        ? `Serveur de l’app indisponible (HTTP ${res.status}) : il redémarre peut-être après une mise à jour. Réessaie dans une minute.`
+        : `Réponse illisible du serveur (HTTP ${res.status}).`
+    );
+  }
+}
+
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
 /** Risque à appliquer selon la classe du setup : classe B = risque divisé par deux (grille SMC). */

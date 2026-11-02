@@ -6,7 +6,7 @@ import { JournalView } from './components/JournalView';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
-import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct } from './lib/utils';
+import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson } from './lib/utils';
 import { isTracked, strategyStats, trackJournal } from './lib/tracker';
 
 type Tab = 'analyse' | 'journal' | 'reglages';
@@ -52,7 +52,7 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/status')
-      .then(r => r.json())
+      .then(r => readJson(r))
       .then((s: Status) => {
         setStatus(s);
         if (s.accessRequired && !getAccessCode()) setNeedCode(true);
@@ -63,7 +63,7 @@ export default function App() {
   useEffect(() => {
     const get = () =>
       api('/api/quotes')
-        .then(r => r.json())
+        .then(r => readJson(r))
         .then(j => setQuotes(j.quotes || {}))
         .catch(() => {});
     get();
@@ -225,6 +225,11 @@ export default function App() {
       </header>
 
       <main className="space-y-3 px-4 pt-3">
+        {/* Données indisponibles : on affiche la vraie raison (quota, source en panne…) */}
+        {(() => {
+          const err = Object.values(quotes).find((q: any) => q?.error) as { error?: string } | undefined;
+          return err?.error ? <div className="card border-down/50 px-3 py-2 text-[11px] leading-snug text-down">{err.error}</div> : null;
+        })()}
         {/* Garde-fou perte journalière */}
         <div className={cx('card flex items-center gap-3 px-3 py-2', blocked && 'border-down/60')}>
           <ShieldAlert className={cx('h-4 w-4 shrink-0', blocked ? 'text-down' : 'text-gold')} />

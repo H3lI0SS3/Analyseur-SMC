@@ -2,7 +2,7 @@
 // Mêmes règles que le moteur : ordre limite annulé après sa validité (4 h) ou si TP1 est atteint avant l'exécution,
 // stop vérifié avant l'objectif dans la même bougie, 50 % à TP1 puis stop au point d'entrée et reste à TP2.
 import type { JournalEntry } from '../types';
-import { api } from './utils';
+import { api, readJson } from './utils';
 
 export interface Candle {
   t: number;
@@ -120,7 +120,7 @@ export async function trackJournal(journal: JournalEntry[]): Promise<JournalEntr
       const since = Math.min(...open.filter(j => j.pair === p).map(j => j.createdAt));
       try {
         const r = await api(`/api/candles?pair=${encodeURIComponent(p)}&tf=M15&since=${since}`);
-        if (r.ok) byPair[p] = (await r.json()).candles || [];
+        if (r.ok) byPair[p] = (await readJson(r)).candles || [];
       } catch {
         /* on réessaiera au prochain tour */
       }

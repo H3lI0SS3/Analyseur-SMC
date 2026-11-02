@@ -62,7 +62,8 @@ app.get('/api/candles', async (req, res) => {
     const candles = Number.isFinite(since) && since > 0 ? s.candles.filter(c => c.t >= since - TF_MS[tf]).slice(-700) : s.candles.slice(-150);
     res.json({ pair, tf, candles, source: s.source, futuresProxy: s.futuresProxy, fetchedAt: s.fetchedAt });
   } catch (err: any) {
-    res.status(502).json({ error: `Données indisponibles : ${err.message}` });
+    // 424 et non 502 : le proxy de l'aperçu AI Studio remplace les 502/503 par une page HTML
+    res.status(424).json({ error: `Données indisponibles : ${err.message}` });
   }
 });
 

@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResponse, PipelineReport, RiskSettings, Status, Timeframe } from '../types';
-import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade } from '../lib/utils';
+import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade, readJson } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 
 interface Props {
@@ -73,7 +73,7 @@ export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, o
           image: image ? { base64: image.base64, mediaType: image.mediaType } : undefined,
         }),
       });
-      const j = await r.json();
+      const j = await readJson(r);
       if (!r.ok) throw new Error(j.error || 'Erreur pendant l’analyse.');
       setAnalysis(j);
     } catch (e: any) {
