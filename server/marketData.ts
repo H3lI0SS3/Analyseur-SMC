@@ -59,9 +59,13 @@ export interface SeriesResult {
   pair: string;
   tf: Timeframe;
   candles: Candle[];
-  source: 'Twelve Data' | 'Yahoo Finance';
+  source: string;
   /** true si l'or vient des futures (Yahoo) : niveaux non transposables chez le broker */
   futuresProxy: boolean;
+  /** données de secours (Yahoo Finance) parce que Twelve Data est épuisé ou en panne */
+  fallback?: boolean;
+  /** or de secours : futures recalées sur le spot de cet écart (futures − spot), si connu */
+  basis?: number | null;
   /** true si la source a échoué et qu'on ressert une donnée réelle plus ancienne */
   fromStaleCache: boolean;
   fetchedAt: number;
@@ -148,17 +152,24 @@ async function getRaw(pairId: string, tf: 'M15' | 'H1', maxAgeMs?: number): Prom
   const p = (async () => {
     try {
       const useTwelve = !!process.env.TWELVE_DATA_API_KEY;
-      const candles = useTwelve ? await fetchTwelve(pair, tf, process.env.TWELVE_DATA_API_KEY!) : await fetchYahoo(pair, tf);
-      if (candles.length < 60) throw new Error(`Pas assez de bougies reçues pour ${pairId} ${tf} (${candles.length}).`);
-      const res: SeriesResult = {
-        pair: pairId,
-        tf,
-        candles,
-        source: dataSourceName(),
-        futuresProxy: !useTwelve && pair.isFuturesOnYahoo,
-        fromStaleCache: false,
-        fetchedAt: Date.now(),
-      };
+      let res: SeriesResult;
+      if (useTwelve && !twelveLimitMessage()) {
+        try {
+          const candles = await fetchTwelve(pair, tf, process.env.TWELVE_DATA_API_KEY!);
+          if (candles.length < 60) throw new Error(`Pas assez de bougies reçues pour ${pairId} ${tf} (${candles.length}).`);
+          res = { pair: pairId, tf, candles, source: 'Twelve Data', futuresProxy: false, fromStaleCache: false, fetchedAt: Date.now() };
+          lastTwelve.set(key, res);
+        } catch (err) {
+          // quota épuisé ou panne de Twelve Data : bascule sur Yahoo Finance
+          res = await fromYahoo(pair, tf, key, `Twelve Data indisponible (${String((err as Error).message).slice(0, 80)})`);
+        }
+      } else if (useTwelve) {
+        res = await fromYahoo(pair, tf, key, twelveLimitMessage()!);
+      } else {
+        const candles = await fetchYahoo(pair, tf);
+        if (candles.length < 60) throw new Error(`Pas assez de bougies reçues pour ${pairId} ${tf} (${candles.length}).`);
+        res = { pair: pairId, tf, candles, source: 'Yahoo Finance', futuresProxy: pair.isFuturesOnYahoo, fromStaleCache: false, fetchedAt: Date.now() };
+      }
       cache.set(key, res);
       return res;
     } catch (err) {
@@ -232,6 +243,53 @@ async function fetchTwelve(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string, siz
     c: Number(v.close),
   }));
   return clean(out);
+}
+
+// ---------- Secours Yahoo Finance ----------
+/** Dernières séries Twelve Data reçues : servent à recaler les futures de l'or sur le spot en secours. */
+const lastTwelve = new Map<string, SeriesResult>();
+/** Dernier écart futures − spot connu par actif (valable pour toutes les unités de temps). */
+const lastBasis = new Map<string, { basis: number; at: number }>();
+
+/** Écart futures − spot (médiane sur les bougies communes), ou null s'il n'y a pas assez de recouvrement. */
+export function estimateBasis(futures: Candle[], spot: Candle[]): number | null {
+  const byT = new Map(spot.map(c => [c.t, c.c]));
+  const diffs = futures.filter(c => byT.has(c.t)).map(c => c.c - byT.get(c.t)!);
+  if (diffs.length < 8) return null;
+  diffs.sort((a, b) => a - b);
+  return diffs[Math.floor(diffs.length / 2)];
+}
+
+async function fromYahoo(pair: PairInfo, tf: 'M15' | 'H1', key: string, why: string): Promise<SeriesResult> {
+  const raw = await fetchYahoo(pair, tf);
+  if (raw.length < 60) throw new Error(`${why}. Secours Yahoo Finance : pas assez de bougies (${raw.length}).`);
+  let candles = raw;
+  let basis: number | null = null;
+  let futuresProxy = false;
+  if (pair.isFuturesOnYahoo) {
+    // or : Yahoo ne publie que les futures COMEX. On les recale sur le spot si on connaît l'écart.
+    const spot = lastTwelve.get(key);
+    basis = spot ? estimateBasis(raw, spot.candles) : null;
+    if (basis !== null) lastBasis.set(pair.id, { basis, at: Date.now() });
+    else {
+      // écart mesuré sur l'autre unité de temps dans les 24 dernières heures (il bouge de quelques cents par jour)
+      const known = lastBasis.get(pair.id);
+      if (known && Date.now() - known.at < 24 * 3_600_000) basis = known.basis;
+    }
+    if (basis === null) futuresProxy = true;
+    else candles = raw.map(c => ({ t: c.t, o: c.o - basis!, h: c.h - basis!, l: c.l - basis!, c: c.c - basis! }));
+  }
+  return {
+    pair: pair.id,
+    tf,
+    candles,
+    source: basis !== null ? `Yahoo Finance (secours, futures recalées −${basis.toFixed(2)} $)` : 'Yahoo Finance (secours)',
+    futuresProxy,
+    fallback: true,
+    basis,
+    fromStaleCache: false,
+    fetchedAt: Date.now(),
+  };
 }
 
 // ---------- Yahoo Finance ----------

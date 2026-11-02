@@ -228,7 +228,13 @@ export default function App() {
         {/* Données indisponibles : on affiche la vraie raison (quota, source en panne…) */}
         {(() => {
           const err = Object.values(quotes).find((q: any) => q?.error) as { error?: string } | undefined;
-          return err?.error ? <div className="card border-down/50 px-3 py-2 text-[11px] leading-snug text-down">{err.error}</div> : null;
+          if (err?.error) return <div className="card border-down/50 px-3 py-2 text-[11px] leading-snug text-down">{err.error}</div>;
+          const backup = Object.values(quotes).some((q: any) => typeof q?.source === 'string' && q.source.includes('secours'));
+          return backup ? (
+            <div className="card border-warn/50 px-3 py-2 text-[11px] leading-snug text-warn">
+              Twelve Data épuisé : données de secours Yahoo Finance (sans prix en direct). Recale toujours avec le prix de ton broker avant d’entrer.
+            </div>
+          ) : null;
         })()}
         {/* Garde-fou perte journalière */}
         <div className={cx('card flex items-center gap-3 px-3 py-2', blocked && 'border-down/60')}>

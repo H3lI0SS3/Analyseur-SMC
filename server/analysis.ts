@@ -196,12 +196,22 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   const lastT = series.M15[series.M15.length - 1].t;
   const marketIsClosed = marketClosed(now);
   if (futuresProxy) {
-    blockers.push('Prix de l’or issu des futures (écart de 10 à 40 $ avec ton broker) : niveaux masqués. Ajoute la clé TWELVE_DATA_API_KEY pour le prix spot.');
+    blockers.push(results.some(r => r.fallback)
+      ? 'Twelve Data épuisé et écart futures/spot de l’or inconnu : niveaux masqués (écart de 10 à 40 $ avec ton broker). L’or redevient disponible à minuit UTC ; EUR/USD fonctionne en secours.'
+      : 'Prix de l’or issu des futures (écart de 10 à 40 $ avec ton broker) : niveaux masqués. Ajoute la clé TWELVE_DATA_API_KEY pour le prix spot.');
   }
   if (incoherences.length) blockers.push(`Incohérence détectée dans l’analyse (${incoherences[0]}) : pas de signal par sécurité.`);
   if (fromStaleCache) blockers.push('La source de données ne répond plus : données des dernières minutes seulement, pas de signal.');
   if (!marketIsClosed && now - lastT > 20 * 60_000) {
     blockers.push(`Données en retard : dernière bougie à ${maTime(lastT)} (heure du Maroc). Pas de signal tant qu’elles ne sont pas à jour.`);
+  }
+  if (results.some(r => r.fallback)) {
+    const gold = results.find(r => r.basis !== undefined && r.basis !== null);
+    warnings.push(
+      `Données de secours Yahoo Finance (Twelve Data épuisé ou en panne) : pas de prix en direct${
+        gold ? `, or recalé sur le spot (écart futures −${gold.basis!.toFixed(2)} $)` : ''
+      }. Recale toujours avec le prix de ton broker avant d’entrer.`
+    );
   }
   if (marketIsClosed) warnings.push('Marché fermé : réouverture le dimanche à 17h00 New York.');
   if (!engine.newsAvailable) warnings.push('Calendrier économique indisponible : vérifie les annonces toi-même.');

@@ -4,7 +4,7 @@ Outil d'aide à la décision SMC/ICT pour EUR/USD et XAU/USD. **Aucune exécutio
 
 ## Principe (règles 3.8)
 
-1. **Vraies données** : bougies D1, H4, H1 et M15 depuis Twelve Data (offre gratuite : 800 requêtes / jour, l'app en consomme ~30 / heure quand elle est ouverte et visible). Aucun prix n'est inventé.
+1. **Vraies données** : bougies D1, H4, H1 et M15 depuis Twelve Data (offre gratuite : 800 requêtes / jour, l'app en consomme ~30 / heure quand elle est ouverte et visible). Si Twelve Data est épuisé ou en panne, l'app bascule sur **Yahoo Finance** (EUR/USD direct, or via futures recalées sur le spot). Aucun prix n'est inventé.
 2. **Moteur déterministe** (`server/smc.ts`) — protocole en 4 étapes, toutes obligatoires :
    1. **Contexte HTF** : biais D1/H4, balayage d'une liquidité HTF, zone H1/H4 ou objectif externe ;
    2. **Déclencheur M15**, dans l'ordre : balayage → displacement → CHoCH ;
