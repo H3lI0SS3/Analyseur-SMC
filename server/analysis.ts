@@ -1,5 +1,5 @@
 // Logique d'analyse partagée entre l'interface web (/api/analyze) et le connecteur MCP.
-import { PAIRS, TIMEFRAMES, getSeries, type Timeframe, type Candle } from './marketData';
+import { PAIRS, TIMEFRAMES, getLivePrice, getSeries, withLivePrice, type Timeframe, type Candle } from './marketData';
 import { getNews, NEWS_CURRENCIES } from './news';
 import type { CandlePattern } from './candlePatterns';
 import { auditEngine } from './audit';
@@ -139,10 +139,15 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   };
 
   let series: Record<Timeframe, Candle[]>;
+  let livePriceAt: number | null = null;
   let results;
   try {
-    results = await Promise.all(TIMEFRAMES.map(tf => getSeries(pair, tf)));
+    // Analyse : M15 rechargé s'il a plus de 30 s, et prix en direct pour la bougie en cours
+    const [res, live] = await Promise.all([Promise.all(TIMEFRAMES.map(tf => getSeries(pair, tf, tf === 'M15' ? 30_000 : undefined))), getLivePrice(pair)]);
+    results = res;
     series = Object.fromEntries(results.map(r => [r.tf, r.candles])) as Record<Timeframe, Candle[]>;
+    if (!results.some(r => r.futuresProxy)) series.M15 = withLivePrice(series.M15, live);
+    livePriceAt = live?.at ?? null;
   } catch (err: any) {
     throw new AnalysisError(
       `Impossible de récupérer les données de marché réelles (${err.message}). Aucune analyse n'est produite sans vraies données.`,
@@ -251,6 +256,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   return {
     verdict,
     rulesVersion: RULES_VERSION,
+    livePriceAt,
     pair,
     label: info.label,
     decimals: info.decimals,

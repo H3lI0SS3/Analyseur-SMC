@@ -1,5 +1,5 @@
 // Tests du moteur sur données synthétiques : npx tsx server/engine.test.ts
-import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
+import { aggregateTrading, TF_MS, withLivePrice, type Candle, type Timeframe } from './marketData';
 import { analyze, findFVGs, findSweeps, scanStructure, findSwings, amdPhase, type EngineResult } from './smc';
 import { reconcile } from './analysis';
 import { nyParts, nyToUtc } from './time';
@@ -211,6 +211,17 @@ ok('Samedi : marché fermé, signal = attendre', saturday.signal === 'attendre' 
   ok('Règle souple : le balayage est un bonus', softRes.checklist.find(c => c.key === 'sweep')?.core === false);
   const sweepOk = strictRes.checklist.find(c => c.key === 'sweep')?.ok;
   if (!sweepOk) ok('Sans balayage, la règle stricte n’autorise aucun trade', strictRes.signal === 'attendre');
+}
+
+// ---------- Prix en direct : seule la bougie en cours est mise à jour ----------
+{
+  const t0 = Date.UTC(2026, 10, 2, 7, 0);
+  const cs: Candle[] = [{ t: t0, o: 3900, h: 3905, l: 3898, c: 3902 }, { t: t0 + 900_000, o: 3902, h: 3906, l: 3901, c: 3906.15 }];
+  const up = withLivePrice(cs, { price: 3910.7, at: t0 + 900_000 + 8 * 60_000 });
+  ok('Prix en direct appliqué à la bougie en cours', up[1].c === 3910.7 && up[1].h === 3910.7 && up[0].c === 3902);
+  const next = withLivePrice(cs, { price: 3909, at: t0 + 2 * 900_000 + 60_000 });
+  ok('Nouvelle bougie ajoutée si la source a du retard', next.length === 3 && next[2].c === 3909 && next[2].o === 3906.15);
+  ok('Sans prix en direct, rien ne change', withLivePrice(cs, null) === cs);
 }
 
 // ---------- Balayage : la bougie qui forme un niveau ne peut pas le balayer ----------

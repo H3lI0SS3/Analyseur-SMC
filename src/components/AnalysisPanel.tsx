@@ -214,7 +214,10 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
         {ai?.resume && <p className="mt-3 border-t border-line pt-3 text-sm leading-snug text-ink/90">{ai.resume}</p>}
         <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-mute">
           <span>
-            Prix <span className="num text-ink">{fmt(e.price, dec)}</span> à {localTime(e.priceTime)}
+            Prix <span className="num text-ink">{fmt(e.price, dec)}</span>{' '}
+            {a.livePriceAt
+              ? `en direct à ${new Date(a.livePriceAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Africa/Casablanca' })}`
+              : `à ${localTime(e.priceTime)} (prix en direct indisponible : vérifie chez ton broker)`}
           </span>
           <span>{e.session.name}</span>
           <span>Source : {a.source}</span>

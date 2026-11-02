@@ -77,21 +77,67 @@ export function dataSourceName(): 'Twelve Data' | 'Yahoo Finance' {
 }
 
 /** M15 et H1 sont téléchargés ; H4 et D1 sont reconstruits depuis le H1. */
-export async function getSeries(pairId: string, tf: Timeframe): Promise<SeriesResult> {
+export async function getSeries(pairId: string, tf: Timeframe, maxAgeMs?: number): Promise<SeriesResult> {
   if (tf === 'H4' || tf === 'D1') {
-    const h1 = await getRaw(pairId, 'H1');
+    const h1 = await getRaw(pairId, 'H1', maxAgeMs);
     return { ...h1, tf, candles: aggregateTrading(h1.candles, tf) };
   }
-  return getRaw(pairId, tf);
+  return getRaw(pairId, tf, maxAgeMs);
 }
 
-async function getRaw(pairId: string, tf: 'M15' | 'H1'): Promise<SeriesResult> {
+const liveCache = new Map<string, { price: number; at: number }>();
+
+/** Dernier prix en direct déjà connu (sans nouvelle requête), s'il a moins de maxAge. */
+export function peekLivePrice(pairId: string, maxAge = 60_000) {
+  const hit = liveCache.get(pairId);
+  return hit && Date.now() - hit.at < maxAge ? hit : null;
+}
+
+/** Prix en direct (dernier prix connu de la source), mis en cache 15 s. Null si indisponible. */
+export async function getLivePrice(pairId: string): Promise<{ price: number; at: number } | null> {
+  const pair = PAIRS[pairId];
+  const apiKey = process.env.TWELVE_DATA_API_KEY;
+  if (!pair || !apiKey || marketClosed(Date.now())) return null;
+  const hit = liveCache.get(pairId);
+  if (hit && Date.now() - hit.at < 15_000) return hit;
+  try {
+    await twelveSlot();
+    const res = await fetch(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(pair.twelveSymbol)}&apikey=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(6_000) });
+    const json: any = await res.json();
+    const price = Number(json?.price);
+    if (!res.ok || !Number.isFinite(price) || price <= 0) return null;
+    const v = { price, at: Date.now() };
+    liveCache.set(pairId, v);
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remplace le prix de la bougie M15 en cours par le prix en direct (clôture, plus haut, plus bas).
+ * Les bougies clôturées ne sont jamais modifiées : la structure reste calculée sur des données figées.
+ */
+export function withLivePrice(m15: Candle[], live: { price: number; at: number } | null): Candle[] {
+  if (!live || !m15.length) return m15;
+  const last = m15[m15.length - 1];
+  const period = TF_MS.M15;
+  if (live.at >= last.t + period) {
+    // la bougie en cours n'est pas encore dans la série : on l'ajoute
+    const t = Math.floor(live.at / period) * period;
+    return [...m15, { t, o: last.c, h: Math.max(last.c, live.price), l: Math.min(last.c, live.price), c: live.price }];
+  }
+  if (live.at < last.t) return m15;
+  return [...m15.slice(0, -1), { ...last, c: live.price, h: Math.max(last.h, live.price), l: Math.min(last.l, live.price) }];
+}
+
+async function getRaw(pairId: string, tf: 'M15' | 'H1', maxAgeMs?: number): Promise<SeriesResult> {
   const pair = PAIRS[pairId];
   if (!pair) throw new Error(`Actif non supporté : ${pairId}`);
   const key = `${pairId}|${tf}`;
   const hit = cache.get(key);
   // Marché fermé : aucune nouvelle bougie, inutile de consommer des crédits (cache 30 min).
-  const ttl = marketClosed(Date.now()) ? 30 * 60_000 : CACHE_TTL[tf];
+  const ttl = marketClosed(Date.now()) ? 30 * 60_000 : Math.min(CACHE_TTL[tf], maxAgeMs ?? Infinity);
   if (hit && !hit.fromStaleCache && Date.now() - hit.fetchedAt < ttl) return hit;
   const running = inflight.get(key);
   if (running) return running;
@@ -325,7 +371,9 @@ export async function getQuotes(): Promise<Record<string, QuoteInfo>> {
   await Promise.all(
     Object.keys(PAIRS).map(async id => {
       try {
-        const [m15, d1] = await Promise.all([getSeries(id, 'M15'), getSeries(id, 'D1')]);
+        const [m15s, d1] = await Promise.all([getSeries(id, 'M15'), getSeries(id, 'D1')]);
+        // prix en direct déjà récupéré par une analyse récente : réutilisé sans requête supplémentaire
+        const m15 = { ...m15s, candles: withLivePrice(m15s.candles, m15s.futuresProxy ? null : peekLivePrice(id)) };
         const last = m15.candles[m15.candles.length - 1];
         const today = tradingDayStart(last.t);
         const prevClose = [...d1.candles].reverse().find(c => c.t < today)?.c;

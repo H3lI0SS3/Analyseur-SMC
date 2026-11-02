@@ -266,6 +266,7 @@ export interface CandlePattern {
 }
 
 export interface AnalysisResponse {
+  livePriceAt?: number | null;
   candlePatterns?: CandlePattern[];
   rulesVersion?: string;
   verdict?: Verdict;
