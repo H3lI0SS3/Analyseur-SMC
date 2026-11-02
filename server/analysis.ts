@@ -5,6 +5,8 @@ import type { CandlePattern } from './candlePatterns';
 import { auditEngine } from './audit';
 import { marketClosed, maTime } from './time';
 import { analyze, RULES_VERSION, type EngineResult } from './smc';
+/** Délai maximal de la relecture IA (au-delà, le prix « en direct » vieillit et l'analyse paraît bloquée). */
+export const AI_TIMEOUT_MS = 35_000;
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
 
 export const compact = (c: Candle[], n: number, dec: number) =>
@@ -218,7 +220,10 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   if (chosen) {
     try {
       const img = image && typeof image.base64 === 'string' && image.base64.length < 11_000_000 ? image : undefined;
-      ai = await reviewWithAi(
+      // l'IA ne doit jamais bloquer l'analyse : au-delà de AI_TIMEOUT_MS on rend le résultat du moteur seul
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('TIMEOUT_IA')), AI_TIMEOUT_MS); });
+      ai = await Promise.race([reviewWithAi(
         chosen,
         pair,
         engine,
@@ -226,10 +231,12 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
         compact(series.M15, 48, info.decimals),
         img,
         typeof note === 'string' ? note.slice(0, 500) : undefined
-      );
+      ), timeout]).finally(() => clearTimeout(timer));
     } catch (err: any) {
       const msg = String(err?.message || err);
-      aiError = /\b(503|429)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded/i.test(msg)
+      aiError = msg === 'TIMEOUT_IA'
+        ? `L’IA (${chosen}) a mis plus de ${AI_TIMEOUT_MS / 1000} s à répondre : résultat basé uniquement sur les calculs du moteur (le verdict de ta stratégie n’en dépend pas).`
+        : /\b(503|429)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded/i.test(msg)
         ? `L’IA (${chosen}) est surchargée en ce moment (côté ${chosen === 'gemini' ? 'Google' : 'Anthropic'}). Réessaie dans une minute. Résultat basé uniquement sur les calculs du moteur.`
         : `L’IA (${chosen}) n’a pas répondu : ${msg.slice(0, 200)}. Résultat basé uniquement sur les calculs du moteur.`;
     }
