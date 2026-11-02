@@ -85,6 +85,14 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
   if (ok('session') !== e.session.killzone) err('case kill zone incohérente avec la session');
   if (ok('bias') !== (e.bias !== 'neutre')) err('case biais incohérente');
 
+  // ---- 3b. Balayages cohérents avec la liste de liquidité ----
+  for (const sw of e.sweeps) {
+    const lvl = e.liquidity.find(l => l.label === sw.label && near(l.price, sw.price, tick * 10));
+    if (lvl && !lvl.swept) err(`balayage de « ${sw.label} » annoncé alors que le niveau est marqué non pris`);
+    if (lvl?.formedAt && sw.t < lvl.formedAt) err(`« ${sw.label} » balayé avant même d’exister`);
+    if (sw.t > ctx.now) err('balayage dans le futur');
+  }
+
   // ---- 4. AMD ----
   if ((e.amd.phase === 'Manipulation' || e.amd.phase === 'Distribution') && !e.amd.direction) err('AMD en manipulation/distribution sans direction');
   if ((e.amd.phase === 'Accumulation' || e.amd.phase === 'Indéterminée') && e.amd.direction) err('AMD sans cycle mais avec une direction');

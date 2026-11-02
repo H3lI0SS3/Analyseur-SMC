@@ -1,6 +1,6 @@
 // Tests du moteur sur données synthétiques : npx tsx server/engine.test.ts
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
-import { analyze, findFVGs, scanStructure, findSwings, amdPhase, type EngineResult } from './smc';
+import { analyze, findFVGs, findSweeps, scanStructure, findSwings, amdPhase, type EngineResult } from './smc';
 import { reconcile } from './analysis';
 import { nyParts, nyToUtc } from './time';
 import type { AiReview } from './ai';
@@ -211,6 +211,17 @@ ok('Samedi : marché fermé, signal = attendre', saturday.signal === 'attendre' 
   ok('Règle souple : le balayage est un bonus', softRes.checklist.find(c => c.key === 'sweep')?.core === false);
   const sweepOk = strictRes.checklist.find(c => c.key === 'sweep')?.ok;
   if (!sweepOk) ok('Sans balayage, la règle stricte n’autorise aucun trade', strictRes.signal === 'attendre');
+}
+
+// ---------- Balayage : la bougie qui forme un niveau ne peut pas le balayer ----------
+{
+  const day = Date.UTC(2026, 9, 30, 21); // nouveau jour de trading (17h NY)
+  const friday = { t: day - 75 * 60_000, o: 3880, h: 3884, l: 3871.1875, c: 3883.6 }; // c'est elle qui fait le plus bas de la veille
+  const today = { t: day + 15 * 60_000, o: 3875, h: 3877, l: 3874, c: 3875.3 };
+  const pdl = { id: 'PDL', label: 'Plus bas de la veille (PDL)', price: 3871.1875, side: 'sell' as const, swept: false, formedAt: day };
+  ok('Pas de faux balayage par la bougie qui a formé le PDL', findSweeps([friday, today], [pdl], [], []).length === 0);
+  const real = { t: day + 30 * 60_000, o: 3875, h: 3876, l: 3869, c: 3874 };
+  ok('Vrai balayage du PDL par une bougie du jour détecté', findSweeps([friday, today, real], [pdl], [], []).length === 1);
 }
 
 if (failed) {

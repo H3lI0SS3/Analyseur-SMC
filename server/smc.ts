@@ -9,10 +9,10 @@ import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.4';
+export const RULES_VERSION = '3.5';
 // 3.4 : displacement, OTE, liquidité de trendline, breaker blocks, bougies japonaises (ebook) dans la décision ; 3 confluences sur 8
 export const MIN_CONFLUENCES = 3;
-export const RULES_FROZEN_AT = Date.UTC(2026, 10, 1, 21, 0); // 01/11/2026 21:00 UTC, avant la réouverture
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 1, 23, 0); // 01/11/2026 23:00 UTC (3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -65,6 +65,8 @@ export interface LiquidityLevel {
   side: 'buy' | 'sell'; // buy-side = au-dessus (stops acheteurs/vendeurs), sell-side = en dessous
   swept: boolean;
   sweptAt?: number;
+  /** instant à partir duquel le niveau existe : seules les bougies suivantes peuvent le balayer */
+  formedAt?: number;
 }
 
 export interface Setup {
@@ -110,6 +112,8 @@ export interface EngineResult {
   session: { name: string; killzone: boolean; detail: string };
   dealingRange: { high: number; low: number; position: number; label: 'premium' | 'discount' | 'équilibre' } | null;
   liquidity: LiquidityLevel[];
+  /** balayages récents détectés (mèche au-delà puis clôture revenue) */
+  sweeps: SweepInfo[];
   zones: Zone[];
   setup: Setup | null;
   alternatives: Setup[];
@@ -388,6 +392,7 @@ export function buildLiquidity(
         price: s.price,
         side: type === 'high' ? 'buy' : 'sell',
         swept: false,
+        formedAt: s.t + 4 * HOUR, // swing confirmé 3 bougies H1 plus tard
       });
     }
   }
@@ -403,6 +408,7 @@ export function buildLiquidity(
           price: sw.price,
           side: sw.type === 'high' ? 'buy' : 'sell',
           swept: false,
+          formedAt: sw.t + (tf === 'D1' ? 3 * 24 * HOUR : 4 * 4 * HOUR), // swing confirmé
         });
       }
     };
@@ -413,6 +419,17 @@ export function buildLiquidity(
     const down = Math.floor(price / htf.roundStep) * htf.roundStep;
     if (up > price) levels.push({ id: `RNH-${up}`, label: 'Chiffre rond', price: up, side: 'buy', swept: false });
     if (down < price) levels.push({ id: `RNL-${down}`, label: 'Chiffre rond', price: down, side: 'sell', swept: false });
+  }
+
+  // Un niveau peut avoir été pris par une mèche M15 dans une bougie H1/H4/D1 pas encore clôturée :
+  // on vérifie chaque niveau sur les bougies M15 depuis sa formation (sinon il resterait « non pris » à tort).
+  for (const l of levels) {
+    if (l.swept || l.id.startsWith('RN') || l.formedAt === undefined) continue;
+    const hit = m15.find(c => c.t >= l.formedAt! && (l.side === 'buy' ? c.h > l.price : c.l < l.price));
+    if (hit) {
+      l.swept = true;
+      l.sweptAt = hit.t;
+    }
   }
 
   // tri + dédoublonnage des niveaux très proches (on garde le plus significatif)
@@ -445,7 +462,7 @@ function mkLevel(id: string, label: string, price: number, side: 'buy' | 'sell',
       sweptAt = sweptAt ?? c.t;
     }
   }
-  return { id, label, price, side, swept, sweptAt };
+  return { id, label, price, side, swept, sweptAt, formedAt: from };
 }
 
 /** Balayage récent de liquidité dans les N dernières bougies M15 : mèche au-delà + clôture revenue à l'intérieur. */
@@ -477,7 +494,7 @@ export function findSweeps(m15: Candle[], levels: LiquidityLevel[], h1: Candle[]
   const recent = m15.slice(-lookback);
   const cands: { side: 'buy' | 'sell'; label: string; price: number; since: number }[] = [
     // un chiffre rond est une cible, pas un réservoir de stops : il ne compte pas comme balayage
-    ...levels.filter(l => !l.id.startsWith('RN')).map(l => ({ side: l.side, label: l.label, price: l.price, since: 0 })),
+    ...levels.filter(l => !l.id.startsWith('RN')).map(l => ({ side: l.side, label: l.label, price: l.price, since: l.formedAt ?? 0 })),
     ...h1Swings
       .filter(s => s.idx >= h1.length - 120)
       .map(s => ({
@@ -682,13 +699,15 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     }
   }
 
-  const liquidity = buildLiquidity(closed.D1, h1, m15, raw.H1.swings, atrH1, price, {
+  const liquidityRaw = buildLiquidity(closed.D1, h1, m15, raw.H1.swings, atrH1, price, {
     h4: closed.H4,
     h4Swings: raw.H4.swings,
     d1Swings: raw.D1.swings,
     roundStep: decimals >= 4 ? 0.005 : 50,
-  }).map(l => ({ ...l, price: r(l.price) }));
-  const sweeps = findSweeps(m15, liquidity, h1, raw.H1.swings);
+  });
+  // balayages détectés sur les prix exacts (un arrondi ne doit jamais créer un faux balayage)
+  const sweeps = findSweeps(m15, liquidityRaw, h1, raw.H1.swings).map(sw => ({ ...sw, price: r(sw.price) }));
+  const liquidity = liquidityRaw.map(l => ({ ...l, price: r(l.price) }));
   // marché fermé : on décrit le cycle de la dernière séance, pas une séance qui n'existe pas
   // (−1 ms : la dernière bougie de vendredi finit pile à 17h00 NY, qui ouvrirait une journée inexistante)
   const amdRef = marketClosed(now) ? lastM15.t + TF_MS.M15 - 1 : now;
@@ -979,6 +998,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     session,
     dealingRange,
     liquidity,
+    sweeps,
     zones,
     setup,
     alternatives,
