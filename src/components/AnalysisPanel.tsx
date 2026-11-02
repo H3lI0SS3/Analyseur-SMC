@@ -224,6 +224,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
           <span>{e.session.name}</span>
           <span>Source : {a.source}</span>
         </div>
+        <div className="mt-3"><BrokerPriceBox a={a} broker={broker} /></div>
         {e.nextNews && (
           <p className="mt-2 text-[11px] text-mute">
             Prochaine annonce forte : <span className="text-ink">{e.nextNews.title}</span> ({e.nextNews.currency}), {localDateTime(e.nextNews.t)}
@@ -243,7 +244,6 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
             <div className="label">{go ? 'Plan de trade' : 'Plan en préparation (pas d’entrée pour l’instant)'}</div>
             <span className="text-[10px] text-mute">{plan.origin}</span>
           </div>
-          <BrokerPriceBox a={a} broker={broker} />
           <div className="grid grid-cols-2 gap-2">
             <Level label="Entrée" value={fmt(shift(plan.entry), dec)} cls="text-gold" />
             <Level label="Stop loss" value={fmt(shift(plan.sl), dec)} sub={distanceLabel(a.pair, plan.entry, plan.sl)} cls="text-down" />
@@ -311,6 +311,12 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
           {final.notes.map(n => (
             <p key={n} className="mt-1 text-[11px] text-mute">• {n}</p>
           ))}
+          {!go && (
+            <div className="mt-3 rounded-lg border border-line py-2.5 text-center text-sm text-mute">
+              <div className="flex items-center justify-center gap-2 font-semibold"><BookPlus className="h-4 w-4" /> Je prends ce trade → suivi automatique</div>
+              <p className="mt-1 px-3 text-[11px] leading-snug">Bouton inactif : pas de signal pour l’instant. Il s’active dès que le verdict passe à ACHETER ou VENDRE. Relance l’analyse pendant la kill zone.</p>
+            </div>
+          )}
           {go && (
             <button
               onClick={onAdd}
@@ -642,7 +648,7 @@ function BrokerPriceBox({ a, broker }: { a: AnalysisResponse; broker: ReturnType
   const ref = a.livePriceAt ?? a.generatedAt;
   const late = broker.enteredAt !== null && broker.enteredAt - ref > 60_000;
   return (
-    <div className="mb-3 rounded-lg bg-card2 px-3 py-2">
+    <div className="rounded-lg bg-card2 px-3 py-2">
       <label className="flex items-center justify-between gap-2 text-xs">
         <span className="text-mute">Prix « Sell » affiché chez ton broker maintenant</span>
         <input
@@ -654,8 +660,14 @@ function BrokerPriceBox({ a, broker }: { a: AnalysisResponse; broker: ReturnType
         />
       </label>
       <p className="mt-1 text-[10px] leading-snug text-mute">
-        Optionnel. Les niveaux ci-dessous sont alors recalés sur le prix de ton broker (même distances, même R:R). Saisis-le juste après l’analyse.
+        Optionnel. Les niveaux du plan sont alors recalés sur le prix de ton broker (mêmes distances, même R:R). Saisis-le juste après l’analyse.
       </p>
+      {broker.offset !== 0 && (
+        <p className="mt-1 text-[11px] text-gold">
+          Écart broker − app : {broker.offset > 0 ? '+' : ''}{fmt(broker.offset, a.decimals)}{a.pair === 'XAU/USD' ? ' $' : ''}. {a.final.plan ? 'Les niveaux du plan sont recalés.' : 'Pas de plan pour l’instant : rien à recaler.'}
+        </p>
+      )}
+      {broker.text.trim() !== '' && broker.offset === 0 && !broker.error && <p className="mt-1 text-[11px] text-up">Même prix que l’app : aucun recalage nécessaire.</p>}
       {broker.error && <p className="mt-1 text-[11px] text-warn">{broker.error}</p>}
       {late && !broker.error && (
         <p className="mt-1 text-[11px] text-warn">Analyse faite il y a plus d’une minute : relance l’analyse puis saisis le prix tout de suite, sinon le recalage peut être faux.</p>
