@@ -41,7 +41,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
         </div>
         {(settings.broker ?? 'etoro') === 'etoro' && (
           <>
-            <Field label="Levier eToro EUR/USD (1:x)" value={settings.leverageEur ?? 30} step={1} min={1} max={400} onChange={v => set({ leverageEur: v })} hint="Mets le levier que tu choisis sur eToro au moment d’ouvrir la position." />
+            <Field label="Levier eToro EUR/USD (1:x)" value={settings.leverageEur ?? 30} step={1} min={1} max={400} onChange={v => set({ leverageEur: v })} hint="1 = sans levier. Le levier ne change pas ton risque (fixé par le stop et ton % de risque) : il change seulement le montant à bloquer." />
             <Field label="Levier eToro or (1:x)" value={settings.leverageGold ?? 20} step={1} min={1} max={400} onChange={v => set({ leverageGold: v })} />
           </>
         )}

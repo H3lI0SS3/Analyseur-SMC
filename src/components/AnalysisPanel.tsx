@@ -262,6 +262,16 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
                       <span className="text-mute">Valeur exposée</span>
                       <span className="num">≈ {z.exposure.toFixed(0)} $</span>
                     </div>
+                    {z.amount > settings.capital && (() => {
+                      // capital insuffisant avec ce levier : on réduit la taille, le risque réel baisse d'autant
+                      const ratio = settings.capital / z.amount;
+                      const maxUnits = z.units * ratio;
+                      return (
+                        <p className="mt-1.5 rounded bg-warn/10 px-2 py-1 text-[11px] leading-snug text-warn">
+                          Montant supérieur à ton capital avec un levier 1:{z.leverage}. Taille maximale : {maxUnits.toLocaleString('fr-FR', { maximumFractionDigits: a.pair === 'XAU/USD' ? 2 : 0 })} {a.pair === 'XAU/USD' ? 'onces' : 'unités'} pour {settings.capital.toFixed(0)} $ investis, soit un risque réel d’environ {(riskPct * ratio).toFixed(2)} % au lieu de {riskPct} %.
+                        </p>
+                      );
+                    })()}
                   </>
                 );
               })()
