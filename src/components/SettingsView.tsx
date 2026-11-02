@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { RiskSettings, Status } from '../types';
 import { cx } from '../lib/utils';
 
@@ -104,22 +105,35 @@ export function SettingsView({ settings, setSettings, status }: Props) {
 }
 
 function Field({ label, value, onChange, step, min, max, hint, allowZero }: { label: string; value: number; onChange: (v: number) => void; step: number; min?: number; max?: number; hint?: string; allowZero?: boolean }) {
+  // texte libre pendant la saisie (on peut vider le champ, taper « 0, » ou « 0.3 ») ; la valeur n'est enregistrée que si elle est valide
+  const [text, setText] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(String(value));
+  }, [value, focused]);
+  const parse = (t: string) => Number(t.replace(',', '.'));
+  const valid = (v: number) => Number.isFinite(v) && (v > 0 || (allowZero && v === 0)) && (max === undefined || v <= max);
+  const bad = text.trim() !== '' && !valid(parse(text));
   return (
     <label className="block">
       <span className="text-sm">{label}</span>
       <input
-        type="number"
+        type="text"
         inputMode="decimal"
-        value={value}
-        step={step}
-        min={min}
-        max={max}
-        onChange={e => {
-          const v = Number(e.target.value);
-          if (Number.isFinite(v) && (v > 0 || (allowZero && v === 0))) onChange(v);
+        value={text}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          setText(String(value)); // valeur invalide ou vide : on revient à la dernière valeur enregistrée
         }}
-        className="num mt-1 w-full rounded-lg border border-line bg-card2 px-3 py-2.5 text-base text-ink focus:border-gold focus:outline-none"
+        onChange={e => {
+          setText(e.target.value);
+          const v = parse(e.target.value);
+          if (e.target.value.trim() !== '' && valid(v)) onChange(v);
+        }}
+        className={cx('num mt-1 w-full rounded-lg border bg-card2 px-3 py-2.5 text-base text-ink focus:outline-none', bad ? 'border-down' : 'border-line focus:border-gold')}
       />
+      {bad && <span className="mt-1 block text-[11px] text-down">Valeur non valide{max !== undefined ? ` (max ${max})` : ''} : non enregistrée.</span>}
       {hint && <span className="mt-1 block text-[11px] text-mute">{hint}</span>}
     </label>
   );
