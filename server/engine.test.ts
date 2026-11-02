@@ -203,14 +203,12 @@ ok('Samedi : marché fermé, signal = attendre', saturday.signal === 'attendre' 
   ok('Week-end : AMD sans « range en formation »', !wk.amd.detail.includes('en formation'), wk.amd.detail);
 }
 
-// ---------- 7. Sweep obligatoire ----------
+// ---------- 7. Règles 3.7 : les 4 étapes du protocole sont obligatoires ----------
 {
-  const strictRes = analyze(series, 5, { now: tuesday, ...costs, news: { available: true, events: [] }, strictSweep: true });
-  const softRes = analyze(series, 5, { now: tuesday, ...costs, news: { available: true, events: [] }, strictSweep: false });
-  ok('Règle stricte : le balayage est une condition obligatoire', strictRes.checklist.find(c => c.key === 'sweep')?.core === true);
-  ok('Règle souple : le balayage est un bonus', softRes.checklist.find(c => c.key === 'sweep')?.core === false);
-  const sweepOk = strictRes.checklist.find(c => c.key === 'sweep')?.ok;
-  if (!sweepOk) ok('Sans balayage, la règle stricte n’autorise aucun trade', strictRes.signal === 'attendre');
+  const res = analyze(series, 5, { now: tuesday, ...costs, news: { available: true, events: [] } });
+  for (const k of ['bias', 'htf', 'sweep', 'displacement', 'choch', 'zone', 'pd', 'rr', 'session', 'news'])
+    ok(`Étape obligatoire : ${k}`, res.checklist.find(c => c.key === k)?.core === true);
+  if (!res.checklist.find(c => c.key === 'sweep')?.ok) ok('Sans balayage, aucun trade', res.signal === 'attendre');
 }
 
 // ---------- Prix en direct : seule la bougie en cours est mise à jour ----------

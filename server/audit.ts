@@ -1,7 +1,7 @@
 // Contrôleur de cohérence du moteur : vérifie qu'une analyse ne se contredit pas elle-même.
 // Utilisé par les tests (données synthétiques et réelles). Renvoie la liste des incohérences trouvées.
 import { TF_MS, type Candle, type Timeframe } from './marketData';
-import { MIN_CONFLUENCES, findShock, type EngineResult } from './smc';
+import { GRADE_A, findShock, type EngineResult } from './smc';
 import { marketClosed } from './time';
 
 export interface AuditContext {
@@ -73,16 +73,15 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
   if (s) {
     const long = s.direction === 'acheter';
     if (ok('ote') && !(e.ict.ote && s.entry <= e.ict.ote.top + tick && s.entry >= e.ict.ote.bottom - tick)) err('OTE coché alors que l’entrée est hors OTE');
-    if (ok('pd') && !(e.dealingRange && (long ? e.dealingRange.position < 0.5 : e.dealingRange.position > 0.5))) err('premium/discount coché à tort');
     if (ok('ltf') && e.timeframes.M15.trend !== (long ? 'haussier' : 'baissier')) err('structure M15 cochée à tort');
     if (ok('amd') && e.amd.direction !== (long ? 'haussière' : 'baissière')) err('AMD coché contre le sens du cycle');
     if (ok('trendline') && !e.ict.trendlines.some(t => t.intact && (long ? t.side === 'buy' && t.priceNow > s.entry : t.side === 'sell' && t.priceNow < s.entry))) err('trendline cochée sans trendline valide');
     if (ok('candle') && !e.ict.candlePatterns.some(p => p.inZone && p.dir === (long ? 'haussier' : 'baissier'))) err('bougie japonaise cochée sans figure dans la zone');
     if (ok('rr') !== ((s.rr2 ?? s.rr1) >= 2)) err('case R:R incohérente avec le plan');
   } else {
-    for (const k of ['zone', 'rr', 'sweep', 'amd', 'pd', 'ltf', 'displacement', 'ote', 'trendline', 'candle']) if (ok(k)) err(`critère « ${k} » coché sans plan`);
+    for (const k of ['zone', 'rr', 'sweep', 'choch', 'htf', 'amd', 'pd', 'ltf', 'displacement', 'trendline', 'candle', 'htfzone']) if (ok(k)) err(`critère « ${k} » coché sans plan`);
   }
-  if (ok('session') !== e.session.killzone) err('case kill zone incohérente avec la session');
+  if (ok('session') && !ok('sweep')) err('session validée sans déclencheur');
   if (ok('bias') !== (e.bias !== 'neutre')) err('case biais incohérente');
 
   // ---- 3b. Balayages cohérents avec la liste de liquidité ----
@@ -99,13 +98,14 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
 
   // ---- 5. Score et décision ----
   if (e.score < 0 || e.score > 100) err(`score hors bornes (${e.score})`);
-  if (e.grade !== (e.score >= 80 ? 'A+' : e.score >= 60 ? 'B' : 'C')) err('classe incohérente avec le score');
+  const trig = !!e.setup && ck('zone')?.ok;
+  if (e.grade !== (!trig ? 'C' : e.score >= GRADE_A ? 'A+' : 'B')) err('classe incohérente avec le score');
   if (e.dealingRange && (e.dealingRange.position < 0 || e.dealingRange.position > 1)) err('position dans le range hors de 0-100 %');
   if (e.signal !== 'attendre') {
     if (!s) err('signal sans plan');
     else if (e.signal !== s.direction) err('signal différent du sens du plan');
     if (!e.checklist.filter(c => c.core).every(c => c.ok)) err('signal alors qu’une condition obligatoire manque');
-    if (e.checklist.filter(c => !c.core && c.ok).length < MIN_CONFLUENCES) err('signal avec moins de confluences que le minimum');
+    for (const k of ['bias', 'htf', 'sweep', 'displacement', 'choch', 'zone', 'pd', 'rr', 'session', 'news']) if (!ok(k)) err(`signal sans l’étape obligatoire « ${k} »`);
     if (e.grade === 'C') err('signal en classe C');
     if (marketClosed(ctx.now)) err('signal marché fermé');
     if (s?.entryType === 'marché' && !ok('ltf')) err('entrée au marché sans confirmation M15');

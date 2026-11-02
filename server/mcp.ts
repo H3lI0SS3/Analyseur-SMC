@@ -175,7 +175,7 @@ function buildServer() {
       title: 'Backtest du moteur',
       description:
         'Rejoue le moteur sur l’historique réel en M15 (jusqu’à ~2 ans avec Twelve Data) et simule chaque plan avec coûts : trades, réussite, total en R, profit factor, pire repli. ' +
-        'Compare la règle stricte (balayage obligatoire) et la règle souple, sur toute la période ET depuis le gel des règles (équivalent d’un suivi en direct). ' +
+        'Règles 3.7 : seuls les trades du protocole complet (contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session) ; résultats sur toute la période ET depuis le gel des règles. ' +
         'Le calcul prend plusieurs minutes : chaque appel le fait avancer ; rappelle l’outil jusqu’au statut « terminé ».',
       inputSchema: {
         actif: PAIR_ENUM.describe('EUR/USD ou XAU/USD'),
@@ -184,7 +184,7 @@ function buildServer() {
       annotations: readOnly,
     },
     async ({ actif, relancer }) => {
-      let job = getJob(actif, 25_000);
+      let job = getJob(actif, 55_000);
       if (job?.status === 'erreur' && !relancer) {
         return fail(`Backtest ${actif} en erreur (serveur ${job.instance}) : ${job.error}. Passe relancer=true pour réessayer.`);
       }
@@ -204,7 +204,7 @@ function buildServer() {
           const j = getJob(actif, 0);
           if (j && (j.status !== 'en cours' || !j.phase?.startsWith('Téléchargement'))) break;
         }
-        job = getJob(actif, 15_000)!;
+        job = getJob(actif, 40_000)!;
       }
       if (job.status === 'erreur') return fail(`Backtest ${actif} en erreur (serveur ${job.instance}) : ${job.error}`);
       if (job.status === 'en cours') return text(`Backtest ${actif} en cours (serveur ${job.instance}) : ${job.phase}. Rappelle l’outil pour continuer le calcul.`);

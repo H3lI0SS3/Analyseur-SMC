@@ -87,14 +87,14 @@ const setup = (p: Partial<Setup>): Setup => ({
   ok('Statistiques « depuis le gel » présentes', !!res.strictForward && !!res.soupleForward);
   // Labo : la variante de référence doit reproduire exactement le backtest « sweep en bonus »
   const baseV = res.lab.variants.find(v => v.id === 'base')!;
-  const strictV = res.lab.variants.find(v => v.id === 'strict')!;
+  const strictV = res.lab.variants.find(v => v.id === 'aplus')!;
   const sum = (x: { trades: number; totalR: number }, y: { trades: number; totalR: number } | null) => ({ trades: x.trades + (y?.trades ?? 0), totalR: Number((x.totalR + (y?.totalR ?? 0)).toFixed(2)) });
   const bAll = sum(baseV.inSample, baseV.outOfSample);
   ok('Labo : la référence reproduit le backtest actuel', bAll.trades === res.souple.trades && Math.abs(bAll.totalR - res.souple.totalR) < 0.05, `${bAll.trades} trades ${bAll.totalR} R vs ${res.souple.trades} trades ${res.souple.totalR} R`);
-  ok('Labo : la variante stricte reproduit le backtest strict (1re moitié)', strictV.inSample.trades <= res.strict.trades, `${strictV.inSample.trades} ≤ ${res.strict.trades}`);
+  ok('Labo : la variante A+ prend au plus autant de trades que le backtest (1re moitié)', strictV.inSample.trades <= res.strict.trades, `${strictV.inSample.trades} ≤ ${res.strict.trades}`);
   const revealed = res.lab.variants.filter(v => v.outOfSample !== null).map(v => v.id);
   ok('Labo : 2e moitié révélée seulement pour la référence et au plus 3 variantes', revealed.includes('base') && revealed.length <= 4, revealed.join(', '));
-  ok('Labo : 12 variantes évaluées', res.lab.variants.length === 12);
+  ok('Labo : 11 variantes évaluées', res.lab.variants.length === 11);
   // le découpage en tranches ne doit pas changer le résultat
   const run = new BacktestRun('EUR/USD', h1.slice(-5000), m15.slice(-5000), 5, { spread: 0.0001, commissionPerLot: 7, contract: 100_000 });
   while (!run.done) run.step(137);

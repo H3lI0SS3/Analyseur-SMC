@@ -44,27 +44,22 @@ Figures de retournement valables après un mouvement, idéalement dans la zone d
   - Kill zone de New York : 07h00–10h00 NY.
   - Journée de trading : à partir de 17h00 NY ; marché fermé du vendredi 17h au dimanche 17h NY.
 - Cycle AMD : accumulation (range asiatique), manipulation (sweep d'un côté du range), distribution (cassure M15 dans l'autre sens). Invalidé si le prix clôture au-delà de l'extrême de la manipulation.
-- Premium / Discount : range H1 entre le dernier swing high et le dernier swing low. Au-dessus de 50 % = premium (favorable aux ventes), en dessous = discount (favorable aux achats). Dans l'app c'est une confluence : acheter en premium ou vendre en discount n'est pas interdit, mais retire des points.
+- Premium / Discount (règles 3.7) : mesuré sur la vague impulsive du déclencheur (de l'extrême du balayage jusqu'au bout du mouvement). Une vente se prend sur une zone dans la moitié premium (> 50 %), un achat dans la moitié discount (< 50 %). C'est obligatoire. Pas de Fibonacci figé (l'OTE est affichée à titre indicatif seulement).
 
-## 5. Conditions éliminatoires (aucun trade si l'une manque)
-1. Biais H4/D1 clair et trade dans son sens.
-2. Zone valide (OB, FVG, IFVG ou Breaker non invalidé) dans le sens du biais.
-3. Sweep de liquidité préalable du côté opposé.
-4. R:R net d'au moins 1:2 (spread et commission compris), objectif posé sur de la liquidité.
-5. Aucune annonce à fort impact dans les 30 minutes (ordre limite annulé 30 min avant).
-6. Marché ouvert et données à jour.
+## 5. Protocole du trader (règles 3.7) — toutes les étapes sont obligatoires
+1. Contexte HTF : biais H4/D1 clair, trade dans son sens ; le prix vient de balayer une liquidité HTF (veille, semaine, Asie, swing H1/H4/D1, égaux), sort d'une zone H1/H4, ou court vers une liquidité externe. Jamais « au milieu de nulle part ».
+2. Déclencheur, dans cet ordre sur M15 : balayage (mèche au-delà d'un sommet/creux, clôture revenue) → displacement (bougie impulsive) → CHoCH/MSS net dans le sens du trade. Annulé si une bougie clôture au-delà de l'extrême du balayage ou si la structure M15 se retourne.
+3. Zone : le FVG (ou l'OB) né de l'impulsion du CHoCH, dans la moitié premium (vente) ou discount (achat) de la vague. Bonus si elle repose sur un OB/FVG H1 ou H4.
+4. Timing : balayage ou cassure en kill zone de Londres ou de New York, aucune annonce forte à ±30 min.
+Exécution : ordre limite au début du FVG (ou au marché si le prix est déjà dedans), stop juste au-delà de l'extrême du balayage, objectif sur la liquidité opposée avec un R:R net d'au moins 1:2.
 
 ## 6. Score de qualité (0 à 100, pas une probabilité)
-Calculé seulement si les conditions éliminatoires sont réunies :
-- Biais H4/D1 aligné, D1 et H4 dans le même sens : 20 (H4 seul, D1 neutre : 10)
-- Sweep de liquidité préalable : 20
-- Zone non testée : 10, issue d'un displacement : +5
-- Entrée dans l'OTE : 10
-- Kill zone active : 10
-- Premium pour une vente / discount pour un achat : 10
-- Confirmation M15 (structure dans le sens du trade) : 5, figure japonaise dans la zone : +5
-- Cycle AMD dans le sens du trade : 5
-Classement : A+ ≥ 80 (risque normal) ; B 60–79 (risque réduit de moitié) ; C < 60 (pas de trade).
+- D1 et H4 alignés : 20 (H4 seul, D1 neutre : 10)
+- Balayage d'une liquidité HTF : 20 (contexte HTF par la zone ou l'objectif seulement : 10)
+- Zone jamais testée : 10 ; zone alignée sur un OB/FVG H1/H4 : 15
+- Analyse pendant une kill zone : 10 ; R:R final ≥ 3 : 10
+- Cycle AMD dans le sens du trade, figure japonaise dans la zone, liquidité de trendline vers l'objectif : 5 chacun
+Classement : A+ ≥ 70 (risque normal) ; B < 70 (risque réduit de moitié). Sans déclencheur complet : C (pas de trade).
 
 ## 7. Refus obligatoires
 - Range sans cassure de structure ni FVG directionnel.

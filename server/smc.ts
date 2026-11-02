@@ -3,16 +3,18 @@
 
 import { TF_MS, type Candle, type Timeframe } from './marketData';
 import { HOUR, marketClosed, maDateTime, maTime, nyParts, nyToUtc, tradingDayStart, tradingWeekStart } from './time';
-import { findBreakers, findInversionFVGs, findTrendlines, oteZone, zoneFromDisplacement, type OteZone, type TrendlineLiquidity } from './ictConcepts';
+import { findBreakers, findInversionFVGs, findTrendlines, isDisplacement, oteZone, zoneFromDisplacement, type OteZone, type TrendlineLiquidity } from './ictConcepts';
 import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.6';
+export const RULES_VERSION = '3.7';
 // 3.4 : displacement, OTE, liquidité de trendline, breaker blocks, bougies japonaises (ebook) dans la décision ; 3 confluences sur 8
-export const MIN_CONFLUENCES = 3;
-export const RULES_FROZEN_AT = Date.UTC(2026, 10, 2, 17, 0); // 02/11/2026 17:00 UTC (3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
+export const MIN_CONFLUENCES = 3; // (règles ≤ 3.6, conservé pour le laboratoire du backtest)
+/** Score minimal pour la classe A+ (en dessous : classe B, risque divisé par 2). */
+export const GRADE_A = 70;
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 2, 19, 0); // 02/11/2026 19:00 UTC (3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -656,6 +658,97 @@ export function findShock(m15: Candle[], now: number, atrM15: number, long: bool
   return null;
 }
 
+// ---------------- Déclencheur structurel (règles 3.7) ----------------
+/** Balayage → displacement → CHoCH/MSS sur M15, dans cet ordre. */
+export interface Trigger {
+  dir: Dir;
+  sweep: { label: string; price: number; t: number; idx: number; htf: boolean };
+  /** extrême du balayage (plus haut pour une vente, plus bas pour un achat) : le stop va derrière */
+  extreme: number;
+  displacementT: number;
+  mss: StructureEvent;
+  /** jambe impulsive : de l'extrême du balayage jusqu'au bout du mouvement */
+  legHigh: number;
+  legLow: number;
+  /** le balayage ou la cassure a eu lieu en kill zone (Londres / New York) */
+  inSession: boolean;
+}
+
+/** Durée maximale entre le balayage et la cassure de structure. */
+export const TRIGGER_MAX_GAP = 4 * HOUR;
+/** Au-delà, le déclencheur est trop ancien pour poser un ordre. */
+export const TRIGGER_MAX_AGE = 6 * HOUR;
+
+export interface SweepCandidate {
+  side: 'buy' | 'sell';
+  label: string;
+  price: number;
+  since: number;
+  htf: boolean;
+}
+
+/**
+ * Cherche le déclencheur le plus récent dans le sens demandé (bear = vente, bull = achat) :
+ * 1. balayage d'une liquidité (mèche au-delà, clôture revenue de l'autre côté sur la même bougie ou la suivante),
+ * 2. displacement dans le sens du trade entre le balayage et la cassure,
+ * 3. cassure de structure M15 (CHoCH/BOS) dans le sens du trade après le balayage.
+ * Le déclencheur est annulé si une bougie clôture au-delà de l'extrême du balayage, ou si la structure M15 se retourne ensuite.
+ */
+export function findTrigger(m15: Candle[], events: StructureEvent[], cands: SweepCandidate[], dir: Dir, now: number): Trigger | null {
+  const long = dir === 'bull';
+  const side = long ? 'sell' : 'buy';
+  const pool = cands.filter(c => c.side === side);
+  const n = m15.length;
+  const minIdx = Math.max(21, n - Math.round(TRIGGER_MAX_AGE / TF_MS.M15) - Math.round(TRIGGER_MAX_GAP / TF_MS.M15));
+  for (let i = n - 2; i >= minIdx; i--) {
+    const c = m15[i];
+    // balayage sur cette bougie : mèche au-delà, clôture revenue (même bougie ou la suivante)
+    let best: SweepCandidate | null = null;
+    for (const l of pool) {
+      if (c.t < l.since) continue;
+      const pierced = long ? c.l < l.price : c.h > l.price;
+      if (!pierced) continue;
+      const back = (k: Candle | undefined) => !!k && (long ? k.c > l.price : k.c < l.price);
+      if (!back(c) && !back(m15[i + 1])) continue;
+      // on retient le niveau le plus significatif (HTF d'abord), puis le plus loin du prix d'avant
+      if (!best || (l.htf && !best.htf) || (l.htf === best.htf && (long ? l.price < best.price : l.price > best.price))) best = l;
+    }
+    if (!best) continue;
+    const mss = events.find(e => e.dir === dir && e.idx > i && e.t - c.t <= TRIGGER_MAX_GAP);
+    if (!mss) continue;
+    if (now - mss.t > TRIGGER_MAX_AGE) continue;
+    let dispIdx = -1;
+    for (let j = i; j <= mss.idx; j++) if (isDisplacement(m15, j, dir)) { dispIdx = j; break; }
+    if (dispIdx < 0) continue;
+    // le balayage commence à la première bougie qui a percé le niveau (plusieurs bougies peuvent rester au-delà)
+    let p = i;
+    while (p - 1 >= 0 && (long ? m15[p - 1].l < best.price : m15[p - 1].h > best.price) && m15[p - 1].t >= best.since) p--;
+    const seg = m15.slice(p, mss.idx + 1);
+    const extreme = long ? Math.min(...seg.map(k => k.l)) : Math.max(...seg.map(k => k.h));
+    // annulé : clôture au-delà de l'extrême après la cassure, ou structure M15 retournée depuis
+    const after = m15.slice(mss.idx + 1);
+    if (after.some(k => (long ? k.c < extreme : k.c > extreme))) continue;
+    if (events.some(e => e.idx > mss.idx && e.dir !== dir)) continue;
+    const rest = m15.slice(i);
+    const legHigh = long ? Math.max(...rest.map(k => k.h)) : extreme;
+    const legLow = long ? extreme : Math.min(...rest.map(k => k.l));
+    return {
+      dir,
+      sweep: { label: best.label, price: best.price, t: c.t, idx: i, htf: best.htf },
+      extreme,
+      displacementT: m15[dispIdx].t,
+      mss,
+      legHigh,
+      legLow,
+      inSession: sessionInfo(c.t).killzone || sessionInfo(mss.t).killzone,
+    };
+  }
+  return null;
+}
+
+/** Liquidité « externe » (objectif HTF clair) : veille, semaine, Asie, égaux hauts/bas, swings H4/D1. */
+export const isExternalLiquidity = (id: string) => /^(PD|PW|AS|EQ|H4|D1)/.test(id);
+
 export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, opts: AnalyzeOptions = {}): EngineResult {
   const r = (x: number) => Number(x.toFixed(decimals));
   const now = opts.now ?? Date.now();
@@ -805,9 +898,107 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
 
   const wantDir = bias === 'haussier' ? 'acheter' : bias === 'baissier' ? 'vendre' : null;
   const aligned = wantDir ? candidates.filter(c => c.direction === wantDir) : [];
-  const setup = aligned.find(c => (c.rr2 ?? c.rr1) >= 2) || aligned[0] || null;
+
+  // ----- Déclencheur structurel (3.7) : balayage → displacement → CHoCH, puis FVG/OB né de l'impulsion -----
+  const sweepCands: SweepCandidate[] = [
+    ...liquidityRaw.filter(l => !l.id.startsWith('RN')).map(l => ({ side: l.side, label: l.label, price: l.price, since: l.formedAt ?? 0, htf: true })),
+    ...raw.H1.swings
+      .filter((sw: Swing) => sw.idx >= h1.length - 120)
+      .map((sw: Swing) => ({ side: (sw.type === 'high' ? 'buy' : 'sell') as 'buy' | 'sell', label: `Swing ${sw.type === 'high' ? 'high' : 'low'} H1`, price: sw.price, since: sw.t + 4 * HOUR, htf: true })),
+    ...raw.M15.swings
+      .filter((sw: Swing) => sw.idx >= m15.length - 96)
+      .map((sw: Swing) => ({ side: (sw.type === 'high' ? 'buy' : 'sell') as 'buy' | 'sell', label: `Swing ${sw.type === 'high' ? 'high' : 'low'} M15`, price: sw.price, since: sw.t + 4 * TF_MS.M15, htf: false })),
+  ];
+  const trigger = wantDir ? findTrigger(m15, raw.M15.events, sweepCands, wantDir === 'acheter' ? 'bull' : 'bear', now) : null;
+  // zones HTF (H1/H4) pour l'alignement de la zone d'entrée
+  const atrH4 = timeframes.H4.atr14;
+  const htfZones: Zone[] = [
+    ...zones.filter(z => z.tf === 'H1' && (z.kind === 'FVG' || z.kind === 'OB')),
+    ...findFVGs(closed.H4, 'H4', atrH4, 60),
+    ...findOrderBlocks(closed.H4, 'H4', raw.H4.events, raw.H4.swings, atrH4),
+  ];
+  let trigZone: Zone | null = null;
+  let trigPremium = false;
+  let trigSetup: Setup | null = null;
+  if (trigger) {
+    const long = trigger.dir === 'bull';
+    const mid = (trigger.legHigh + trigger.legLow) / 2;
+    const inHalf = (z: Zone) => (long ? (z.top + z.bottom) / 2 <= mid : (z.top + z.bottom) / 2 >= mid);
+    // FVG né de l'impulsion (bougie du milieu entre le balayage et la bougie après la cassure)
+    const fvgs = findFVGs(m15, 'M15', atrM15, 96).filter(
+      z => z.dir === trigger.dir && z.t >= trigger.sweep.t && z.t <= trigger.mss.t + TF_MS.M15
+    );
+    // OB : dernière bougie opposée entre le balayage et le premier displacement
+    let ob: Zone | null = null;
+    const iDisp = m15.findIndex(k => k.t === trigger.displacementT);
+    for (let j = iDisp; j >= Math.max(0, trigger.sweep.idx - 1); j--) {
+      const k = m15[j];
+      if (long ? k.c < k.o : k.c > k.o) {
+        const z: Zone = { id: `M15-OB-${k.t}`, tf: 'M15', kind: 'OB', dir: trigger.dir, top: k.h, bottom: k.l, t: k.t, touched: false };
+        // invalidé par une clôture au-delà (dès la bougie suivante) ; testé si le prix y est revenu après la cassure
+        if (!m15.slice(j + 1).some(x => (long ? x.c < z.bottom : x.c > z.top))) {
+          z.touched = m15.slice(trigger.mss.idx + 1).some(x => (long ? x.l <= z.top : x.h >= z.bottom));
+          ob = z;
+        }
+        break;
+      }
+    }
+    const pool = [...fvgs, ...(ob ? [ob] : [])].filter(z => (long ? price >= z.bottom : price <= z.top));
+    // priorité : zone dans la bonne moitié de l'impulsion, la plus proche du prix
+    const dist = (z: Zone) => Math.abs((long ? z.top : z.bottom) - price);
+    const sorted = [...pool].sort((a, b) => Number(inHalf(b)) - Number(inHalf(a)) || dist(a) - dist(b));
+    trigZone = sorted[0] ? { ...sorted[0], top: r(sorted[0].top), bottom: r(sorted[0].bottom) } : null;
+    trigPremium = !!trigZone && inHalf(trigZone);
+    if (trigZone) {
+      const z = trigZone;
+      const inside = price <= z.top && price >= z.bottom;
+      const entry = inside ? price : long ? z.top : z.bottom;
+      // stop juste derrière l'extrême du balayage
+      const buffer = Math.max(0.1 * atrM15, spread);
+      // (si l'OB dépasse l'extrême du balayage, le stop va derrière l'OB)
+      const base = long ? Math.min(trigger.extreme, z.bottom) : Math.max(trigger.extreme, z.top);
+      let sl = long ? base - buffer : base + buffer + spread;
+      const minRisk = Math.max(0.3 * atrH1, 4 * spread);
+      if (Math.abs(entry - sl) < minRisk) sl = long ? entry - minRisk : entry + minRisk;
+      const risk = Math.abs(r(entry) - r(sl));
+      if (risk > 0 && risk <= 2.5 * atrH1) {
+        const tpOf = (lvl: number) => (long ? lvl - spread : lvl + spread);
+        const rrNet = (lvl: number) => (Math.abs(r(tpOf(lvl)) - r(entry)) - commUnit) / (risk + commUnit);
+        const targets = liquidity
+          .filter(l => !l.swept && (long ? l.side === 'buy' && l.price > entry : l.side === 'sell' && l.price < entry) && rrNet(l.price) >= 1)
+          .sort((a, b) => (long ? a.price - b.price : b.price - a.price));
+        if (targets.length) {
+          const t1 = targets[0];
+          const t2 = targets.find(t => rrNet(t.price) >= 2 && t !== t1) || null;
+          trigSetup = {
+            direction: long ? 'acheter' : 'vendre',
+            entryType: inside ? 'marché' : 'limite',
+            entry: r(entry),
+            sl: r(sl),
+            tp1: r(tpOf(t1.price)),
+            tp2: t2 ? r(tpOf(t2.price)) : null,
+            tp1Label: t1.label,
+            tp2Label: t2?.label ?? null,
+            rr1: Number(rrNet(t1.price).toFixed(2)),
+            rr2: t2 ? Number(rrNet(t2.price).toFixed(2)) : null,
+            zoneId: z.id,
+            zoneLabel: `${ZONE_NAMES[z.kind]} ${long ? 'haussier' : 'baissier'} M15 né de l’impulsion (${z.bottom} – ${z.top})`,
+          };
+        }
+      }
+      if (!zones.some(x => x.id === z.id)) zones.push(z);
+    }
+  }
+  // Plan proposé : celui du déclencheur ; sinon le plan « en préparation » sur la zone la plus proche (pas de signal possible)
+  const setup = trigSetup || aligned.find(c => (c.rr2 ?? c.rr1) >= 2) || aligned[0] || null;
   if (setup) setup.validUntil = now + 4 * HOUR;
-  const alternatives = candidates.filter(c => c !== setup).slice(0, 3);
+  const alternatives = candidates.filter(c => c !== setup && c.zoneId !== setup?.zoneId).slice(0, 3);
+  const finalTarget = trigSetup ? liquidity.find(l => l.label === (trigSetup!.tp2Label ?? trigSetup!.tp1Label) && Math.abs(l.price - (trigSetup!.tp2Label ? trigSetup!.tp2! : trigSetup!.tp1)) <= spread + 10 ** -decimals * 2) : null;
+  const htfTarget = !!trigSetup && liquidity.some(l => isExternalLiquidity(l.id) && !l.swept && (trigSetup!.direction === 'acheter' ? l.side === 'buy' && l.price > trigSetup!.entry : l.side === 'sell' && l.price < trigSetup!.entry));
+  const htfZoneAligned = !!trigZone && htfZones.some(z => z.dir === trigZone!.dir && z.bottom <= trigZone!.top && z.top >= trigZone!.bottom);
+  const htfZoneAtExtreme = !!trigger && htfZones.some(z => z.dir === trigger.dir && trigger.extreme <= z.top + atrM15 * 0.25 && trigger.extreme >= z.bottom - atrM15 * 0.25);
+  const htfContext = !!trigger && (trigger.sweep.htf || htfZoneAtExtreme || htfTarget);
+  void finalTarget;
 
   // ----- Annonces économiques -----
   const curr = opts.newsCurrencies ?? ['USD'];
@@ -848,23 +1039,75 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   ];
   const patternForTrade = setup ? candlePatterns.find(p => p.dir === (isLong ? 'haussier' : 'baissier') && p.inZone) || null : null;
 
-  // ----- Checklist -----
-  // un achat demande un balayage SOUS le prix (liquidité vendeuse), une vente un balayage AU-DESSUS
+  // ----- Checklist (règles 3.7 : protocole en 4 étapes, toutes obligatoires) -----
   const sweepForTrade = setup ? sweeps.find(sw => sw.side === (isLong ? 'sell' : 'buy')) || null : null;
   const ltfOk = !!setup && timeframes.M15.trend === (isLong ? 'haussier' : 'baissier');
+  const fromTrigger = !!trigSetup && setup === trigSetup;
+  const dirWord = isLong ? 'haussier' : 'baissier';
   const checklist: CheckItem[] = [
     {
       key: 'bias',
-      label: 'Biais D1/H4 clair',
+      label: '1. Courant HTF : biais D1/H4 clair',
       ok: bias !== 'neutre',
       detail: biasDetail,
       core: true,
     },
     {
+      key: 'htf',
+      label: '1. Contexte HTF : liquidité HTF balayée, zone clé ou objectif externe',
+      ok: fromTrigger && htfContext,
+      detail: !trigger
+        ? 'Pas encore de déclencheur : le contexte se juge sur le balayage.'
+        : trigger.sweep.htf
+        ? `${trigger.sweep.label} balayé : liquidité HTF prise.`
+        : htfZoneAtExtreme
+        ? 'Le balayage s’est fait dans une zone H1/H4 : le prix sort d’une zone clé.'
+        : htfTarget
+        ? 'Objectif externe clair (veille, semaine, Asie, égaux, swing H4/D1).'
+        : 'Balayage d’une simple liquidité M15, sans zone clé ni objectif externe : « au milieu de nulle part ».',
+      core: true,
+    },
+    {
+      key: 'sweep',
+      label: '2. Balayage de liquidité',
+      ok: !!trigger,
+      detail: trigger
+        ? `${trigger.sweep.label} (${r(trigger.sweep.price)}) balayé à ${maTime(trigger.sweep.t)} (heure du Maroc).`
+        : sweepForTrade
+        ? `${sweepForTrade.label} balayé à ${maTime(sweepForTrade.t)}, mais sans displacement ni CHoCH ${dirWord} derrière.`
+        : `Aucun balayage ${isLong ? 'sous un creux' : 'au-dessus d’un sommet'} suivi d’une cassure dans les dernières heures.`,
+      core: true,
+    },
+    {
+      key: 'displacement',
+      label: '2. Displacement après le balayage',
+      ok: !!trigger,
+      detail: trigger ? `Bougie impulsive ${dirWord} à ${maTime(trigger.displacementT)} (corps ≥ 2x la moyenne).` : 'Pas de bougie impulsive dans le sens du trade après un balayage.',
+      core: true,
+    },
+    {
+      key: 'choch',
+      label: '2. CHoCH / MSS M15 net',
+      ok: !!trigger,
+      detail: trigger
+        ? `${trigger.mss.kind} ${dirWord} à ${maTime(trigger.mss.t)} (cassure de ${r(trigger.mss.level)}).`
+        : `Attendre une cassure M15 ${dirWord} après un balayage.`,
+      core: true,
+    },
+    {
       key: 'zone',
-      label: 'Zone d\'entrée (OB/FVG/IFVG/Breaker) dans le sens du biais',
-      ok: !!setup,
-      detail: setup ? setup.zoneLabel : 'Aucune zone valide (OB/FVG/IFVG/Breaker) dans le sens du biais près du prix.',
+      label: '3. FVG / OB né de l’impulsion',
+      ok: fromTrigger,
+      detail: fromTrigger ? setup!.zoneLabel : trigger ? 'Pas de FVG ni d’OB exploitable dans l’impulsion (ou déjà invalidé).' : setup ? `Zone en attente : ${setup.zoneLabel}.` : 'Aucune zone.',
+      core: true,
+    },
+    {
+      key: 'pd',
+      label: isLong ? '3. Zone en discount de l’impulsion (< 50 %)' : '3. Zone en premium de l’impulsion (> 50 %)',
+      ok: fromTrigger && trigPremium,
+      detail: trigger && trigZone
+        ? `Impulsion ${r(trigger.legLow)} → ${r(trigger.legHigh)}, milieu ${r((trigger.legHigh + trigger.legLow) / 2)} : zone ${trigPremium ? (isLong ? 'en discount' : 'en premium') : (isLong ? 'au-dessus du milieu (premium)' : 'sous le milieu (discount)')}.`
+        : 'Pas d’impulsion de référence.',
       core: true,
     },
     {
@@ -875,28 +1118,24 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       core: true,
     },
     {
-      key: 'sweep',
-      label: 'Liquidité balayée avant l’entrée',
-      ok: !!setup && !!sweepForTrade,
-      detail: sweepForTrade
-        ? `${sweepForTrade.label} (${r(sweepForTrade.price)}) balayé à ${maTime(sweepForTrade.t)} (heure du Maroc).`
-        : sweeps.length
-        ? `Dernier balayage dans l’autre sens : ${sweeps[0].label} à ${maTime(sweeps[0].t)}.`
-        : 'Aucun balayage net de liquidité dans les 8 dernières heures.',
-      core: strictSweep,
+      key: 'session',
+      label: '4. Déclenchement en session Londres / New York',
+      ok: !!trigger && trigger.inSession,
+      detail: trigger ? (trigger.inSession ? 'Balayage ou cassure pendant une kill zone.' : 'Balayage et cassure hors kill zone : mouvement de faible liquidité.') + ` ${session.detail}` : session.detail,
+      core: true,
     },
     {
-      key: 'amd',
-      label: 'Cycle AMD dans le sens du trade',
-      ok: !!setup && amd.direction === (isLong ? 'haussière' : 'baissière') && (amd.phase === 'Manipulation' || amd.phase === 'Distribution'),
-      detail: `${amd.phase} — ${amd.detail}`,
-      core: false,
+      key: 'news',
+      label: '4. Pas d’annonce à fort impact (±30 min)',
+      ok: newsOk,
+      detail: newsDetail,
+      core: true,
     },
     {
-      key: 'pd',
-      label: isLong ? 'Achat en zone discount' : 'Vente en zone premium',
-      ok: !!setup && !!dealingRange && (isLong ? dealingRange.position < 0.5 : dealingRange.position > 0.5),
-      detail: dealingRange ? `Prix à ${Math.round(dealingRange.position * 100)} % du range H1 (${dealingRange.label}).` : 'Range H1 indéterminé.',
+      key: 'htfzone',
+      label: 'Bonus : zone alignée avec un OB/FVG H1 ou H4',
+      ok: htfZoneAligned,
+      detail: htfZoneAligned ? 'La zone d’entrée repose sur une zone HTF du même sens.' : 'Pas de zone H1/H4 du même sens sous la zone d’entrée.',
       core: false,
     },
     {
@@ -907,95 +1146,61 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       core: false,
     },
     {
-      key: 'news',
-      label: 'Pas d’annonce à fort impact (±30 min)',
-      ok: newsOk,
-      detail: newsDetail,
-      core: true,
-    },
-    {
-      key: 'session',
-      label: 'Pendant une kill zone (Londres / New York)',
-      ok: session.killzone,
-      detail: session.detail,
-      core: false,
-    },
-    {
-      key: 'displacement',
-      label: 'Zone créée par un displacement',
-      ok: displacement,
-      detail: setupZone
-        ? displacement
-          ? 'Bougie impulsive (corps ≥ 2x la moyenne, clôture près de l’extrême) à l’origine de la zone : intervention agressive.'
-          : 'Pas de bougie impulsive à l’origine de la zone : mouvement mou.'
-        : 'Pas de zone.',
-      core: false,
-    },
-    {
-      key: 'ote',
-      label: 'Entrée dans l’OTE (62–79 %)',
-      ok: inOte,
-      detail: ote
-        ? `OTE ${setupZone?.tf} : ${ote.bottom} – ${ote.top} (${ote.detail}, ${ote.legLow} → ${ote.legHigh}).${setup ? (inOte ? ' L’entrée est dedans.' : ` Entrée à ${setup.entry} : hors OTE.`) : ''}`
-        : 'Pas d’impulse de référence pour tracer l’OTE.',
-      core: false,
-    },
-    {
-      key: 'trendline',
-      label: 'Liquidité de trendline à prendre dans le sens du trade',
-      ok: !!tlTarget,
-      detail: tlTarget
-        ? `${tlTarget.label}, vers ${tlTarget.priceNow} : stops accumulés ${isLong ? 'au-dessus' : 'en dessous'}, carburant pour le mouvement.`
-        : 'Aucune trendline de 3 touches intacte du côté de l’objectif.',
+      key: 'amd',
+      label: 'Bonus : cycle AMD dans le sens du trade',
+      ok: !!setup && amd.direction === (isLong ? 'haussière' : 'baissière') && (amd.phase === 'Manipulation' || amd.phase === 'Distribution'),
+      detail: `${amd.phase} — ${amd.detail}`,
       core: false,
     },
     {
       key: 'candle',
-      label: 'Bougie japonaise de retournement dans la zone',
+      label: 'Bonus : bougie japonaise de retournement dans la zone',
       ok: !!patternForTrade,
       detail: patternForTrade
         ? `${patternForTrade.name} en ${patternForTrade.tf} à ${maTime(patternForTrade.t)} : ${patternForTrade.detail}`
         : 'Aucune figure de retournement (ebook) dans la zone sur les dernières bougies M15/H1.',
       core: false,
     },
+    {
+      key: 'trendline',
+      label: 'Bonus : liquidité de trendline vers l’objectif',
+      ok: !!tlTarget,
+      detail: tlTarget
+        ? `${tlTarget.label}, vers ${tlTarget.priceNow} : stops accumulés ${isLong ? 'au-dessus' : 'en dessous'}, carburant pour le mouvement.`
+        : 'Aucune trendline de 3 touches intacte du côté de l’objectif.',
+      core: false,
+    },
   ];
 
   const coreOk = checklist.filter(c => c.core).every(c => c.ok);
-  // Score de qualité (grille de la base de connaissance, §6) : mesure de confluence, pas une probabilité
+  // Score de qualité : mesure de confluence, pas une probabilité. A+ ≥ 70, sinon B (risque divisé par 2).
   const ok = (k: string) => !!checklist.find(c => c.key === k)?.ok;
   const score = !setup
     ? 0
-    : (bias !== 'neutre' ? (d1 === h4 ? 20 : 10) : 0) +
-      (ok('sweep') ? 20 : 0) +
-      (setupZone && !setupZone.touched ? 10 : 0) +
-      (ok('displacement') ? 5 : 0) +
-      (ok('ote') ? 10 : 0) +
-      (ok('session') ? 10 : 0) +
-      (ok('pd') ? 10 : 0) +
-      (ok('ltf') ? 5 : 0) +
-      (ok('candle') ? 5 : 0) +
-      (ok('amd') ? 5 : 0);
-  const grade: EngineResult['grade'] = score >= 80 ? 'A+' : score >= 60 ? 'B' : 'C';
+    : Math.min(
+        100,
+        (bias !== 'neutre' ? (d1 === h4 ? 20 : 10) : 0) +
+          (trigger?.sweep.htf ? 20 : ok('htf') ? 10 : 0) +
+          (ok('zone') && trigZone && !trigZone.touched ? 10 : 0) +
+          (ok('htfzone') ? 15 : 0) +
+          (session.killzone ? 10 : 0) +
+          (finalRR >= 3 ? 10 : 0) +
+          (ok('amd') ? 5 : 0) +
+          (ok('candle') ? 5 : 0) +
+          (ok('trendline') ? 5 : 0)
+      );
+  const grade: EngineResult['grade'] = !fromTrigger ? 'C' : score >= GRADE_A ? 'A+' : 'B';
   let signal: EngineResult['signal'] = 'attendre';
   let waitCondition: string | null = null;
-  // conditions obligatoires toutes remplies + au moins 3 confluences sur 8
-  const optionalOk = checklist.filter(c => !c.core && c.ok).length;
-  if (coreOk && optionalOk >= MIN_CONFLUENCES && setup && grade === 'C') {
-    waitCondition = `Conditions réunies mais qualité C (${score}/100) : pas de trade sous 60.`;
-  } else if (coreOk && optionalOk >= MIN_CONFLUENCES && setup) {
-    signal = setup.direction;
-    // au marché : seulement si la structure M15 confirme déjà le sens du trade
-    if (setup.entryType === 'marché' && !ltfOk) {
-      signal = 'attendre';
-      waitCondition = `Prix déjà dans la zone : attendre une cassure M15 ${isLong ? 'haussière' : 'baissière'} (CHoCH) avant d’entrer.`;
-    }
+  if (coreOk && fromTrigger) {
+    signal = setup!.direction;
   } else {
-    const missing = checklist.filter(c => !c.ok).map(c => c.label.toLowerCase());
-    waitCondition = setup
-      ? `Plan en préparation, il manque : ${missing.join(', ')}.`
-      : bias === 'neutre'
+    const missing = checklist.filter(c => c.core && !c.ok).map(c => c.label.replace(/^\d\. /, '').toLowerCase());
+    waitCondition = !wantDir
       ? 'Attendre une structure H4 claire (cassure confirmée) avant de chercher une entrée.'
-      : `Attendre un retour du prix dans une zone ${bias === 'haussier' ? 'haussière (discount)' : 'baissière (premium)'} avec de la place jusqu'à la prochaine liquidité.`;
+      : !trigger
+      ? `Attendre le déclencheur : balayage d’une liquidité ${isLong || wantDir === 'acheter' ? 'sous un creux' : 'au-dessus d’un sommet'}, puis displacement et CHoCH M15 ${wantDir === 'acheter' ? 'haussier' : 'baissier'}.`
+      : `Déclencheur présent, il manque : ${missing.join(', ')}.`;
   }
   // Choc de volatilité contre le plan (annonce imprévue, gros titre…) : on ne vend pas dans une impulsion haussière,
   // on n'achète pas dans une chute, tant que la structure M15 n'a pas repris le sens du trade.
