@@ -99,7 +99,7 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
   // ---- 5. Score et décision ----
   if (e.score < 0 || e.score > 100) err(`score hors bornes (${e.score})`);
   const trig = !!e.setup && ck('zone')?.ok;
-  if (e.grade !== (!trig ? 'C' : e.score >= GRADE_A ? 'A+' : 'B')) err('classe incohérente avec le score');
+  if (e.grade !== (!trig ? 'C' : e.score >= GRADE_A && !e.tentativeNews.length ? 'A+' : 'B')) err('classe incohérente avec le score');
   if (e.dealingRange && (e.dealingRange.position < 0 || e.dealingRange.position > 1)) err('position dans le range hors de 0-100 %');
   if (e.signal !== 'attendre') {
     if (!s) err('signal sans plan');

@@ -1,5 +1,11 @@
 # Journal des versions
 
+## Règles 3.9 — 03/11/2026 (revue « desk »)
+- **Ticket broker** : ordre prêt à saisir (Buy/Sell Limit ou marché), position découpée en deux ordres (TP1 et TP2), break-even à déplacer sur l'ordre 2, expiration de l'ordre limite.
+- **Règles du desk** au moment de prendre un trade : 2 trades maximum par jour, stop après 2 pertes d'affilée, un seul trade par actif, pas deux trades avec la même exposition au dollar (achat or + achat EUR/USD).
+- **Rollover** (16h45–18h30 New York) : aucune nouvelle entrée, et les ordres limite expirent avant 16h45 NY.
+- **Jour d'annonce forte à horaire inconnu** (élections…) : classe B au mieux, donc risque divisé par 2.
+
 ## 02/11/2026 — secours de données
 - **Yahoo Finance en secours** quand Twelve Data est épuisé (429) ou en panne : EUR/USD directement ; or via les futures COMEX recalées sur le spot (écart futures − spot mesuré sur les dernières bougies Twelve Data). Si l'écart est inconnu, niveaux de l'or masqués.
 - Après un 429 « quota du jour », plus aucun appel à Twelve Data jusqu'à minuit UTC.

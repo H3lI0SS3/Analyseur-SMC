@@ -6,6 +6,7 @@ import { JournalView } from './components/JournalView';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
+import { deskCheck } from './lib/desk';
 import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson } from './lib/utils';
 import { isTracked, strategyStats, trackJournal } from './lib/tracker';
 
@@ -89,6 +90,8 @@ export default function App() {
     if (Date.now() - a.generatedAt > 10 * 60_000) return 'Analyse de plus de 10 minutes : relance l’analyse avant de prendre le trade.';
     const dup = journal.some(j => isTracked(j) && j.pair === a.pair && j.direction === p.direction && Math.abs(j.entry - p.entry) < 1e-9);
     if (dup) return 'Ce trade est déjà suivi dans le journal.';
+    const desk = deskCheck(journal, a.pair, p.direction);
+    if (desk) return desk;
     const costs = costsFor(a.pair, settings);
     setJournal([
       {

@@ -9,14 +9,14 @@ import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.8';
+export const RULES_VERSION = '3.9';
 // 3.4 : displacement, OTE, liquidité de trendline, breaker blocks, bougies japonaises (ebook) dans la décision ; 3 confluences sur 8
 export const MIN_CONFLUENCES = 3; // (règles ≤ 3.6, conservé pour le laboratoire du backtest)
 /** R:R net minimal (spread et commission compris) pour qu'un plan soit exploitable. */
 export const MIN_RR = 2.5;
 /** Score minimal pour la classe A+ (en dessous : classe B, risque divisé par 2). */
 export const GRADE_A = 70;
-export const RULES_FROZEN_AT = Date.UTC(2026, 10, 2, 20, 0); // 02/11/2026 20:00 UTC (3.8 : R:R net minimal 1:2,5, double validation moteur + Gemini ; 3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 3, 22, 0); // 03/11/2026 22:00 UTC (3.9 : pas d'entrée au rollover, ordres limite expirés avant 16h45 NY, classe B au mieux les jours d'annonce à horaire inconnu ; 3.8 : R:R net minimal 1:2,5, double validation moteur + Gemini ; 3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -752,6 +752,21 @@ export function findTrigger(m15: Candle[], events: StructureEvent[], cands: Swee
   return null;
 }
 
+/** Rollover de fin de journée de trading (16h45–18h30 heure de New York). */
+export function inRollover(t: number): boolean {
+  const p = nyParts(t);
+  const h = p.h + p.mi / 60;
+  return h >= 16.75 && h < 18.5;
+}
+
+/** Prochain début de rollover (16h45 NY) après t. */
+export function nextRollover(t: number): number {
+  const p = nyParts(t);
+  let r = nyToUtc(p.y, p.m, p.d, 16, 45);
+  if (r <= t) r = nyToUtc(p.y, p.m, p.d + 1, 16, 45);
+  return r;
+}
+
 /** Liquidité « externe » (objectif HTF clair) : veille, semaine, Asie, égaux hauts/bas, swings H4/D1. */
 export const isExternalLiquidity = (id: string) => /^(PD|PW|AS|EQ|H4|D1)/.test(id);
 
@@ -1002,7 +1017,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   }
   // Plan proposé : celui du déclencheur ; sinon le plan « en préparation » sur la zone la plus proche (pas de signal possible)
   const setup = trigSetup || aligned.find(c => (c.rr2 ?? c.rr1) >= MIN_RR) || aligned[0] || null;
-  if (setup) setup.validUntil = now + 4 * HOUR;
+  if (setup) setup.validUntil = Math.min(now + 4 * HOUR, nextRollover(now));
   const alternatives = candidates.filter(c => c !== setup && c.zoneId !== setup?.zoneId).slice(0, 3);
   const finalTarget = trigSetup ? liquidity.find(l => l.label === (trigSetup!.tp2Label ?? trigSetup!.tp1Label) && Math.abs(l.price - (trigSetup!.tp2Label ? trigSetup!.tp2! : trigSetup!.tp1)) <= spread + 10 ** -decimals * 2) : null;
   const htfTarget = !!trigSetup && liquidity.some(l => isExternalLiquidity(l.id) && !l.swept && (trigSetup!.direction === 'acheter' ? l.side === 'buy' && l.price > trigSetup!.entry : l.side === 'sell' && l.price < trigSetup!.entry));
@@ -1200,7 +1215,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
           (ok('candle') ? 5 : 0) +
           (ok('trendline') ? 5 : 0)
       );
-  const grade: EngineResult['grade'] = !fromTrigger ? 'C' : score >= GRADE_A ? 'A+' : 'B';
+  // Jour d'annonce forte à horaire inconnu (élections, discours…) : classe B au mieux (risque divisé par 2)
+  const grade: EngineResult['grade'] = !fromTrigger ? 'C' : score >= GRADE_A && !tentativeToday.length ? 'A+' : 'B';
   let signal: EngineResult['signal'] = 'attendre';
   let waitCondition: string | null = null;
   if (coreOk && fromTrigger) {
@@ -1224,6 +1240,11 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   if (blocking && signal !== 'attendre') {
     signal = 'attendre';
     waitCondition = `Annonce à fort impact : ${blocking.title} à ${maTime(blocking.t)}. On attend la fin de la fenêtre de 30 minutes.`;
+  }
+  // Rollover (16h45–18h30 NY) : spreads très larges, pas de nouvelle entrée
+  if (signal !== 'attendre' && inRollover(now)) {
+    signal = 'attendre';
+    waitCondition = 'Rollover de fin de journée (16h45–18h30 New York) : spreads très larges, pas de nouvelle entrée. Relance l’analyse après.';
   }
   if (marketClosed(now)) {
     signal = 'attendre';

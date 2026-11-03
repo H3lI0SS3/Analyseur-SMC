@@ -13,6 +13,7 @@ import {
 import type { AnalysisResponse, PipelineReport, RiskSettings, Status, Timeframe } from '../types';
 import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade, readJson } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
+import { splitOrders } from '../lib/desk';
 
 interface Props {
   pair: string;
@@ -257,6 +258,21 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
             <p className="mt-1.5 text-[10px] leading-snug text-mute">
               Niveaux recalés sur ton broker ({broker.offset > 0 ? '+' : ''}{fmt(broker.offset, dec)}). Niveaux de l’app (flux Twelve Data, utilisés par le suivi du journal) : entrée {fmt(plan.entry, dec)}, stop {fmt(plan.sl, dec)}, TP1 {fmt(plan.tp1, dec)}{plan.tp2 !== null ? `, TP2 ${fmt(plan.tp2, dec)}` : ''}.
             </p>
+          )}
+          {go && (settings.broker ?? 'etoro') !== 'etoro' && lots !== null && lots > 0 && (
+            <OrderTicket
+              long={plan.direction === 'acheter'}
+              market={plan.entryType === 'marché'}
+              entry={shift(plan.entry)!}
+              sl={shift(plan.sl)!}
+              tp1={shift(plan.tp1)!}
+              tp2={shift(plan.tp2)}
+              lots={lots}
+              cent={cent}
+              dec={dec}
+              validUntil={e.setup?.validUntil ?? null}
+              recalibrated={broker.offset !== 0}
+            />
           )}
           <div className="mt-3 rounded-lg bg-card2 px-3 py-2 text-xs">
             {(settings.broker ?? 'etoro') === 'etoro' && lots !== null && lots > 0 ? (
@@ -743,5 +759,53 @@ function PipelineCard({ p, dec }: { p: PipelineReport; dec: number }) {
         {p.model ? `${p.model} · ` : ''}{(p.latencyMs / 1000).toFixed(1)} s · ~{p.payloadTokens} tokens envoyés. Un trade n’est proposé que si le moteur ET Gemini sont d’accord.
       </p>
     </section>
+  );
+}
+
+/** Ticket prêt à saisir dans MT5 / Exness : la sortie partielle se fait avec deux ordres (TP1 et TP2). */
+function OrderTicket(p: { long: boolean; market: boolean; entry: number; sl: number; tp1: number; tp2: number | null; lots: number; cent: boolean; dec: number; validUntil: number | null; recalibrated: boolean }) {
+  const type = `${p.long ? 'Buy' : 'Sell'} ${p.market ? '(au marché)' : 'Limit'}`;
+  const split = p.tp2 !== null ? splitOrders(p.lots) : null;
+  const unit = p.cent ? ' lot cent' : ' lot';
+  const Row = ({ n, lots, tp }: { n: string; lots: number; tp: number }) => (
+    <tr className="border-t border-line/60">
+      <td className="py-1 pr-2 text-mute">{n}</td>
+      <td className="num py-1 pr-2">{lots.toFixed(2)}{unit}</td>
+      <td className="num py-1 pr-2">{fmt(p.entry, p.dec)}</td>
+      <td className="num py-1 pr-2 text-down">{fmt(p.sl, p.dec)}</td>
+      <td className="num py-1 text-up">{fmt(tp, p.dec)}</td>
+    </tr>
+  );
+  return (
+    <div className="mt-3 rounded-lg border border-gold/40 bg-gold/5 px-3 py-2 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-gold">Ordre à saisir chez ton broker</span>
+        <span className="num font-bold">{type}</span>
+      </div>
+      {!p.recalibrated && <p className="mt-1 text-[11px] text-warn">Saisis d’abord le prix « Sell » de ton broker plus haut : les niveaux seront recalés sur ses prix.</p>}
+      <table className="mt-2 w-full text-left text-[11px]">
+        <thead>
+          <tr className="text-mute">
+            <th className="font-normal">Ordre</th><th className="font-normal">Volume</th><th className="font-normal">Prix</th><th className="font-normal">Stop</th><th className="font-normal">TP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {split ? (
+            <>
+              <Row n="1" lots={split.lot1} tp={p.tp1} />
+              <Row n="2" lots={split.lot2} tp={p.tp2!} />
+            </>
+          ) : (
+            <Row n="1" lots={p.lots} tp={p.tp2 ?? p.tp1} />
+          )}
+        </tbody>
+      </table>
+      <ul className="mt-2 space-y-0.5 text-[11px] leading-snug text-mute">
+        {split && <li>• Quand l’ordre 1 touche son TP, déplace le stop de l’ordre 2 au prix d’entrée (break-even).</li>}
+        {!split && p.tp2 !== null && <li>• Volume trop petit pour deux ordres : à TP1 ({fmt(p.tp1, p.dec)}), déplace ton stop au prix d’entrée.</li>}
+        {!p.market && p.validUntil && <li>• Ordre limite : mets une expiration à {localTime(p.validUntil)} (heure du Maroc), ou annule-le toi-même à cette heure.</li>}
+        <li>• Vérifie que le spread affiché chez ton broker est normal avant de valider.</li>
+      </ul>
+    </div>
   );
 }
