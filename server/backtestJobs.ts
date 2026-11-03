@@ -44,6 +44,21 @@ export function getJob(pair: string, budgetMs = 8000): JobView | null {
   return view(job);
 }
 
+/**
+ * Fait avancer le calcul pendant totalMs SANS bloquer le serveur : tranches de sliceMs entrecoupées
+ * d'un retour à la boucle d'événements (les analyses et cotations restent servies pendant ce temps).
+ */
+export async function advanceJobAsync(pair: string, totalMs: number, sliceMs = 200): Promise<JobView | null> {
+  const job = jobs.get(pair);
+  if (!job) return null;
+  const until = Date.now() + totalMs;
+  while (job.status === 'en cours' && job.run && Date.now() < until) {
+    advance(job, Math.min(sliceMs, until - Date.now()));
+    await new Promise(r => setImmediate(r));
+  }
+  return view(job);
+}
+
 /** Fait avancer tous les calculs en cours (appelé à chaque rafraîchissement des cotations). */
 export function advanceAll(budgetMs: number) {
   for (const job of jobs.values()) advance(job, budgetMs);

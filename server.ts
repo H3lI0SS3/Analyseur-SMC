@@ -8,7 +8,7 @@ import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './server/ai';
 import { runAnalysis, AnalysisError } from './server/analysis';
 import { mountMcp } from './server/mcp';
 import { RULES_VERSION } from './server/smc';
-import { advanceAll, getJob, startBacktest } from './server/backtestJobs';
+import { advanceAll, getJob, startBacktest, advanceJobAsync } from './server/backtestJobs';
 
 dotenv.config();
 
@@ -70,7 +70,7 @@ app.get('/api/candles', async (req, res) => {
 // ---------- Cotations ----------
 app.get('/api/quotes', async (_req, res) => {
   const quotes = await getQuotes();
-  advanceAll(1500); // fait progresser un éventuel calcul d'historique
+  advanceAll(300); // fait progresser un éventuel calcul d'historique (petite tranche : ne bloque pas l'app)
   res.json({ quotes });
 });
 
@@ -97,7 +97,7 @@ app.post('/api/backtest', (req, res) => {
 app.get('/api/backtest', async (req, res) => {
   // chaque consultation fait avancer le calcul ~2,5 s (Cloud Run ne donne du CPU que pendant les requêtes)
   const pair = String(req.query.pair || 'EUR/USD');
-  let job = getJob(pair, 2500);
+  let job = await advanceJobAsync(pair, 2500);
   if (job?.status === 'en cours' && job.phase?.startsWith('Téléchargement')) {
     await new Promise(r => setTimeout(r, 2500)); // laisse le téléchargement avancer pendant la requête
     job = getJob(pair, 0);

@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { PAIRS, getSeries, getQuotes, dataSourceName, type Timeframe } from './marketData';
 import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './ai';
 import { runAnalysis, AnalysisError } from './analysis';
-import { finishedTrades, getJob, startBacktest } from './backtestJobs';
+import { advanceJobAsync, finishedTrades, getJob, startBacktest } from './backtestJobs';
 import { exportTrades } from './historySnapshot';
 import { describe as describeBt } from './backtest';
 import { maDateTime } from './time';
@@ -185,7 +185,9 @@ function buildServer() {
       annotations: readOnly,
     },
     async ({ actif, relancer }) => {
-      let job = getJob(actif, 55_000);
+      // calcul par tranches non bloquantes (le serveur continue de répondre à l'app pendant ce temps)
+      let job = getJob(actif, 0);
+      if (job?.status === 'en cours' && !job.phase?.startsWith('Téléchargement')) job = await advanceJobAsync(actif, 45_000);
       if (job?.status === 'erreur' && !relancer) {
         return fail(`Backtest ${actif} en erreur (serveur ${job.instance}) : ${job.error}. Passe relancer=true pour réessayer.`);
       }
@@ -205,7 +207,7 @@ function buildServer() {
           const j = getJob(actif, 0);
           if (j && (j.status !== 'en cours' || !j.phase?.startsWith('Téléchargement'))) break;
         }
-        job = getJob(actif, 40_000)!;
+        job = (await advanceJobAsync(actif, 30_000))!;
       }
       if (job.status === 'erreur') return fail(`Backtest ${actif} en erreur (serveur ${job.instance}) : ${job.error}`);
       if (job.status === 'en cours') return text(`Backtest ${actif} en cours (serveur ${job.instance}) : ${job.phase}. Rappelle l’outil pour continuer le calcul.`);
