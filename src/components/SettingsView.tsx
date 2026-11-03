@@ -29,12 +29,21 @@ export function SettingsView({ settings, setSettings, status }: Props) {
 
       <section className="card space-y-4 p-4">
         <div className="label">Broker</div>
+        <button
+          onClick={() => set({ broker: 'mt5', commissionPerLot: 7, spreadEurPips: 0.2, spreadGold: 0.2 })}
+          className={cx(
+            'w-full rounded-lg border py-2 text-sm font-semibold',
+            settings.broker === 'mt5' && settings.commissionPerLot === 7 && settings.spreadEurPips === 0.2 && settings.spreadGold === 0.2 ? 'border-gold bg-gold/10 text-gold' : 'border-line text-ink'
+          )}
+        >
+          Préréglage FxPro (MT5 Raw+) : commission 7 $/lot, spreads 0,2
+        </button>
         <div className="grid grid-cols-3 gap-2">
-          {([['etoro', 'eToro'], ['mt5', 'MT5 (lots)'], ['cent', 'Compte cent']] as const).map(([k, l]) => (
+          {([['mt5', 'MT5 (lots)'], ['cent', 'Compte cent'], ['etoro', 'eToro']] as const).map(([k, l]) => (
             <button
               key={k}
               onClick={() => set(k === 'mt5' ? { broker: k } : { broker: k, commissionPerLot: 0 })}
-              className={cx('rounded-lg border py-2 text-sm', (settings.broker ?? 'etoro') === k ? 'border-gold bg-gold/10 text-gold' : 'border-line text-mute')}
+              className={cx('rounded-lg border py-2 text-sm', (settings.broker ?? 'mt5') === k ? 'border-gold bg-gold/10 text-gold' : 'border-line text-mute')}
             >
               {l}
             </button>
@@ -45,7 +54,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
             Compte cent (ex. Exness Standard Cent) : saisis ton capital en dollars (5 000 USC = 50 $). Les tailles sont données en lots cent (1 lot cent = 1/100 de lot standard). Vérifie dans la « Spécification » du symbole que c’est bien le cas chez ton broker.
           </p>
         )}
-        {(settings.broker ?? 'etoro') === 'etoro' && (
+        {settings.broker === 'etoro' && (
           <>
             <Field label="Levier eToro EUR/USD (1:x)" value={settings.leverageEur ?? 30} step={1} min={1} max={400} onChange={v => set({ leverageEur: v })} hint="1 = sans levier. Le levier ne change pas ton risque (fixé par le stop et ton % de risque) : il change seulement le montant à bloquer." />
             <Field label="Levier eToro or (1:x)" value={settings.leverageGold ?? 20} step={1} min={1} max={400} onChange={v => set({ leverageGold: v })} />
@@ -54,7 +63,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
         <div className="label pt-2">Coûts de ton broker</div>
         <Field label="Spread EUR/USD (pips)" value={settings.spreadEurPips} step={0.1} min={0} max={10} onChange={v => set({ spreadEurPips: v })} />
         <Field label="Spread or ($)" value={settings.spreadGold} step={0.05} min={0} max={5} onChange={v => set({ spreadGold: v })} />
-        <Field label="Commission aller-retour par lot ($)" value={settings.commissionPerLot} step={0.5} min={0} max={50} onChange={v => set({ commissionPerLot: v })} hint={(settings.broker ?? 'etoro') === 'etoro' ? 'eToro se rémunère en général par le spread : 0 sauf frais affichés sur ton compte.' : 'Pris en compte dans le stop, les objectifs, le R:R net et la taille de lot.'} allowZero />
+        <Field label="Commission aller-retour par lot ($)" value={settings.commissionPerLot} step={0.5} min={0} max={50} onChange={v => set({ commissionPerLot: v })} hint={settings.broker === 'etoro' ? 'eToro se rémunère en général par le spread : 0 sauf frais affichés sur ton compte.' : 'Pris en compte dans le stop, les objectifs, le R:R net et la taille de lot.'} allowZero />
       </section>
 
       <section className="card space-y-3 p-4">

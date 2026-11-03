@@ -259,7 +259,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
               Niveaux recalés sur ton broker ({broker.offset > 0 ? '+' : ''}{fmt(broker.offset, dec)}). Niveaux de l’app (flux Twelve Data, utilisés par le suivi du journal) : entrée {fmt(plan.entry, dec)}, stop {fmt(plan.sl, dec)}, TP1 {fmt(plan.tp1, dec)}{plan.tp2 !== null ? `, TP2 ${fmt(plan.tp2, dec)}` : ''}.
             </p>
           )}
-          {go && (settings.broker ?? 'etoro') !== 'etoro' && lots !== null && lots > 0 && (
+          {go && (settings.broker ?? 'mt5') !== 'etoro' && lots !== null && lots > 0 && (
             <OrderTicket
               long={plan.direction === 'acheter'}
               market={plan.entryType === 'marché'}
@@ -275,7 +275,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
             />
           )}
           <div className="mt-3 rounded-lg bg-card2 px-3 py-2 text-xs">
-            {(settings.broker ?? 'etoro') === 'etoro' && lots !== null && lots > 0 ? (
+            {(settings.broker ?? 'mt5') === 'etoro' && lots !== null && lots > 0 ? (
               (() => {
                 const z = etoroSize(a.pair, lots, plan.entry, a.pair === 'XAU/USD' ? settings.leverageGold ?? 20 : settings.leverageEur ?? 30);
                 return (
@@ -323,7 +323,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
                 Stop trop large pour ton capital : même 0,01 lot{cent ? ' cent' : ''} ferait perdre ≈ {minLotRiskUsd(a.pair, plan.entry, plan.sl, comm, scale).toFixed(2)} $ ({((minLotRiskUsd(a.pair, plan.entry, plan.sl, comm, scale) / settings.capital) * 100).toFixed(1)} % du compte, au lieu de {riskPct} %). Ne prends pas ce trade{cent ? '' : ', ou passe sur un compte cent'}.
               </p>
             )}
-            {(settings.broker ?? 'etoro') === 'etoro' && (
+            {(settings.broker ?? 'mt5') === 'etoro' && (
               <p className="mt-1 text-[10px] text-mute">Sur eToro : saisis le montant avec ce levier, vérifie que le nombre d’unités affiché correspond, puis pose le stop loss et le take profit aux niveaux ci-dessus.</p>
             )}
           </div>

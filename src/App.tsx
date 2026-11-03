@@ -17,10 +17,11 @@ const DEFAULT_SETTINGS: RiskSettings = {
   riskPct: 1,
   dailyLossPct: 3,
   aiProvider: 'auto',
-  spreadEurPips: 1,
-  spreadGold: 0.3,
-  commissionPerLot: 0,
-  broker: 'etoro',
+  // préréglage FxPro MT5 Raw+ (compte démo du trader)
+  spreadEurPips: 0.2,
+  spreadGold: 0.2,
+  commissionPerLot: 7,
+  broker: 'mt5',
   leverageEur: 30,
   leverageGold: 20,
 };
@@ -36,8 +37,8 @@ export default function App() {
   const [pair, setPair] = useState<string>(() => load('sa_ui', { pair: 'XAU/USD' }).pair);
   const [settings, setSettings] = useState<RiskSettings>(() => {
     const s = load('sa_settings', DEFAULT_SETTINGS);
-    // broker par défaut : eToro (sans commission séparée)
-    const migrated = s.broker ? s : { ...s, broker: 'etoro' as const, commissionPerLot: 0 };
+    // broker par défaut : MT5 (FxPro)
+    const migrated = s.broker ? s : { ...s, broker: 'mt5' as const };
     return { ...migrated, riskPct: Math.min(2, migrated.riskPct) }; // risque plafonné à 2 % par trade
   });
   const [needCode, setNeedCode] = useState(false);
