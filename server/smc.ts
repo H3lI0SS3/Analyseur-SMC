@@ -926,6 +926,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   let trigZone: Zone | null = null;
   let trigPremium = false;
   let trigSetup: Setup | null = null;
+  /** pourquoi le déclencheur ne donne pas de plan (affiché dans la checklist) */
+  let trigWhy: string | null = null;
   if (trigger) {
     const long = trigger.dir === 'bull';
     const mid = (trigger.legHigh + trigger.legLow) / 2;
@@ -967,12 +969,15 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       const minRisk = Math.max(0.3 * atrH1, 4 * spread);
       if (Math.abs(entry - sl) < minRisk) sl = long ? entry - minRisk : entry + minRisk;
       const risk = Math.abs(r(entry) - r(sl));
-      if (risk > 0 && risk <= 2.5 * atrH1) {
+      if (!(risk > 0 && risk <= 2.5 * atrH1)) {
+        trigWhy = `${ZONE_NAMES[z.kind]} de l’impulsion trouvé (${z.bottom} – ${z.top}), mais stop derrière le balayage trop large : ${r(risk)} > 2,5 ATR H1 (${r(2.5 * atrH1)}).`;
+      } else {
         const tpOf = (lvl: number) => (long ? lvl - spread : lvl + spread);
         const rrNet = (lvl: number) => (Math.abs(r(tpOf(lvl)) - r(entry)) - commUnit) / (risk + commUnit);
         const targets = liquidity
           .filter(l => !l.swept && (long ? l.side === 'buy' && l.price > entry : l.side === 'sell' && l.price < entry) && rrNet(l.price) >= 1)
           .sort((a, b) => (long ? a.price - b.price : b.price - a.price));
+        if (!targets.length) trigWhy = `${ZONE_NAMES[z.kind]} de l’impulsion trouvé (${z.bottom} – ${z.top}), mais aucune liquidité opposée non prise à au moins 1R.`;
         if (targets.length) {
           const t1 = targets[0];
           const t2 = targets.find(t => rrNet(t.price) >= MIN_RR && t !== t1) || null;
@@ -1061,7 +1066,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     {
       key: 'htf',
       label: '1. Contexte HTF : liquidité HTF balayée, zone clé ou objectif externe',
-      ok: fromTrigger && htfContext,
+      ok: htfContext,
       detail: !trigger
         ? 'Pas encore de déclencheur : le contexte se juge sur le balayage.'
         : trigger.sweep.htf
@@ -1104,7 +1109,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       key: 'zone',
       label: '3. FVG / OB né de l’impulsion',
       ok: fromTrigger,
-      detail: fromTrigger ? setup!.zoneLabel : trigger ? 'Pas de FVG ni d’OB exploitable dans l’impulsion (ou déjà invalidé).' : setup ? `Zone en attente : ${setup.zoneLabel}.` : 'Aucune zone.',
+      detail: fromTrigger ? setup!.zoneLabel : trigger ? trigWhy ?? 'Pas de FVG ni d’OB exploitable dans l’impulsion (ou déjà invalidé).' : setup ? `Zone en attente : ${setup.zoneLabel}.` : 'Aucune zone.',
       core: true,
     },
     {

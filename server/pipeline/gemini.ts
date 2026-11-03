@@ -1,6 +1,6 @@
 // Appel à Google AI Studio (Gemini) en Structured Outputs, avec délai maximal, modèles de secours,
 // nouvelle tentative si Google est surchargé, et validation stricte du JSON reçu.
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { GEMINI_FALLBACKS, isBusy, isModelGone } from '../ai';
 import type { MarketPayload } from './payload';
 import { GEMINI_RESPONSE_SCHEMA, parsePipelineJson, type PipelineResult } from './schema';
@@ -27,19 +27,32 @@ Règles absolues :
 /** Fonction d'appel bas niveau (remplaçable en test). Renvoie le texte JSON brut. */
 export type GeminiCall = (req: { model: string; system: string; user: string; signal: AbortSignal }) => Promise<string>;
 
+/** Réflexion réduite : sans ça, Gemini dépasse souvent 30 s sur ce payload. Désactivée si le modèle la refuse. */
+let thinkingSupported = true;
+
 const defaultCall: GeminiCall = async ({ model, system, user, signal }) => {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const res = await ai.models.generateContent({
-    model,
-    contents: [{ role: 'user', parts: [{ text: user }] }],
-    config: {
-      systemInstruction: system,
-      temperature: 0,
-      responseMimeType: 'application/json',
-      responseSchema: GEMINI_RESPONSE_SCHEMA as any,
-      abortSignal: signal,
-    },
-  });
+  const run = (withThinking: boolean) =>
+    ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text: user }] }],
+      config: {
+        systemInstruction: system,
+        temperature: 0,
+        responseMimeType: 'application/json',
+        responseSchema: GEMINI_RESPONSE_SCHEMA as any,
+        abortSignal: signal,
+        ...(withThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+      },
+    });
+  let res;
+  try {
+    res = await run(thinkingSupported);
+  } catch (e: any) {
+    if (!thinkingSupported || !/thinking/i.test(String(e?.message || e))) throw e;
+    thinkingSupported = false;
+    res = await run(false);
+  }
   return res.text ?? '';
 };
 

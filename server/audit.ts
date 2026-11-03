@@ -79,7 +79,7 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
     if (ok('candle') && !e.ict.candlePatterns.some(p => p.inZone && p.dir === (long ? 'haussier' : 'baissier'))) err('bougie japonaise cochée sans figure dans la zone');
     if (ok('rr') !== ((s.rr2 ?? s.rr1) >= MIN_RR)) err('case R:R incohérente avec le plan');
   } else {
-    for (const k of ['zone', 'rr', 'sweep', 'choch', 'htf', 'amd', 'pd', 'ltf', 'displacement', 'trendline', 'candle', 'htfzone']) if (ok(k)) err(`critère « ${k} » coché sans plan`);
+    for (const k of ['zone', 'rr', 'amd', 'pd', 'ltf', 'trendline', 'candle', 'htfzone']) if (ok(k)) err(`critère « ${k} » coché sans plan`);
   }
   if (ok('session') && !ok('sweep')) err('session validée sans déclencheur');
   if (ok('bias') !== (e.bias !== 'neutre')) err('case biais incohérente');
