@@ -1,5 +1,9 @@
 # Journal des versions
 
+## Règles 3.10 — 03/11/2026 (mise en situation)
+- Le **timing s'applique à l'entrée** : l'app ne propose un trade que pendant une kill zone (Londres / New York). Un balayage pendant une kill zone devient un bonus (+10 au score), conformément au protocole (« sessions de Londres ou New York de préférence »). En 3.9, un setup formé en Asie était refusé même à l'ouverture de Londres : zéro trade en deux jours.
+- Test de mise en situation sur les vraies bougies du 02-03/11 (journal, règles du desk, taille, suivi automatique).
+
 ## Règles 3.9 — 03/11/2026 (revue « desk »)
 - **Ticket broker** : ordre prêt à saisir (Buy/Sell Limit ou marché), position découpée en deux ordres (TP1 et TP2), break-even à déplacer sur l'ordre 2, expiration de l'ordre limite.
 - **Règles du desk** au moment de prendre un trade : 2 trades maximum par jour, stop après 2 pertes d'affilée, un seul trade par actif, pas deux trades avec la même exposition au dollar (achat or + achat EUR/USD).

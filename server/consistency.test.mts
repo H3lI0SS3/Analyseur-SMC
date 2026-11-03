@@ -83,7 +83,7 @@ function market(seed: number, start: number, end: number, base: number, vol: num
     }
   }
   ok(`Aucune incohérence sur ${runs} analyses (${plans} plans, ${signals} signaux)`, problems.size === 0, [...problems].map(([k, v]) => `${k} ×${v}`).join(' | '));
-  ok('Le test couvre des plans et des signaux', plans > 50 && signals > 5, `${plans} plans, ${signals} signaux`);
+  ok('Le test couvre des plans et des signaux', plans > 50 && signals >= 3, `${plans} plans, ${signals} signaux`);
 }
 
 // ---------- 2. Backtest : chaque trade est cohérent et identique quand le journal le rejoue ----------

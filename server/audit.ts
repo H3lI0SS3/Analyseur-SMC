@@ -81,7 +81,8 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
   } else {
     for (const k of ['zone', 'rr', 'amd', 'pd', 'ltf', 'trendline', 'candle', 'htfzone']) if (ok(k)) err(`critère « ${k} » coché sans plan`);
   }
-  if (ok('session') && !ok('sweep')) err('session validée sans déclencheur');
+  if (ok('session') !== e.session.killzone) err('case kill zone incohérente avec la session');
+  if (ok('sweepSession') && !ok('sweep')) err('balayage en session validé sans déclencheur');
   if (ok('bias') !== (e.bias !== 'neutre')) err('case biais incohérente');
 
   // ---- 3b. Balayages cohérents avec la liste de liquidité ----
