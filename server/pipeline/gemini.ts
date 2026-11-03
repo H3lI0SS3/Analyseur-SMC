@@ -96,7 +96,8 @@ export async function runGeminiPipeline(payload: MarketPayload, opts: PipelineCa
     return { status: 'indisponible', reason: 'pas_de_cle', detail: 'Aucune clé GEMINI_API_KEY configurée.', latencyMs: 0 };
   }
   const call = opts.call ?? defaultCall;
-  const models = opts.models ?? GEMINI_FALLBACKS;
+  // modèle rapide d'abord (le pipeline doit répondre en moins de 30 s), puis les modèles habituels
+  const models = opts.models ?? [...new Set([process.env.GEMINI_PIPELINE_MODEL || 'gemini-flash-lite-latest', ...GEMINI_FALLBACKS])];
   const user = buildUserPrompt(payload);
   try {
     return await withTimeout(opts.timeoutMs ?? PIPELINE_TIMEOUT_MS, async signal => {
@@ -112,6 +113,7 @@ export async function runGeminiPipeline(payload: MarketPayload, opts: PipelineCa
               if (attempt === 0) continue;
               return { status: 'indisponible', reason: 'json_invalide', detail: parsed.error, latencyMs: ms() } as const;
             }
+            console.log(`[Pipeline Gemini] ${model} : ${parsed.value.statut} en ${ms()} ms`);
             return { status: 'ok', result: parsed.value, model, latencyMs: ms() } as const;
           } catch (e) {
             if (signal.aborted) throw e;
