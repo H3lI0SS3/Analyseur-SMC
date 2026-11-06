@@ -240,8 +240,23 @@ function buildServer() {
         },
         hypotheses: r.assumptions,
         export_compact: { from: r.from, to: r.to, generatedAt: Date.now(), rulesVersion: r.rulesVersion, rows: exportTrades(finishedTrades(actif) ?? []) },
-        derniers_trades: r.lastTrades.map(t => ({
-          variante: t.variant,
+        // tous les signaux depuis le gel, y compris les ordres limite jamais exécutés (équivalent d'un suivi en direct)
+        signaux_depuis_gel: (finishedTrades(actif) ?? [])
+          .filter(t => t.variant === 'strict' && t.signalAt >= r.frozenFrom)
+          .map(t => ({
+            signal: maDateTime(t.signalAt),
+            sens: t.direction,
+            entree: t.entry,
+            sl: t.sl,
+            tp1: t.tp1,
+            tp2: t.tp2,
+            execute: t.filledAt !== null ? maDateTime(t.filledAt) : 'non (ordre expiré ou annulé)',
+            resultat: t.outcome,
+            r: t.r,
+            session: t.session,
+          })),
+        // depuis la 3.7 les deux variantes sont identiques : une seule liste
+        derniers_trades: r.lastTrades.filter(t => t.variant === 'strict').map(t => ({
           signal: maDateTime(t.signalAt),
           sens: t.direction,
           entree: t.entry,

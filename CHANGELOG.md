@@ -4,6 +4,8 @@
 - **Hypothèse testée, déclarée avant de voir les résultats** : même setup M15 (contexte, balayage, displacement, CHoCH, zone), mais entrée affinée en M5 comme le font les traders SMC en intraday : le prix entre dans la zone M15, fait un extrême M5, puis CHoCH M5 (clôture au-delà du dernier creux/sommet M5) ; ordre limite au milieu de la jambe du CHoCH ; stop derrière l'extrême M5 (au moins 25 % du stop M15) ; objectifs inchangés. Si le stop M15 est touché avant le CHoCH M5, pas de trade.
 - La 2e moitié de l'historique est toujours révélée pour cette variante : c'est elle qui décidera si l'app passe en exécution M5.
 - Le backtest télécharge aussi le **M5 sur 2 ans** (facultatif : s'il échoue, le reste du backtest continue).
+- Rapport du backtest : liste de **tous les signaux depuis le gel des règles**, y compris les ordres limite jamais exécutés (pour rejouer les journées récentes) ; les doublons strict/souple sont retirés.
+- Cohérence : un niveau de liquidité pris par une mèche M15 ne garde plus l'étiquette « non pris » (ex. « Swing low H4 non pris » marqué déjà pris) ; contrôle ajouté à l'audit automatique.
 - Téléchargement de l'historique plus robuste : une page lente est retentée 2 fois au lieu de faire échouer tout le backtest (cause de l'échec EUR/USD du 06/11).
 
 ## Règles 3.10 — 03/11/2026 (mise en situation)

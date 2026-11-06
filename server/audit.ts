@@ -85,6 +85,8 @@ export function auditEngine(e: EngineResult, ctx: AuditContext): string[] {
   if (ok('sweepSession') && !ok('sweep')) err('balayage en session validé sans déclencheur');
   if (ok('bias') !== (e.bias !== 'neutre')) err('case biais incohérente');
 
+  for (const l of e.liquidity) if (l.swept && /non pris/.test(l.label)) err(`niveau « ${l.label} » marqué pris`);
+
   // ---- 3b. Balayages cohérents avec la liste de liquidité ----
   for (const sw of e.sweeps) {
     const lvl = e.liquidity.find(l => l.label === sw.label && near(l.price, sw.price, tick * 10));

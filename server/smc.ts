@@ -437,6 +437,7 @@ export function buildLiquidity(
     if (hit) {
       l.swept = true;
       l.sweptAt = hit.t;
+      l.label = l.label.replace(' non pris', ''); // « Swing low H4 non pris » marqué pris serait contradictoire
     }
   }
 
