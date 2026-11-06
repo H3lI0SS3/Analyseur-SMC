@@ -121,12 +121,19 @@ const setup = (p: Partial<Setup>): Setup => ({
 {
   process.env.TWELVE_DATA_API_KEY = 'test';
   process.env.TWELVE_RATE_PER_MIN = '1000';
+  process.env.TWELVE_MINUTE_WAIT_MS = '10';
   const realFetch = globalThis.fetch;
   const firstAvailable = Date.UTC(2025, 3, 1); // la source ne remonte pas avant le 1er avril 2025
   const lastBar = Date.UTC(2026, 9, 30, 20, 45);
   let calls = 0;
+  let minuteLimitSent = false;
   globalThis.fetch = (async (url: any) => {
     calls++;
+    // comme Twelve Data : limite par minute signalée dans une réponse 200, au milieu du téléchargement
+    if (calls === 4 && !minuteLimitSent) {
+      minuteLimitSent = true;
+      return new Response(JSON.stringify({ code: 429, status: 'error', message: 'You have run out of API credits for the current minute. 9 API credits were used.' }), { status: 200 });
+    }
     const u = new URL(String(url));
     const iv = u.searchParams.get('interval');
     const step = iv === '5min' ? 300_000 : iv === '15min' ? 900_000 : 3_600_000;

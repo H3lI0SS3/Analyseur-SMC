@@ -350,6 +350,7 @@ async function fetchTwelveDeep(pair: PairInfo, tf: 'M5' | 'M15' | 'H1', apiKey: 
   let all: Candle[] = [];
   let endDate: string | null = null;
   let limited = false;
+  let minuteRetries = 0;
   for (let page = 0; page < Math.ceil(maxBars / 3000) + 2 && all.length < maxBars; page++) {
     await twelveSlot();
     const url =
@@ -371,6 +372,19 @@ async function fetchTwelveDeep(pair: PairInfo, tf: 'M5' | 'M15' | 'H1', apiKey: 
     }
     await twelveCheck(res);
     const json: any = await res.json();
+    // Twelve Data signale ses limites dans une réponse 200 { status: 'error', code: 429 } : ce n'est PAS la fin de
+    // l'historique. Limite par minute → on attend et on refait la même page ; quota du jour → erreur explicite.
+    if (json.status === 'error' && (Number(json.code) === 429 || /credits|limit/i.test(String(json.message)))) {
+      if (/day|daily/i.test(String(json.message))) {
+        twelveBlockedUntil = nextUtcMidnight(Date.now()) + 60_000;
+        twelveBlockedMsg = 'Quota quotidien de Twelve Data épuisé (800 requêtes / jour sur l’offre gratuite) : nouvelles données à minuit UTC (00h00 au Maroc).';
+        throw new Error(twelveBlockedMsg);
+      }
+      if (++minuteRetries > 5) throw new Error(`Twelve Data : ${json.message}`);
+      await new Promise(r => setTimeout(r, Number(process.env.TWELVE_MINUTE_WAIT_MS) || 61_000));
+      page--;
+      continue;
+    }
     if (json.status === 'error' || !Array.isArray(json.values) || !json.values.length) {
       if (page === 0) throw new Error(`Twelve Data : ${json.message || 'réponse invalide'}`);
       limited = true; // plus de données disponibles plus loin dans le passé
