@@ -1,5 +1,6 @@
 // Logique d'analyse partagée entre l'interface web (/api/analyze) et le connecteur MCP.
-import { PAIRS, TIMEFRAMES, getLivePrice, getSeries, withLivePrice, type Timeframe, type Candle } from './marketData';
+import { PAIRS, TIMEFRAMES, getLivePrice, getM5, getSeries, withLivePrice, type Timeframe, type Candle } from './marketData';
+import { M5_EXECUTION_PAIRS, applyExecution } from './execution';
 import { getNews, NEWS_CURRENCIES } from './news';
 import type { CandlePattern } from './candlePatterns';
 import { auditEngine } from './audit';
@@ -274,6 +275,13 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     final.plan = futuresProxy ? null : final.plan;
     final.notes.unshift(...blockers);
   }
+
+  // ----- Exécution affinée M5 (or) et actifs en pause -----
+  const needM5 = final.signal !== 'attendre' && !!final.plan && !!engine.setup && !!engine.trigger && M5_EXECUTION_PAIRS.has(pair);
+  const m5raw = needM5 ? await getM5(pair) : null;
+  const { execution, paused } = applyExecution(pair, engine, final, m5raw, now, costs, info.decimals);
+  if (paused) warnings.push(paused);
+
   if (futuresProxy) {
     // aucun niveau en prix futures ne doit sortir de l'app
     engine.setup = null;
@@ -302,6 +310,8 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     pipeline,
     final,
     candlePatterns,
+    execution,
+    paused,
   };
 }
 

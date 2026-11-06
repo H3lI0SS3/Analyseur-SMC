@@ -127,7 +127,9 @@ function buildServer() {
           prix: e.price,
           heure_prix_utc: new Date(e.priceTime).toISOString(),
           decision: a.final.signal,
-          condition_attente: a.final.signal === 'attendre' ? e.waitCondition : null,
+          condition_attente: a.final.signal === 'attendre' ? a.final.notes[0] ?? e.waitCondition : null,
+          execution_m5: a.execution ? { etape: a.execution.stage, message: a.execution.message, zone: a.execution.zone, niveau_choch: a.execution.chochLevel, ordre: a.execution.order } : null,
+          actif_en_pause: a.paused,
           score_confluence: `${e.checklist.filter(c => c.ok).length}/${e.checklist.length}`,
           score_qualite: `${e.score}/100 (classe ${e.grade})`,
           plan: p

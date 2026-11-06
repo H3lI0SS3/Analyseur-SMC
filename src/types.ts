@@ -287,6 +287,10 @@ export interface AnalysisResponse {
   /** pipeline Gemini (JSON structuré) recontrôlé par le serveur */
   pipeline?: PipelineReport | null;
   final: { signal: Signal; plan: FinalPlan | null; notes: string[] };
+  /** exécution affinée M5 (or) : étape en cours ; null si le setup M15 n'est pas valide ou actif non concerné */
+  execution?: M5Execution | null;
+  /** actif en pause : raison (aucun trade proposé) */
+  paused?: string | null;
 }
 
 export type PipelineStepKey = 'htf' | 'declencheur' | 'zone' | 'risque';
@@ -363,4 +367,15 @@ export interface JournalEntry {
   exitAt?: number | null;
   rulesVersion?: string;
   pattern?: string | null; // figure japonaise dans le sens du trade au moment de la prise (null = aucune)
+}
+
+export interface M5Execution {
+  stage: 'attente_zone' | 'attente_choch' | 'ordre' | 'manqué' | 'annulé' | 'indisponible';
+  message: string;
+  zone: { bottom: number; top: number };
+  from: number;
+  until: number;
+  extreme: number | null;
+  chochLevel: number | null;
+  order: { entry: number; sl: number; tp1: number; tp2: number | null; rr1: number; rr2: number | null; validUntil: number; chochAt: number } | null;
 }

@@ -9,14 +9,14 @@ import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.10';
+export const RULES_VERSION = '3.11';
 // 3.4 : displacement, OTE, liquidité de trendline, breaker blocks, bougies japonaises (ebook) dans la décision ; 3 confluences sur 8
 export const MIN_CONFLUENCES = 3; // (règles ≤ 3.6, conservé pour le laboratoire du backtest)
 /** R:R net minimal (spread et commission compris) pour qu'un plan soit exploitable. */
 export const MIN_RR = 2.5;
 /** Score minimal pour la classe A+ (en dessous : classe B, risque divisé par 2). */
 export const GRADE_A = 70;
-export const RULES_FROZEN_AT = Date.UTC(2026, 10, 3, 22, 0); // 03/11/2026 22:00 UTC (3.10 : le timing s'applique à l'entrée (kill zone), balayage en session = bonus ; 3.9 : pas d'entrée au rollover, ordres limite expirés avant 16h45 NY, classe B au mieux les jours d'annonce à horaire inconnu ; 3.8 : R:R net minimal 1:2,5, double validation moteur + Gemini ; 3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 6, 20, 0); // 06/11/2026 20:00 UTC (3.11 : or exécuté en M5 — CHoCH M5 dans la zone M15, ordre limite à mi-jambe, stop M5 —, EUR/USD en pause ; 3.10 : le timing s'applique à l'entrée (kill zone), balayage en session = bonus ; 3.9 : pas d'entrée au rollover, ordres limite expirés avant 16h45 NY, classe B au mieux les jours d'annonce à horaire inconnu ; 3.8 : R:R net minimal 1:2,5, double validation moteur + Gemini ; 3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';

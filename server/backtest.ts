@@ -99,7 +99,7 @@ export interface BacktestResult {
   lab: LabResult;
 }
 
-const EXPIRY = 4 * HOUR; // un ordre limite non exécuté est annulé après 4 h
+export const EXPIRY = 4 * HOUR; // un ordre limite non exécuté est annulé après 4 h
 const MAX_HOLD = 5 * 24 * HOUR; // un trade ouvert est clôturé après 5 jours
 
 /**
@@ -190,7 +190,9 @@ function firstAtOrAfter(arr: Candle[], t: number): number {
 
 export type RefineOutcome =
   | { kind: 'entrée'; setup: Setup; from: number; idx: number }
-  | { kind: 'annulé'; reason: 'expiré' | 'objectif atteint' | 'stop M15 touché' };
+  | { kind: 'annulé'; reason: 'expiré' | 'objectif atteint' | 'stop M15 touché' }
+  /** les bougies s'arrêtent avant la fin de la fenêtre (analyse en direct) : on attend encore */
+  | { kind: 'en attente'; inZone: boolean; extreme: number | null; chochLevel: number | null; until: number };
 
 /**
  * Entrée affinée en M5 (règle FIGÉE avant le test) : le plan M15 reste la référence (zone, objectifs, stop maximal).
@@ -222,7 +224,8 @@ export function refineM5(setup: Setup, zone: { top: number; bottom: number }, fr
   let inZone = false;
   let ext = NaN;
   let extIdx = -1;
-  for (let i = firstAtOrAfter(m5, from); i < m5.length && m5[i].t < from + EXPIRY; i++) {
+  let i = firstAtOrAfter(m5, from);
+  for (; i < m5.length && m5[i].t < from + EXPIRY; i++) {
     const c = m5[i];
     if (!inZone) {
       if (long ? c.h >= setup.tp1 : c.l <= setup.tp1 - spread) return { kind: 'annulé', reason: 'objectif atteint' };
@@ -246,6 +249,10 @@ export function refineM5(setup: Setup, zone: { top: number; bottom: number }, fr
       if (Math.abs(fill - sl) < minRisk) sl = long ? fill - minRisk : fill + minRisk;
       return { kind: 'entrée', setup: { ...setup, entryType: 'limite', entry, sl }, from: c.t + 5 * 60_000, idx: i + 1 };
     }
+  }
+  // plus de bougies alors que la fenêtre de 4 h n'est pas finie : en direct, le setup est encore en cours
+  if (i >= m5.length && (!m5.length || m5[m5.length - 1].t + 5 * 60_000 < from + EXPIRY)) {
+    return { kind: 'en attente', inZone, extreme: extIdx >= 0 ? ext : null, chochLevel: extIdx >= 0 ? chochLevel(m5, extIdx, long) : null, until: from + EXPIRY };
   }
   return { kind: 'annulé', reason: 'expiré' };
 }
@@ -457,7 +464,7 @@ export class BacktestRun {
       const ref = refineM5(s, zone, now, this.m5, this.costs.spread);
       m5res = {} as NonNullable<Candidate['m5']>;
       for (const mode of ['partiel', 'tp1', 'final'] as Management[]) {
-        if (ref.kind === 'annulé') {
+        if (ref.kind !== 'entrée') {
           m5res[mode] = { filledAt: null, exitAt: null, r: null };
           continue;
         }

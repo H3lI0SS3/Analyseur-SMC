@@ -223,9 +223,9 @@ async function twelveSlot() {
   }
 }
 
-async function fetchTwelve(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string, size = tf === 'M15' ? 700 : 5000): Promise<Candle[]> {
+async function fetchTwelve(pair: PairInfo, tf: 'M5' | 'M15' | 'H1', apiKey: string, size = tf === 'M15' ? 700 : 5000): Promise<Candle[]> {
   await twelveSlot();
-  const interval = tf === 'M15' ? '15min' : '1h';
+  const interval = tf === 'M5' ? '5min' : tf === 'M15' ? '15min' : '1h';
   const url =
     `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair.twelveSymbol)}` +
     `&interval=${interval}&outputsize=${size}&timezone=UTC&order=ASC&apikey=${encodeURIComponent(apiKey)}`;
@@ -243,6 +243,29 @@ async function fetchTwelve(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string, siz
     c: Number(v.close),
   }));
   return clean(out);
+}
+
+// ---------- Bougies M5 (exécution affinée) ----------
+const m5Cache = new Map<string, { at: number; candles: Candle[] }>();
+
+/**
+ * Dernières bougies M5 (≈ 12 h) pour l'exécution affinée. Twelve Data uniquement : en secours Yahoo, l'or
+ * serait en prix futures, donc pas de M5 (l'app attend plutôt que de donner une entrée fausse). Cache 60 s.
+ */
+export async function getM5(pairId: string, maxAgeMs = 60_000): Promise<Candle[] | null> {
+  const pair = PAIRS[pairId];
+  const key = process.env.TWELVE_DATA_API_KEY;
+  if (!pair || !key) return null;
+  const hit = m5Cache.get(pairId);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.candles;
+  try {
+    const candles = await fetchTwelve(pair, 'M5', key, 150);
+    m5Cache.set(pairId, { at: Date.now(), candles });
+    return candles;
+  } catch (e: any) {
+    console.warn(`[M5 ${pairId}] indisponible : ${e?.message || e}`);
+    return hit && Date.now() - hit.at < 10 * 60_000 ? hit.candles : null;
+  }
 }
 
 // ---------- Secours Yahoo Finance ----------

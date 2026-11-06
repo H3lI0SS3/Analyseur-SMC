@@ -10,7 +10,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import type { AnalysisResponse, PipelineReport, RiskSettings, Status, Timeframe } from '../types';
+import type { AnalysisResponse, M5Execution, PipelineReport, RiskSettings, Status, Timeframe } from '../types';
 import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade, readJson } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 import { splitOrders } from '../lib/desk';
@@ -168,6 +168,13 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
   return (
     <div className="space-y-3">
       {a.verdict && <VerdictCard v={a.verdict} stats={stats} score={e.setup ? e.score : null} grade={e.setup ? e.grade : undefined} />}
+      {a.paused && (
+        <section className="card border border-warn/40 p-4">
+          <div className="label mb-1 text-warn">Actif en pause</div>
+          <p className="text-xs leading-snug text-ink/90">{a.paused}</p>
+        </section>
+      )}
+      {a.execution && <ExecutionCard x={a.execution} dec={dec} shift={broker.offset} />}
       {a.pipeline && <PipelineCard p={a.pipeline} dec={dec} />}
 
       {/* Verdict */}
@@ -707,6 +714,36 @@ const STEP_LABELS: Record<'htf' | 'declencheur' | 'zone' | 'risque', string> = {
 };
 
 /** Résultat du pipeline Gemini, tel que recontrôlé par le serveur. Les niveaux affichés sont ceux du contrôle. */
+const STAGE_LABEL: Record<M5Execution['stage'], { label: string; tone: string }> = {
+  attente_zone: { label: '1/3 · attente de la zone', tone: 'bg-warn/15 text-warn' },
+  attente_choch: { label: '2/3 · attente du CHoCH M5', tone: 'bg-warn/15 text-warn' },
+  ordre: { label: '3/3 · ordre à placer', tone: 'bg-up/15 text-up' },
+  manqué: { label: 'trade manqué', tone: 'bg-down/15 text-down' },
+  annulé: { label: 'annulé', tone: 'bg-down/15 text-down' },
+  indisponible: { label: 'M5 indisponible', tone: 'bg-down/15 text-down' },
+};
+
+/** Exécution affinée M5 : le setup M15 est valide, l'entrée attend le CHoCH M5 dans la zone. */
+function ExecutionCard({ x, dec, shift }: { x: M5Execution; dec: number; shift: number }) {
+  const st = STAGE_LABEL[x.stage];
+  const s = (v: number) => fmt(v + shift, dec);
+  return (
+    <section className="card p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="label">Exécution M5 (entrée affinée)</div>
+        <span className={cx('rounded px-1.5 py-0.5 text-[10px] font-bold', st.tone)}>{st.label}</span>
+      </div>
+      <p className="text-xs leading-snug text-ink/90">{x.message}</p>
+      <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-card2 px-3 py-2 text-[11px]">
+        <div><div className="text-mute">Zone M15</div><div className="num">{s(x.zone.bottom)} – {s(x.zone.top)}</div></div>
+        <div><div className="text-mute">Niveau CHoCH M5</div><div className="num">{x.chochLevel !== null ? s(x.chochLevel) : '—'}</div></div>
+        <div><div className="text-mute">Surveillance jusqu’à</div><div className="num">{localTime(x.order?.validUntil ?? x.until)}</div></div>
+      </div>
+      {shift !== 0 && <p className="mt-1 text-[10px] text-mute">Niveaux recalés sur ton broker ({shift > 0 ? '+' : ''}{fmt(shift, dec)}).</p>}
+    </section>
+  );
+}
+
 function PipelineCard({ p, dec }: { p: PipelineReport; dec: number }) {
   const g = p.gemini;
   const tone = p.status === 'VALIDÉ' ? 'bg-up/15 text-up' : p.status === 'REJETÉ' ? 'bg-down/15 text-down' : 'bg-warn/15 text-warn';

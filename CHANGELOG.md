@@ -1,5 +1,11 @@
 # Journal des versions
 
+## Règles 3.11 — 06/11/2026 (décision après le backtest sur 2 ans)
+- **Or : exécution affinée en M5.** Le scénario M15 complet reste obligatoire (contexte, balayage → displacement → CHoCH, zone en premium/discount, kill zone, annonces, Gemini). L'entrée n'est donnée qu'après un **CHoCH M5 dans la zone M15** : ordre limite au milieu de la jambe du CHoCH, stop derrière l'extrême M5, objectifs M15 inchangés. Règle identique à celle du backtest (même fonction). Étapes affichées : attente de la zone → attente du CHoCH M5 (avec le niveau à surveiller) → ordre ; « manqué » si l'entrée a déjà été servie, « annulé » si le stop M15 ou TP1 est touché avant. Sans bougies M5 : pas d'entrée.
+  - Backtest 2 ans, gain moyen par trade (1re / 2e moitié) : or −0,05 / +0,24 R en M15 → **+0,31 / +0,35 R en M5** ; EUR/USD −0,26 / −0,12 R → +0,34 / 0,00 R. Environ 3 fois moins de trades : avantage encourageant mais pas encore démontré (≈ 7 % de risque que ce soit le hasard). Validation par les 30 premiers trades suivis en démo.
+- **EUR/USD en pause** : −0,19 R par trade sur 180 trades en 2 ans, sur les deux moitiés. L'analyse reste affichée, aucun trade n'est proposé.
+- Date de gel remise au 06/11 20:00 UTC : le suivi « depuis le gel » repart sur ces règles.
+
 ## 06/11/2026 — labo : entrée affinée M5 (règles en direct inchangées, 3.10)
 - **Hypothèse testée, déclarée avant de voir les résultats** : même setup M15 (contexte, balayage, displacement, CHoCH, zone), mais entrée affinée en M5 comme le font les traders SMC en intraday : le prix entre dans la zone M15, fait un extrême M5, puis CHoCH M5 (clôture au-delà du dernier creux/sommet M5) ; ordre limite au milieu de la jambe du CHoCH ; stop derrière l'extrême M5 (au moins 25 % du stop M15) ; objectifs inchangés. Si le stop M15 est touché avant le CHoCH M5, pas de trade.
 - La 2e moitié de l'historique est toujours révélée pour cette variante : c'est elle qui décidera si l'app passe en exécution M5.
