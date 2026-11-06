@@ -176,6 +176,80 @@ export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: nu
   return { filledAt, exitAt: null, pnl, outcome: 'en cours' as const, risk };
 }
 
+/** Premier indice dont l'horodatage est >= t (recherche dichotomique). */
+function firstAtOrAfter(arr: Candle[], t: number): number {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid].t < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+export type RefineOutcome =
+  | { kind: 'entrée'; setup: Setup; from: number; idx: number }
+  | { kind: 'annulé'; reason: 'expiré' | 'objectif atteint' | 'stop M15 touché' };
+
+/**
+ * Entrée affinée en M5 (règle FIGÉE avant le test) : le plan M15 reste la référence (zone, objectifs, stop maximal).
+ *  1. on attend que le prix entre dans la zone M15 (FVG/OB) pendant la validité de l'ordre (4 h) ;
+ *     si TP1 est atteint avant, le plan est annulé ;
+ *  2. dans la zone, on suit l'extrême atteint (le « mini-balayage » M5) ; si le stop M15 est touché, le setup a échoué :
+ *     pas de trade ;
+ *  3. CHoCH M5 : une bougie M5 clôture au-delà du dernier swing low (vente) / swing high (achat) M5 formé avant
+ *     l'extrême (à défaut, la bougie juste avant l'extrême) ;
+ *  4. ordre limite au milieu de la jambe du CHoCH (extrême → clôture), valable 4 h, annulé si TP1 est atteint avant ;
+ *  5. stop derrière l'extrême M5 + marge (le plus grand du spread et de 10 % du risque M15, + spread pour une vente),
+ *     jamais plus serré que 25 % du risque M15 (évite les stops dans le bruit) ; objectifs inchangés.
+ */
+/** Niveau du CHoCH M5 : dernier creux (vente) / sommet (achat) local dans l'heure qui précède l'extrême. */
+function chochLevel(m5: Candle[], extIdx: number, long: boolean): number | null {
+  if (extIdx < 1) return null;
+  for (let j = extIdx - 1; j >= Math.max(1, extIdx - 12); j--) {
+    const a = m5[j - 1], b = m5[j], c = m5[j + 1];
+    if (long ? b.h >= a.h && b.h >= c.h : b.l <= a.l && b.l <= c.l) return long ? b.h : b.l;
+  }
+  return long ? m5[extIdx - 1].h : m5[extIdx - 1].l;
+}
+
+export function refineM5(setup: Setup, zone: { top: number; bottom: number }, from: number, m5: Candle[], spread: number): RefineOutcome {
+  const long = setup.direction === 'acheter';
+  const risk15 = Math.abs(setup.entry - setup.sl);
+  const buffer = Math.max(spread, 0.1 * risk15);
+  const minRisk = 0.25 * risk15;
+  let inZone = false;
+  let ext = NaN;
+  let extIdx = -1;
+  for (let i = firstAtOrAfter(m5, from); i < m5.length && m5[i].t < from + EXPIRY; i++) {
+    const c = m5[i];
+    if (!inZone) {
+      if (long ? c.h >= setup.tp1 : c.l <= setup.tp1 - spread) return { kind: 'annulé', reason: 'objectif atteint' };
+      const entered = long ? c.l <= zone.top : c.h >= zone.bottom;
+      if (!entered) continue;
+      inZone = true;
+    }
+    if (long ? c.l <= setup.sl : c.h >= setup.sl - spread) return { kind: 'annulé', reason: 'stop M15 touché' };
+    if (extIdx < 0 || (long ? c.l < ext : c.h > ext)) {
+      ext = long ? c.l : c.h;
+      extIdx = i;
+      continue; // la bougie qui fait l'extrême ne peut pas être celle du CHoCH
+    }
+    const ref = chochLevel(m5, extIdx, long);
+    if (ref === null) continue;
+    if (long ? c.c > ref : c.c < ref) {
+      // ordre limite au milieu de la jambe CHoCH (extrême → clôture du CHoCH), comme un retour en OTE M5
+      const entry = (ext + c.c) / 2;
+      let sl = long ? ext - buffer : ext + buffer + spread;
+      const fill = long ? entry + spread : entry;
+      if (Math.abs(fill - sl) < minRisk) sl = long ? fill - minRisk : fill + minRisk;
+      return { kind: 'entrée', setup: { ...setup, entryType: 'limite', entry, sl }, from: c.t + 5 * 60_000, idx: i + 1 };
+    }
+  }
+  return { kind: 'annulé', reason: 'expiré' };
+}
+
 function emptyStats(): VariantStats {
   return {
     signals: 0,
@@ -266,7 +340,9 @@ export class BacktestRun {
     private h1: Candle[],
     private m15: Candle[],
     private decimals: number,
-    private costs: BacktestCosts
+    private costs: BacktestCosts,
+    /** bougies M5 facultatives : activent la variante « entrée affinée M5 » du labo */
+    private m5: Candle[] | null = null
   ) {
     this.h4All = aggregateTrading(h1, 'H4');
     this.d1All = aggregateTrading(h1, 'D1');
@@ -375,6 +451,24 @@ export class BacktestRun {
         r: sim.outcome === 'expiré' || sim.outcome === 'en cours' ? null : (sim.pnl - this.commUnit) / (sim.risk + this.commUnit),
       };
     }
+    let m5res: Candidate['m5'] = null;
+    const zone = eng.zones.find(z => z.id === s.zoneId);
+    if (this.m5 && this.m5.length && zone && now >= this.m5[0].t && now < this.m5[this.m5.length - 1].t) {
+      const ref = refineM5(s, zone, now, this.m5, this.costs.spread);
+      m5res = {} as NonNullable<Candidate['m5']>;
+      for (const mode of ['partiel', 'tp1', 'final'] as Management[]) {
+        if (ref.kind === 'annulé') {
+          m5res[mode] = { filledAt: null, exitAt: null, r: null };
+          continue;
+        }
+        const sim = simulate(ref.setup, ref.from, this.m5, ref.idx, this.costs.spread, mode);
+        m5res[mode] = {
+          filledAt: sim.filledAt,
+          exitAt: sim.exitAt,
+          r: sim.outcome === 'expiré' || sim.outcome === 'en cours' ? null : (sim.pnl - this.commUnit) / (sim.risk + this.commUnit),
+        };
+      }
+    }
     const [zoneTf] = s.zoneId.split('-');
     this.candidates.push({
       t: now,
@@ -391,6 +485,7 @@ export class BacktestRun {
       killzone: eng.session.killzone,
       rr: s.rr2 ?? s.rr1,
       res,
+      m5: m5res,
     });
   }
 
@@ -416,6 +511,7 @@ export class BacktestRun {
         'Gestion : 50 % à TP1 puis stop au point d’entrée, reste à TP2 ; sans TP2, sortie totale à TP1.',
         'Si stop et objectif sont touchés dans la même bougie M15, on compte le stop (hypothèse prudente).',
         `Coûts inclus : spread ${this.costs.spread} et commission ${this.costs.commissionPerLot} $ par lot.`,
+        'Entrée affinée M5 (labo) : même setup M15, CHoCH M5 dans la zone puis ordre limite au milieu de la jambe du CHoCH, stop derrière l’extrême M5 (au moins 25 % du stop M15), gestion simulée sur les bougies M5.',
         'Annonces économiques non filtrées (pas de calendrier historique) : résultats un peu optimistes ou pessimistes selon les jours.',
         `« Depuis le gel des règles » : seuls les signaux apparus après le ${maDateTime(RULES_FROZEN_AT)}, date à laquelle les règles du moteur (version ${RULES_VERSION}) ont été figées. Ces trades n’ont pas pu influencer la conception du moteur : c’est l’équivalent d’un suivi en direct.`,
       ],
@@ -433,8 +529,8 @@ export class BacktestRun {
 }
 
 /** Exécution complète en une fois (tests, scripts). */
-export async function runBacktest(pair: string, h1: Candle[], m15: Candle[], decimals: number, costs: BacktestCosts): Promise<BacktestResult> {
-  const run = new BacktestRun(pair, h1, m15, decimals, costs);
+export async function runBacktest(pair: string, h1: Candle[], m15: Candle[], decimals: number, costs: BacktestCosts, m5: Candle[] | null = null): Promise<BacktestResult> {
+  const run = new BacktestRun(pair, h1, m15, decimals, costs, m5);
   while (!run.done) {
     run.step(2000);
     await new Promise(r => setImmediate(r));
@@ -580,6 +676,8 @@ interface Candidate {
   killzone: boolean;
   rr: number;
   res: Record<Management, { filledAt: number | null; exitAt: number | null; r: number | null }>;
+  /** même setup avec l'entrée affinée en M5 (null si pas de bougies M5 sur cette période) */
+  m5: Record<Management, { filledAt: number | null; exitAt: number | null; r: number | null }> | null;
 }
 
 export interface LabStats {
@@ -613,7 +711,7 @@ const marketRule = (c: Candidate) => !(c.entryType === 'marché' && !c.ltf);
 const base = (c: Candidate) => marketRule(c);
 
 /** Liste FIGÉE à l'avance : on ne l'ajuste pas après avoir vu les résultats. */
-export const LAB_VARIANTS: { id: string; label: string; filter: (c: Candidate) => boolean; mode: Management }[] = [
+export const LAB_VARIANTS: { id: string; label: string; filter: (c: Candidate) => boolean; mode: Management; m5?: boolean }[] = [
   { id: 'base', label: 'Référence : règles actuelles (protocole 3.7)', filter: base, mode: 'partiel' },
   { id: 'aplus', label: 'Classe A+ uniquement', filter: c => base(c) && c.score >= 70, mode: 'partiel' },
   { id: 'kz', label: 'Kill zone obligatoire', filter: c => base(c) && c.killzone, mode: 'partiel' },
@@ -625,7 +723,12 @@ export const LAB_VARIANTS: { id: string; label: string; filter: (c: Candidate) =
   { id: 'rr3', label: 'R:R final ≥ 3', filter: c => base(c) && c.rr >= 3, mode: 'partiel' },
   { id: 'tp1', label: 'Gestion : tout à TP1', filter: base, mode: 'tp1' },
   { id: 'final', label: 'Gestion : tout à l’objectif final, sans point mort', filter: base, mode: 'final' },
+  // hypothèse testée (déclarée avant le test) : même setup M15, entrée sur CHoCH M5 dans la zone
+  { id: 'm5', label: 'Entrée affinée M5 (CHoCH M5 dans la zone M15)', filter: c => base(c) && !!c.m5, mode: 'partiel', m5: true },
 ];
+
+/** Variantes dont la 2e moitié est toujours révélée : la référence et les hypothèses déclarées à l'avance. */
+const ALWAYS_REVEALED = ['base', 'm5'];
 
 function labStats(rs: number[]): LabStats {
   const n = rs.length;
@@ -659,13 +762,14 @@ function labStats(rs: number[]): LabStats {
 /** Rejoue chaque variante (un trade à la fois), sépare 1re et 2e moitié de la période. */
 export function runLab(cands: Candidate[], from: number, to: number): LabResult {
   const splitAt = from + (to - from) / 2;
-  const evaluated = LAB_VARIANTS.map(v => {
+  const hasM5 = cands.some(c => c.m5);
+  const evaluated = LAB_VARIANTS.filter(v => !v.m5 || hasM5).map(v => {
     let busy = 0;
     const isR: number[] = [];
     const oosR: number[] = [];
     for (const c of cands) {
       if (c.t < busy || !v.filter(c)) continue;
-      const r = c.res[v.mode];
+      const r = v.m5 ? c.m5![v.mode] : c.res[v.mode];
       busy = r.exitAt ?? (r.filledAt === null ? c.t + EXPIRY : Number.MAX_SAFE_INTEGER);
       if (r.r === null) continue;
       (c.t < splitAt ? isR : oosR).push(r.r);
@@ -675,18 +779,18 @@ export function runLab(cands: Candidate[], from: number, to: number): LabResult 
   // Règle de sélection fixée à l'avance : les 3 meilleures moyennes de la 1re moitié parmi les variantes
   // ayant au moins 60 trades. Seules celles-ci (et la référence) voient leur 2e moitié révélée.
   const top = evaluated
-    .filter(v => v.id !== 'base' && v.inSample.trades >= 60 && v.inSample.avgR !== null)
+    .filter(v => !ALWAYS_REVEALED.includes(v.id) && v.inSample.trades >= 60 && v.inSample.avgR !== null)
     .sort((a, b) => b.inSample.avgR! - a.inSample.avgR!)
     .slice(0, 3)
     .map(v => v.id);
   return {
     splitAt,
-    rule: 'Sélection sur la 1re moitié uniquement (meilleure moyenne en R, au moins 60 trades) ; la 2e moitié n’est révélée que pour les 3 retenues et la référence.',
+    rule: 'Sélection sur la 1re moitié uniquement (meilleure moyenne en R, au moins 60 trades) ; la 2e moitié n’est révélée que pour les 3 retenues, la référence et l’entrée affinée M5 (hypothèse déclarée avant le test).',
     variants: evaluated.map(v => ({
       id: v.id,
       label: v.label,
       inSample: v.inSample,
-      outOfSample: v.id === 'base' || top.includes(v.id) ? v.oosAll : null,
+      outOfSample: ALWAYS_REVEALED.includes(v.id) || top.includes(v.id) ? v.oosAll : null,
     })),
   };
 }

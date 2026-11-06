@@ -100,6 +100,20 @@ const setup = (p: Partial<Setup>): Setup => ({
   while (!run.done) run.step(137);
   const r2 = run.result();
   ok('Calcul par tranches identique au calcul en une fois', r2.souple.totalR === res.souple.totalR && r2.strict.trades === res.strict.trades, `${r2.souple.totalR} vs ${res.souple.totalR}`);
+  // Variante « entrée affinée M5 » : M5 synthétiques (chaque M15 découpée en 3), le labo doit l'évaluer sans casser la référence
+  const m5: Candle[] = [];
+  for (const c of m15.slice(-5000)) {
+    const up = c.c >= c.o;
+    const mid1 = up ? c.l : c.h, mid2 = up ? c.h : c.l;
+    m5.push({ t: c.t, o: c.o, h: Math.max(c.o, mid1), l: Math.min(c.o, mid1), c: mid1 });
+    m5.push({ t: c.t + 300_000, o: mid1, h: Math.max(mid1, mid2), l: Math.min(mid1, mid2), c: mid2 });
+    m5.push({ t: c.t + 600_000, o: mid2, h: Math.max(mid2, c.c), l: Math.min(mid2, c.c), c: c.c });
+  }
+  const r5 = await runBacktest('EUR/USD', h1.slice(-5000), m15.slice(-5000), 5, { spread: 0.0001, commissionPerLot: 7, contract: 100_000 }, m5);
+  const v5 = r5.lab.variants.find(v => v.id === 'm5');
+  ok('Labo : variante M5 évaluée et révélée sur les deux moitiés', !!v5 && !!v5.outOfSample, v5 ? `${v5.inSample.trades} + ${v5.outOfSample?.trades} trades` : 'absente');
+  ok('Labo : la référence ne change pas avec les M5', r5.lab.variants.find(v => v.id === 'base')!.inSample.totalR === res.lab.variants.find(v => v.id === 'base')!.inSample.totalR);
+  ok('Sans M5, la variante n’apparaît pas', !res.lab.variants.some(v => v.id === 'm5'));
   console.log(`(info) marché aléatoire — strict : ${res.strict.trades} trades, ${res.strict.totalR} R ; souple : ${res.souple.trades} trades, ${res.souple.totalR} R`);
 }
 
@@ -114,7 +128,8 @@ const setup = (p: Partial<Setup>): Setup => ({
   globalThis.fetch = (async (url: any) => {
     calls++;
     const u = new URL(String(url));
-    const step = u.searchParams.get('interval') === '15min' ? 900_000 : 3_600_000;
+    const iv = u.searchParams.get('interval');
+    const step = iv === '5min' ? 300_000 : iv === '15min' ? 900_000 : 3_600_000;
     const end = u.searchParams.get('end_date') ? Date.parse(u.searchParams.get('end_date')!.replace(' ', 'T') + 'Z') : lastBar;
     const vals: any[] = [];
     // comme Twelve Data, la source simulée publie AUSSI des bougies plates le week-end
@@ -132,6 +147,7 @@ const setup = (p: Partial<Setup>): Setup => ({
   ok('Historique M15 reconstitué sans doublon ni trou de tri', sortedUnique, `${hist.m15.length} bougies, ${calls} requêtes`);
   ok('Remonte jusqu’à la limite de la source', Math.abs(hist.m15[0].t - firstAvailable) < 7 * 86_400_000, new Date(hist.m15[0].t).toISOString().slice(0, 10));
   ok('Limite de la source signalée', hist.limitedBySource === true);
+  ok('M5 téléchargé sur la même période (entrée affinée)', !!hist.m5 && Math.abs(hist.m5[0].t - hist.m15[0].t) < 7 * 86_400_000, `${hist.m5?.length ?? 0} bougies M5`);
   ok('H1 couvre la période M15 + préchauffage', hist.h1[0].t <= hist.m15[0].t + 7 * 86_400_000, `H1 dès ${new Date(hist.h1[0].t).toISOString().slice(0, 10)}`);
 }
 

@@ -107,7 +107,7 @@ export function startBacktest(pair: string, spread?: number, commissionPerLot?: 
       const hist = await getHistory(pair, msg => (job.phase = `Téléchargement : ${msg}`));
       if (hist.h1.length < 1500 || hist.m15.length < 800) throw new Error(`historique insuffisant (${hist.h1.length} H1, ${hist.m15.length} M15)`);
       job.meta = { source: hist.source, futuresProxy: hist.futuresProxy, limitedBySource: hist.limitedBySource, m15Count: hist.m15.length };
-      job.run = new BacktestRun(pair, hist.h1, hist.m15, info.decimals, costs);
+      job.run = new BacktestRun(pair, hist.h1, hist.m15, info.decimals, costs, hist.m5);
       job.phase = 'Calcul : 0 %';
       backgroundLoop(job);
     } catch (err: any) {

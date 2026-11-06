@@ -329,6 +329,8 @@ function clean(list: Candle[]): Candle[] {
 export interface History {
   h1: Candle[];
   m15: Candle[];
+  /** M5 sur la même période (variante « entrée affinée M5 ») ; null si indisponible */
+  m5: Candle[] | null;
   source: string;
   futuresProxy: boolean;
   fetchedAt: number;
@@ -343,18 +345,30 @@ const fmtTwelve = (t: number) => new Date(t).toISOString().slice(0, 19).replace(
  * Remonte l'historique Twelve Data page par page (5 000 bougies par page) jusqu'à maxBars,
  * ou jusqu'à ce que l'offre ne fournisse plus de données.
  */
-async function fetchTwelveDeep(pair: PairInfo, tf: 'M15' | 'H1', apiKey: string, maxBars: number, onPage?: (n: number) => void) {
-  const interval = tf === 'M15' ? '15min' : '1h';
+async function fetchTwelveDeep(pair: PairInfo, tf: 'M5' | 'M15' | 'H1', apiKey: string, maxBars: number, onPage?: (n: number) => void) {
+  const interval = tf === 'M5' ? '5min' : tf === 'M15' ? '15min' : '1h';
   let all: Candle[] = [];
   let endDate: string | null = null;
   let limited = false;
-  for (let page = 0; page < 20 && all.length < maxBars; page++) {
+  for (let page = 0; page < Math.ceil(maxBars / 3000) + 2 && all.length < maxBars; page++) {
     await twelveSlot();
     const url =
       `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pair.twelveSymbol)}` +
       `&interval=${interval}&outputsize=5000&timezone=UTC&order=ASC&apikey=${encodeURIComponent(apiKey)}` +
       (endDate ? `&end_date=${encodeURIComponent(endDate)}` : '');
-    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    // une page lente ne doit pas faire échouer tout le téléchargement : 2 nouvelles tentatives
+    let res: Response | null = null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+        break;
+      } catch (e: any) {
+        const timeout = e?.name === 'TimeoutError' || e?.name === 'AbortError' || /timeout|aborted/i.test(String(e?.message));
+        if (!timeout || attempt >= 2) throw e;
+        await new Promise(r => setTimeout(r, 3_000));
+        await twelveSlot();
+      }
+    }
     await twelveCheck(res);
     const json: any = await res.json();
     if (json.status === 'error' || !Array.isArray(json.values) || !json.values.length) {
@@ -406,10 +420,18 @@ export async function getHistory(pairId: string, onProgress?: (msg: string) => v
     // H1 : couvrir la période M15 + 4 mois de préchauffage (structure D1/H4)
     const needH1 = Math.ceil((m15.candles[m15.candles.length - 1].t - m15.candles[0].t) / HOUR) + 4 * 30 * 24;
     const h1 = await fetchTwelveDeep(pair, 'H1', key, Math.min(needH1, 20_000), n => onProgress?.(`${n} bougies H1 téléchargées`));
-    res = { h1: h1.candles, m15: m15.candles, source: 'Twelve Data', futuresProxy: false, fetchedAt: Date.now(), limitedBySource: m15.limited };
+    // M5 sur la même période que le M15 : facultatif, le backtest principal ne dépend pas de lui
+    let m5: Candle[] | null = null;
+    try {
+      const r5 = await fetchTwelveDeep(pair, 'M5', key, Math.ceil(m15.candles.length * 3.05), n => onProgress?.(`${n} bougies M5 téléchargées`));
+      m5 = r5.candles.length > 1000 ? r5.candles : null;
+    } catch (e: any) {
+      console.warn(`[Backtest ${pairId}] M5 indisponible : ${e?.message || e}`);
+    }
+    res = { h1: h1.candles, m15: m15.candles, m5, source: 'Twelve Data', futuresProxy: false, fetchedAt: Date.now(), limitedBySource: m15.limited };
   } else {
     const [h1, m15] = [await fetchYahoo(pair, 'H1'), await fetchYahoo(pair, 'M15', true)];
-    res = { h1, m15, source: 'Yahoo Finance', futuresProxy: pair.isFuturesOnYahoo, fetchedAt: Date.now(), limitedBySource: true };
+    res = { h1, m15, m5: null, source: 'Yahoo Finance', futuresProxy: pair.isFuturesOnYahoo, fetchedAt: Date.now(), limitedBySource: true };
   }
   historyCache.set(pairId, res);
   return res;

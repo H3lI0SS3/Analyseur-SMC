@@ -145,7 +145,7 @@ function LabTable({ lab }: { lab: NonNullable<NonNullable<BacktestJob['result']>
     <div className="space-y-2 pt-1">
       <div className="label">Labo d’optimisation</div>
       <p className="text-[11px] leading-snug text-mute">
-        Chaque variante est notée sur la 1re moitié (jusqu’au {localDateTime(lab.splitAt)}). La 2e moitié, jamais utilisée pour choisir, n’est révélée que pour les 3 meilleures et la référence : c’est le vrai test.
+        Chaque variante est notée sur la 1re moitié (jusqu’au {localDateTime(lab.splitAt)}). La 2e moitié, jamais utilisée pour choisir, n’est révélée que pour les 3 meilleures, la référence et l’entrée affinée M5 (hypothèse annoncée avant le test) : c’est le vrai test.
       </p>
       <div className="overflow-hidden rounded-lg border border-line">
         <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 bg-card2 px-2 py-1.5 text-[10px] uppercase tracking-wide text-mute">

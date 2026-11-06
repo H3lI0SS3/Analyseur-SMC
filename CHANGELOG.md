@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 06/11/2026 — labo : entrée affinée M5 (règles en direct inchangées, 3.10)
+- **Hypothèse testée, déclarée avant de voir les résultats** : même setup M15 (contexte, balayage, displacement, CHoCH, zone), mais entrée affinée en M5 comme le font les traders SMC en intraday : le prix entre dans la zone M15, fait un extrême M5, puis CHoCH M5 (clôture au-delà du dernier creux/sommet M5) ; ordre limite au milieu de la jambe du CHoCH ; stop derrière l'extrême M5 (au moins 25 % du stop M15) ; objectifs inchangés. Si le stop M15 est touché avant le CHoCH M5, pas de trade.
+- La 2e moitié de l'historique est toujours révélée pour cette variante : c'est elle qui décidera si l'app passe en exécution M5.
+- Le backtest télécharge aussi le **M5 sur 2 ans** (facultatif : s'il échoue, le reste du backtest continue).
+- Téléchargement de l'historique plus robuste : une page lente est retentée 2 fois au lieu de faire échouer tout le backtest (cause de l'échec EUR/USD du 06/11).
+
 ## Règles 3.10 — 03/11/2026 (mise en situation)
 - Le **timing s'applique à l'entrée** : l'app ne propose un trade que pendant une kill zone (Londres / New York). Un balayage pendant une kill zone devient un bonus (+10 au score), conformément au protocole (« sessions de Londres ou New York de préférence »). En 3.9, un setup formé en Asie était refusé même à l'ouverture de Londres : zéro trade en deux jours.
 - Test de mise en situation sur les vraies bougies du 02-03/11 (journal, règles du desk, taille, suivi automatique).
