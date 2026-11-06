@@ -6,7 +6,7 @@
 - Le backtest télécharge aussi le **M5 sur 2 ans** (facultatif : s'il échoue, le reste du backtest continue).
 - Rapport du backtest : liste de **tous les signaux depuis le gel des règles**, y compris les ordres limite jamais exécutés (pour rejouer les journées récentes) ; les doublons strict/souple sont retirés.
 - Cohérence : un niveau de liquidité pris par une mèche M15 ne garde plus l'étiquette « non pris » (ex. « Swing low H4 non pris » marqué déjà pris) ; contrôle ajouté à l'audit automatique.
-- **Bug corrigé** : quand Twelve Data atteint sa limite par minute, il répond « erreur » dans une réponse normale ; l'app le prenait pour la fin de l'historique et le backtest tournait en silence sur une période tronquée (1 an au lieu de 2 pour l'or le 06/11). Elle attend maintenant une minute et reprend la même page.
+- **Bug corrigé** : quand Twelve Data atteint sa limite par minute, il répond « erreur » dans une réponse normale ; l'app le prenait pour la fin de l'historique et le backtest pouvait tourner en silence sur une période tronquée. Elle attend maintenant une minute et reprend la même page.
 - Téléchargement de l'historique plus robuste : une page lente est retentée 2 fois au lieu de faire échouer tout le backtest (cause de l'échec EUR/USD du 06/11).
 
 ## Règles 3.10 — 03/11/2026 (mise en situation)
