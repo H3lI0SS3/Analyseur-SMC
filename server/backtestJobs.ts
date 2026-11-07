@@ -6,6 +6,7 @@ import { PAIRS, getHistory } from './marketData';
 
 /** Identifiant de ce serveur : si deux appels n'ont pas le même, l'hébergeur a lancé plusieurs serveurs. */
 export const INSTANCE_ID = crypto.randomBytes(3).toString('hex');
+import { runOraBacktest } from './oraBacktest';
 import { BacktestRun, similarHistory, type BacktestResult, type BtTrade, type SetupFeatures, type SimilarHistory } from './backtest';
 import { bundledSnapshot, importTrades } from './historySnapshot';
 
@@ -71,6 +72,14 @@ function advance(job: Job, budgetMs: number) {
   job.phase = `Calcul : ${job.progress} %`;
   if (job.run.done) {
     job.result = { ...job.run.result(), ...job.meta! };
+    const d = job.run.inputs;
+    if (d.m5 && job.result) {
+      try {
+        job.result.ora = runOraBacktest(job.run.pair, d.h1, d.m15, d.m5, d.costs, d.startT, job.result.lab.splitAt);
+      } catch (e: any) {
+        console.warn(`[Backtest ORA ${job.result.pair}] ${e?.message || e}`);
+      }
+    }
     job.trades = job.run.allTrades();
     job.status = 'terminé';
     job.finishedAt = Date.now();

@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 07/11/2026 — ORA Trader (moteur corrigé, en test) et nouvel en-tête
+- **Moteur ORA** (`server/smcMasterEngine.ts`) intégré avec les corrections demandées : FVG ou OTE obligatoire ; R:R net TP1 ≥ 1:2 et TP2 ≥ 1:2,5 (spread et commission inclus) ; kill zones 07:00–10:00 et 13:00–16:00 UTC (sinon « EN ATTENTE - HORS KILL ZONE ») ; score de confiance dynamique sur 6 confluences. Bugs du code d'origine corrigés : FVG jamais reconnu ('BULLISH' comparé à 'BUY'), zone OTE de vente impossible (bornes inversées), TP2 possible du mauvais côté, displacement sans contrôle du sens.
+- Évalué uniquement sur des bougies clôturées (dernière M5 clôturée = bougie active), session asiatique 00:00–06:00 UTC. Route `/api/ora`.
+- **Onglet « ORA (test) »** : panneau de validation (6 étapes + kill zone), carte « Plan de Trade Validé » (BUY/SELL, entrée, SL, TP1, TP2, R:R, taille), bouton « 📌 Prendre le Trade », **Journal de Trading ORA** (OPEN, WIN_TP1, WIN_TP2, LOSS, BREAK_EVEN ; trades clôturés, win rate, pips cumulés).
+- **Backtest** : ORA est rejoué sur les mêmes 2 ans, en M5, avec les mêmes coûts et la même gestion que le moteur actuel (bloc « moteur_ora_corrige » du rapport). Il ne remplacera le moteur principal que s'il fait mieux sur les deux moitiés.
+- **En-tête** : nom ORA Trader, indicateur de session (kill zones, Asie, rollover, marché fermé) et statut de connexion (connecté, secours Yahoo, données indisponibles, hors ligne), à côté du sélecteur d'actif.
+
 ## Règles 3.11 — 06/11/2026 (décision après le backtest sur 2 ans)
 - **Or : exécution affinée en M5.** Le scénario M15 complet reste obligatoire (contexte, balayage → displacement → CHoCH, zone en premium/discount, kill zone, annonces, Gemini). L'entrée n'est donnée qu'après un **CHoCH M5 dans la zone M15** : ordre limite au milieu de la jambe du CHoCH, stop derrière l'extrême M5, objectifs M15 inchangés. Règle identique à celle du backtest (même fonction). Étapes affichées : attente de la zone → attente du CHoCH M5 (avec le niveau à surveiller) → ordre ; « manqué » si l'entrée a déjà été servie, « annulé » si le stop M15 ou TP1 est touché avant. Sans bougies M5 : pas d'entrée.
   - Backtest 2 ans, gain moyen par trade (1re / 2e moitié) : or −0,05 / +0,24 R en M15 → **+0,31 / +0,35 R en M5** ; EUR/USD −0,26 / −0,12 R → +0,34 / 0,00 R. Environ 3 fois moins de trades : avantage encourageant mais pas encore démontré (≈ 7 % de risque que ce soit le hasard). Validation par les 30 premiers trades suivis en démo.

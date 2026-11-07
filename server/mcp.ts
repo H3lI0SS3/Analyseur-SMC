@@ -231,6 +231,16 @@ function buildServer() {
         },
         bougies_m15: r.m15Count,
         historique_limite_par_la_source: r.limitedBySource,
+        moteur_ora_corrige: r.ora
+          ? {
+              regle: 'ORA Trader corrigé (FVG/OTE obligatoire, R:R net TP1 ≥ 2 et TP2 ≥ 2,5, kill zones 07–10 et 13–16 UTC), rejoué en M5, mêmes coûts et même gestion que le moteur actuel.',
+              signaux: r.ora.signals,
+              toute_la_periode: r.ora.all,
+              premiere_moitie: r.ora.firstHalf,
+              deuxieme_moitie: r.ora.secondHalf,
+              derniers_trades: r.ora.last.map(t => ({ ...t, at: maDateTime(t.at) })),
+            }
+          : 'non calculé (bougies M5 indisponibles)',
         labo: {
           coupure_entre_les_deux_moities: maDateTime(r.lab.splitAt),
           regle: r.lab.rule,

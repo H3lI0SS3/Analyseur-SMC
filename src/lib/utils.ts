@@ -183,3 +183,24 @@ export function brokerOffset(pair: string, appPrice: number, bidText: string, sp
   const dec = pair === 'XAU/USD' ? 2 : 5;
   return { offset: Number(offset.toFixed(dec)), error: null };
 }
+
+/** Heure et jour de la semaine à New York (référence des sessions, heure d'été comprise). */
+function nyClock(t: number): { h: number; m: number; wd: number } {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', weekday: 'short', hour12: false }).formatToParts(new Date(t));
+  const get = (k: string) => parts.find(p => p.type === k)?.value ?? '';
+  const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(get('weekday'));
+  return { h: Number(get('hour')) % 24, m: Number(get('minute')), wd };
+}
+
+/** Session en cours pour l'en-tête (mêmes kill zones que le moteur : Londres 02–05 h, New York 07–10 h, heure de New York). */
+export function sessionNow(t = Date.now()): { label: string; killzone: boolean; closed: boolean } {
+  const { h, m, wd } = nyClock(t);
+  const x = h + m / 60;
+  const closed = wd === 6 || (wd === 0 && x < 17) || (wd === 5 && x >= 17);
+  if (closed) return { label: 'Marché fermé', killzone: false, closed: true };
+  if (x >= 2 && x < 5) return { label: 'Kill zone Londres', killzone: true, closed: false };
+  if (x >= 7 && x < 10) return { label: 'Kill zone New York', killzone: true, closed: false };
+  if (x >= 20 || x < 2) return { label: 'Session Asie', killzone: false, closed: false };
+  if (x >= 16.75 && x < 18.5) return { label: 'Rollover', killzone: false, closed: false };
+  return { label: x < 7 ? 'Londres (hors kill zone)' : 'New York (hors kill zone)', killzone: false, closed: false };
+}

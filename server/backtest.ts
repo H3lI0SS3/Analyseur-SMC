@@ -7,6 +7,7 @@
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
 import { analyze, MIN_CONFLUENCES, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
 import { HOUR, marketClosed, maDateTime, nyParts } from './time';
+import type { OraBacktest } from './oraBacktest';
 
 export interface BacktestCosts {
   spread: number;
@@ -97,6 +98,8 @@ export interface BacktestResult {
   soupleForward: VariantStats;
   lastTrades: BtTrade[];
   lab: LabResult;
+  /** moteur ORA corrigé rejoué sur les mêmes bougies (si les M5 sont disponibles) */
+  ora?: OraBacktest | null;
 }
 
 export const EXPIRY = 4 * HOUR; // un ordre limite non exécuté est annulé après 4 h
@@ -356,6 +359,11 @@ export class BacktestRun {
     this.commUnit = costs.commissionPerLot / costs.contract;
     // départ : il faut au moins 60 jours de H1 et 500 bougies M15 d'historique
     this.startT = Math.max(h1[0].t + 60 * 24 * HOUR, m15[Math.min(500, m15.length - 1)].t);
+  }
+
+  /** Données du run (backtest ORA calculé à la fin, sur les mêmes bougies et les mêmes coûts). */
+  get inputs() {
+    return { h1: this.h1, m15: this.m15, m5: this.m5, costs: this.costs, startT: this.startT };
   }
 
   /** Avancement de 0 à 1. */
@@ -737,7 +745,7 @@ export const LAB_VARIANTS: { id: string; label: string; filter: (c: Candidate) =
 /** Variantes dont la 2e moitié est toujours révélée : la référence et les hypothèses déclarées à l'avance. */
 const ALWAYS_REVEALED = ['base', 'm5'];
 
-function labStats(rs: number[]): LabStats {
+export function labStats(rs: number[]): LabStats {
   const n = rs.length;
   const r2 = (x: number) => Number(x.toFixed(2));
   if (!n) return { trades: 0, winRate: null, avgR: null, totalR: 0, profitFactor: null, maxDrawdownR: 0, ciLow: null, ciHigh: null };

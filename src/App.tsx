@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { BookOpen, KeyRound, LineChart, Settings2, ShieldAlert } from 'lucide-react';
+import { BookOpen, FlaskConical, KeyRound, LineChart, Settings2, ShieldAlert } from 'lucide-react';
 import { CandleChart } from './components/CandleChart';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { JournalView } from './components/JournalView';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
+import { OraDashboard } from './components/OraDashboard';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
 import { deskCheck } from './lib/desk';
-import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson } from './lib/utils';
+import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, sessionNow, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson } from './lib/utils';
 import { isTracked, strategyStats, trackJournal } from './lib/tracker';
 
-type Tab = 'analyse' | 'journal' | 'reglages';
+type Tab = 'analyse' | 'ora' | 'journal' | 'reglages';
 
 const DEFAULT_SETTINGS: RiskSettings = {
   capital: 10000,
@@ -151,6 +152,19 @@ export default function App() {
     };
   }, [openCount, reloadKey]);
   const stats = strategyStats(journal, undefined, status?.rulesVersion);
+  const [session, setSession] = useState(() => sessionNow());
+  useEffect(() => {
+    const id = setInterval(() => setSession(sessionNow()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const quoteList = Object.values(quotes) as Quote[];
+  const connection = !status
+    ? { label: 'hors ligne', tone: 'bg-down', title: 'Serveur injoignable' }
+    : quoteList.some(q => q?.error)
+    ? { label: 'données indisponibles', tone: 'bg-down', title: quoteList.find(q => q?.error)?.error || '' }
+    : quoteList.some(q => typeof (q as any)?.source === 'string' && (q as any).source.includes('secours'))
+    ? { label: 'secours Yahoo', tone: 'bg-warn', title: 'Twelve Data épuisé : données Yahoo Finance' }
+    : { label: `connecté · ${status.dataSource}`, tone: 'bg-up', title: 'Données en direct' };
 
   if (needCode) {
     return (
@@ -187,13 +201,25 @@ export default function App() {
     <div className="mx-auto min-h-screen max-w-2xl pb-24">
       {/* En-tête */}
       <header className="sticky top-0 z-10 border-b border-line bg-bg/95 px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))] backdrop-blur">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <h1 className="text-base font-bold tracking-tight">
-            Analyseur <span className="text-gold">SMC</span>
+            ORA <span className="text-gold">Trader</span>
           </h1>
-          <div className="flex items-center gap-1.5 text-[11px] text-mute">
-            <span className={cx('h-1.5 w-1.5 rounded-full', status ? 'bg-up' : 'bg-down')} />
-            {status ? status.dataSource : 'hors ligne'}
+          <div className="flex flex-wrap items-center justify-end gap-1.5 text-[11px]">
+            {/* Indicateur de session (mis à jour chaque minute) */}
+            <span
+              className={cx(
+                'rounded-full border px-2 py-0.5 font-semibold',
+                session.killzone ? 'border-up/50 text-up' : session.closed ? 'border-line text-mute' : 'border-warn/40 text-warn'
+              )}
+            >
+              {session.label}
+            </span>
+            {/* Statut de connexion */}
+            <span className="flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-mute" title={connection.title}>
+              <span className={cx('h-1.5 w-1.5 rounded-full', connection.tone)} />
+              {connection.label}
+            </span>
           </div>
         </div>
 
@@ -276,6 +302,7 @@ export default function App() {
             />
           </>
         )}
+        {tab === 'ora' && <OraDashboard pair={pair} decimals={meta.decimals} settings={settings} />}
         {tab === 'journal' && (
           <>
             <JournalView journal={journal} setJournal={setJournal} rulesVersion={status?.rulesVersion} />
@@ -287,10 +314,11 @@ export default function App() {
 
       {/* Navigation basse */}
       <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
-        <div className="mx-auto grid max-w-2xl grid-cols-3">
+        <div className="mx-auto grid max-w-2xl grid-cols-4">
           {(
             [
               ['analyse', 'Analyse', LineChart],
+              ['ora', 'ORA (test)', FlaskConical],
               ['journal', 'Journal', BookOpen],
               ['reglages', 'Réglages', Settings2],
             ] as const
