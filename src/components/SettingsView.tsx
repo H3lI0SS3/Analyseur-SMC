@@ -95,11 +95,38 @@ export function SettingsView({ settings, setSettings, status }: Props) {
           Source actuelle : <span className="font-semibold text-gold">{status?.dataSource || '—'}</span>
         </p>
         <ul className="space-y-1 text-xs">
-          <KeyRow name="TWELVE_DATA_API_KEY" ok={status?.dataSource === 'Twelve Data'} desc="Cotations spot EUR/USD et XAU/USD (gratuit sur twelvedata.com)" optional />
+          <KeyRow
+            name="CTRADER_CLIENT_ID · CTRADER_CLIENT_SECRET · CTRADER_ACCESS_TOKEN"
+            ok={!!status?.ctrader?.configured && !(status.ctrader as any).lastError}
+            desc={`Bougies au prix FxPro via cTrader Open API, en lecture seule${status?.ctrader?.configured ? ` (compte ${(status.ctrader as any).env === 'live' ? 'réel' : 'démo'})` : ''}. Facultatifs : CTRADER_REFRESH_TOKEN, CTRADER_ENV (demo / live), CTRADER_ACCOUNT_ID`}
+            optional
+          />
+          <KeyRow name="TWELVE_DATA_API_KEY" ok={status?.dataSource === 'Twelve Data' || (!!status?.ctrader?.configured && status?.dataSource !== 'Yahoo Finance')} desc="Cotations spot EUR/USD et XAU/USD (gratuit sur twelvedata.com) ; en secours si cTrader est configuré" optional />
         </ul>
+        {status?.ctrader?.configured && (status.ctrader as any).lastError && (
+          <p className="text-[11px] text-warn">cTrader : {(status.ctrader as any).lastError} — l’app bascule sur Twelve Data en attendant.</p>
+        )}
+        {status?.ctrader?.configured && (status.ctrader as any).readOnly === false && (
+          <p className="text-[11px] text-warn">Ton jeton cTrader a le droit de trading. L’app ne l’utilise qu’en lecture, mais un jeton « accounts » (lecture seule) est plus sûr.</p>
+        )}
+        {status?.ctrader?.configured && (status.ctrader as any).tokenRefreshed && (
+          <p className="text-[11px] text-warn">Le jeton cTrader a expiré et a été renouvelé pour cette session : génère-en un nouveau et mets à jour CTRADER_ACCESS_TOKEN et CTRADER_REFRESH_TOKEN.</p>
+        )}
         <p className="text-[11px] leading-relaxed text-mute">
           Sans clé Twelve Data, l’app utilise Yahoo Finance (gratuit) : l’or y est coté via les futures COMEX, avec quelques dollars d’écart possible avec ton broker.
           Les clés se règlent dans AI Studio, panneau « Secrets ». Elles restent côté serveur et ne sont jamais envoyées au navigateur.
+        </p>
+      </section>
+      <section className="card space-y-2 p-4">
+        <div className="label">Surveillance automatique et alertes</div>
+        <ul className="space-y-1 text-xs">
+          <KeyRow name="WATCH_SECRET" ok={!!status?.watchConfigured} desc="Clé de la vérification toutes les 5 min (16 caractères minimum)" optional />
+          <KeyRow name="TELEGRAM_BOT_TOKEN · TELEGRAM_CHAT_ID" ok={!!status?.telegram} desc="Bot Telegram qui t’envoie les setups et les ordres prêts" optional />
+        </ul>
+        <p className="text-[11px] leading-relaxed text-mute">
+          Adresse à appeler toutes les 5 minutes (cron-job.org, gratuit) :
+          <span className="num block break-all text-ink">{typeof window !== 'undefined' ? window.location.origin : ''}/api/watch/tick?key=TON_WATCH_SECRET</span>
+          La surveillance ne travaille que pendant les kill zones et n’envoie que deux types d’alertes : « setup en préparation » et « ordre prêt ». Aucun ordre n’est passé.
         </p>
       </section>
       <section className="card space-y-2 p-4">

@@ -1,10 +1,12 @@
 // Données de marché RÉELLES uniquement.
+// - cTrader Open API (si CTRADER_* est défini) : bougies au prix du broker FxPro, en priorité.
 // - Twelve Data (si TWELVE_DATA_API_KEY est défini) : cotations spot EUR/USD et XAU/USD.
 // - Sinon Yahoo Finance (gratuit, sans clé) : EURUSD=X et GC=F (futures or COMEX).
 // H4 et D1 sont reconstruits à partir du H1 avec la frontière forex de 17h00 New York,
 // comme les graphiques MT5 des brokers. Aucune donnée n'est inventée.
 
 import { HOUR, marketClosed, tradingDayStart } from './time';
+import { getCTrader } from './ctrader';
 
 export interface Candle {
   t: number; // timestamp d'ouverture (ms, UTC)
@@ -55,6 +57,9 @@ export const PAIRS: Record<string, PairInfo> = {
   },
 };
 
+/** Libellé de la source quand les bougies viennent de cTrader. */
+export const CTRADER_SOURCE = 'cTrader (FxPro)';
+
 export interface SeriesResult {
   pair: string;
   tf: Timeframe;
@@ -78,7 +83,8 @@ const CACHE_TTL: Record<'M15' | 'H1', number> = { M15: 300_000, H1: 900_000 };
 const cache = new Map<string, SeriesResult>();
 const inflight = new Map<string, Promise<SeriesResult>>();
 
-export function dataSourceName(): 'Twelve Data' | 'Yahoo Finance' {
+export function dataSourceName(): string {
+  if (getCTrader()) return CTRADER_SOURCE;
   return process.env.TWELVE_DATA_API_KEY ? 'Twelve Data' : 'Yahoo Finance';
 }
 
@@ -103,9 +109,20 @@ export function peekLivePrice(pairId: string, maxAge = 60_000) {
 export async function getLivePrice(pairId: string): Promise<{ price: number; at: number } | null> {
   const pair = PAIRS[pairId];
   const apiKey = process.env.TWELVE_DATA_API_KEY;
-  if (!pair || !apiKey || marketClosed(Date.now())) return null;
+  if (!pair || marketClosed(Date.now())) return null;
   const hit = liveCache.get(pairId);
   if (hit && Date.now() - hit.at < 15_000) return hit;
+  // cTrader : dernier prix de la bougie M5 en cours (prix du broker, cache 60 s)
+  if (getCTrader()) {
+    const m5 = await getM5(pairId).catch(() => null);
+    const last = m5?.[m5.length - 1];
+    if (last && Date.now() - last.t < 10 * 60_000) {
+      const v = { price: last.c, at: Date.now() };
+      liveCache.set(pairId, v);
+      return v;
+    }
+  }
+  if (!apiKey) return null;
   try {
     await twelveSlot();
     const res = await fetch(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(pair.twelveSymbol)}&apikey=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(6_000) });
@@ -151,6 +168,19 @@ async function getRaw(pairId: string, tf: 'M15' | 'H1', maxAgeMs?: number): Prom
 
   const p = (async () => {
     try {
+      // 1. cTrader (FxPro) : prix du broker, aucun crédit consommé
+      const ct = getCTrader();
+      if (ct) {
+        try {
+          const candles = await ct.trendbars(pairId, tf, tf === 'M15' ? 700 : 5000);
+          if (candles.length < 60) throw new Error(`Pas assez de bougies cTrader pour ${pairId} ${tf} (${candles.length}).`);
+          const res: SeriesResult = { pair: pairId, tf, candles, source: CTRADER_SOURCE, futuresProxy: false, fromStaleCache: false, fetchedAt: Date.now() };
+          cache.set(key, res);
+          return res;
+        } catch (err) {
+          console.warn(`[cTrader ${pairId} ${tf}] ${(err as Error).message} : bascule sur Twelve Data.`);
+        }
+      }
       const useTwelve = !!process.env.TWELVE_DATA_API_KEY;
       let res: SeriesResult;
       if (useTwelve && !twelveLimitMessage()) {
@@ -255,11 +285,24 @@ const m5Cache = new Map<string, { at: number; candles: Candle[] }>();
 export async function getM5(pairId: string, maxAgeMs = 60_000): Promise<Candle[] | null> {
   const pair = PAIRS[pairId];
   const key = process.env.TWELVE_DATA_API_KEY;
-  if (!pair || !key) return null;
+  if (!pair || (!key && !getCTrader())) return null;
   const hit = m5Cache.get(pairId);
   if (hit && Date.now() - hit.at < maxAgeMs) return hit.candles;
+  const ct = getCTrader();
+  if (ct) {
+    try {
+      const candles = await ct.trendbars(pairId, 'M5', 150);
+      if (candles.length >= 30) {
+        m5Cache.set(pairId, { at: Date.now(), candles });
+        return candles;
+      }
+    } catch (e: any) {
+      console.warn(`[cTrader M5 ${pairId}] ${e?.message || e} : bascule sur Twelve Data.`);
+    }
+  }
+  if (!key) return hit && Date.now() - hit.at < 10 * 60_000 ? hit.candles : null;
   try {
-    const candles = await fetchTwelve(pair, 'M5', key, 150);
+    const candles = await fetchTwelve(pair, 'M5', key!, 150);
     m5Cache.set(pairId, { at: Date.now(), candles });
     return candles;
   } catch (e: any) {

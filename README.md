@@ -71,3 +71,27 @@ src/components/        Graphique, panneau d'analyse, journal, réglages
 ```
 
 Outil d'aide à la décision, pas un conseil en investissement. Teste d'abord sur compte démo.
+
+
+## Données FxPro (cTrader) et alertes automatiques
+
+### 1. Connecter cTrader (lecture seule)
+1. Va sur https://openapi.ctrader.com, connecte-toi avec ton cTrader ID (celui de FxPro), puis **Applications → Add new app**. Attends que l'application soit validée (statut « Active »).
+2. Note le **Client ID** et le **Secret**.
+3. Ouvre le **Playground** de l'application, choisis l'autorisation **« accounts »** (lecture seule), connecte ton compte FxPro et copie l'**access token** et le **refresh token**.
+4. Dans AI Studio, panneau **Secrets**, ajoute : `CTRADER_CLIENT_ID`, `CTRADER_CLIENT_SECRET`, `CTRADER_ACCESS_TOKEN`, `CTRADER_REFRESH_TOKEN`, et `CTRADER_ENV` = `demo` (ou `live` pour un compte réel).
+5. Republie. Dans Réglages, la source doit afficher **cTrader (FxPro)**. En cas de problème cTrader, l'app bascule seule sur Twelve Data, puis Yahoo.
+
+L'app n'implémente aucun message de trading : elle ne peut pas passer d'ordre, même avec un jeton qui en aurait le droit.
+
+### 2. Bot Telegram
+1. Dans Telegram, écris à **@BotFather** → `/newbot` → copie le **token**.
+2. Ajoute `TELEGRAM_BOT_TOKEN` et `WATCH_SECRET` (une phrase longue et aléatoire, 16 caractères minimum) dans les Secrets, puis republie.
+3. Envoie « bonjour » à ton bot, puis ouvre `https://TON-APP/api/watch/telegram-chats?key=TON_WATCH_SECRET` : copie l'`id` affiché dans `TELEGRAM_CHAT_ID`, puis republie.
+4. Test : `https://TON-APP/api/watch/telegram-test?key=TON_WATCH_SECRET` doit t'envoyer un message.
+
+### 3. Vérification toutes les 5 minutes
+L'hébergement AI Studio se met en veille sans visiteur : une tâche externe réveille l'app.
+1. Crée un compte gratuit sur https://cron-job.org.
+2. Nouvelle tâche : adresse `https://TON-APP/api/watch/tick?key=TON_WATCH_SECRET`, toutes les **5 minutes**, délai d'attente maximal.
+3. La surveillance ne travaille que pendant les kill zones (Londres 02–05 h, New York 07–10 h, heure de New York), sur l'or uniquement (EUR/USD en pause). Elle envoie « setup en préparation » quand le scénario M15 est valide, puis « ordre prêt » quand le CHoCH M5 confirme. Les alertes apparaissent aussi en haut de l'onglet Analyse, avec « Ajouter au journal ».

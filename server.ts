@@ -9,6 +9,9 @@ import { runAnalysis, AnalysisError } from './server/analysis';
 import { mountMcp } from './server/mcp';
 import { RULES_VERSION } from './server/smc';
 import { advanceAll, getJob, startBacktest, advanceJobAsync } from './server/backtestJobs';
+import { getWatcher } from './server/watch';
+import { sendTelegram, telegramChats, telegramConfig } from './server/telegram';
+import { ctraderStatus } from './server/ctrader';
 
 dotenv.config();
 
@@ -22,7 +25,8 @@ const accessCode = () => (process.env.APP_ACCESS_CODE || '').trim();
 const failures = new Map<string, number[]>();
 app.use('/api', (req, res, next) => {
   const code = accessCode();
-  if (!code || req.path === '/status') return next();
+  // /api/watch/* : appelées par la tâche programmée, protégées par leur propre secret (WATCH_SECRET)
+  if (!code || req.path === '/status' || req.path.startsWith('/watch/')) return next();
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   const now = Date.now();
   const recent = (failures.get(ip) || []).filter(t => now - t < 60_000);
@@ -46,6 +50,10 @@ app.get('/api/status', (_req, res) => {
     mcpEnabled: (process.env.MCP_TOKEN || '').length >= 16,
     accessRequired: accessCode().length > 0,
     rulesVersion: RULES_VERSION,
+    // aucun secret : seulement « configuré ou non » et le dernier problème rencontré
+    ctrader: ctraderStatus(),
+    telegram: !!telegramConfig(),
+    watchConfigured: (process.env.WATCH_SECRET || '').trim().length >= 16,
     pairs: Object.values(PAIRS).map(p => ({ id: p.id, label: p.label, decimals: p.decimals, pipSize: p.pipSize, contract: p.contract, defaultSpread: p.defaultSpread })),
   });
 });
@@ -65,6 +73,53 @@ app.get('/api/candles', async (req, res) => {
     // 424 et non 502 : le proxy de l'aperçu AI Studio remplace les 502/503 par une page HTML
     res.status(424).json({ error: `Données indisponibles : ${err.message}` });
   }
+});
+
+// ---------- Surveillance automatique (tâche programmée toutes les 5 min) + alertes Telegram ----------
+const watcher = getWatcher(opts => runAnalysis(opts));
+/** Vérifie WATCH_SECRET (paramètre ?key= ou en-tête X-Watch-Key), en temps constant. */
+function watchAuthorized(req: express.Request, res: express.Response): boolean {
+  const secret = (process.env.WATCH_SECRET || '').trim();
+  if (secret.length < 16) {
+    res.status(503).json({ error: 'Surveillance désactivée : définis WATCH_SECRET (16 caractères minimum) dans les Secrets.' });
+    return false;
+  }
+  const given = Buffer.from(String(req.query.key || req.headers['x-watch-key'] || ''));
+  const want = Buffer.from(secret);
+  if (given.length === want.length && crypto.timingSafeEqual(given, want)) return true;
+  res.status(401).json({ error: 'Clé de surveillance invalide.' });
+  return false;
+}
+app.all('/api/watch/tick', async (req, res) => {
+  if (!watchAuthorized(req, res)) return;
+  try {
+    const r = await watcher.tick();
+    res.json({ ok: true, ...r, alertsSent: watcher.alerts.filter(a => a.at === r.at).map(a => ({ kind: a.kind, pair: a.pair, telegram: a.telegram })) });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || 'Erreur de surveillance.' });
+  }
+});
+app.get('/api/watch/telegram-test', async (req, res) => {
+  if (!watchAuthorized(req, res)) return;
+  res.json(await sendTelegram('<b>ORA Trader</b>\nTest réussi : les alertes de setups arriveront ici.'));
+});
+app.get('/api/watch/telegram-chats', async (req, res) => {
+  if (!watchAuthorized(req, res)) return;
+  try {
+    res.json({ chats: await telegramChats() });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message });
+  }
+});
+// Alertes pour l'app (protégées par le code d'accès comme le reste de /api)
+app.get('/api/alerts', (_req, res) => {
+  res.json({
+    alerts: watcher.alerts.map(a => ({ id: a.id, kind: a.kind, pair: a.pair, at: a.at, title: a.title, text: a.text, telegram: a.telegram, analysis: a.analysis })),
+    lastTick: watcher.lastTick,
+    telegram: !!telegramConfig(),
+    watchConfigured: (process.env.WATCH_SECRET || '').trim().length >= 16,
+    ctrader: ctraderStatus(),
+  });
 });
 
 // ---------- Cotations ----------

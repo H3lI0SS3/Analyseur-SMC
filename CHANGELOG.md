@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 07/11/2026 — cTrader (FxPro), surveillance automatique, alertes Telegram, TradingView
+- **cTrader Open API** (`server/ctrader.ts`) : bougies M5 / M15 / H1 au prix FxPro, en priorité sur Twelve Data (qui reste en secours, puis Yahoo). Protocole JSON sur WebSocket (port 5036), lecture seule : aucun message de trading n'existe dans le code. Jeton renouvelé automatiquement s'il expire (refresh token), sans jamais être affiché. Clés dans les Secrets (`CTRADER_*`).
+- **Surveillance automatique** (`server/watch.ts`, route `/api/watch/tick?key=WATCH_SECRET`) : appelée toutes les 5 minutes par cron-job.org (l'hébergement AI Studio se met en veille). Pendant les kill zones uniquement, sur l'or : moteur principal + exécution M5 (règles 3.11). Analyse rapide sans IA, puis analyse complète avec Gemini seulement si un setup apparaît. Deux alertes, sans doublon : « setup en préparation » et « ordre prêt ».
+- **Telegram** (`server/telegram.ts`) : message avec entrée, stop, TP1/TP2, R:R et validité ; routes d'aide `/api/watch/telegram-chats` et `/api/watch/telegram-test`.
+- **App** : carte « Surveillance automatique » en haut de l'onglet Analyse (alertes du jour, « Ajouter au journal » pendant 10 min) ; graphique **TradingView** en direct (OANDA, M5 / M15 / D1) au-dessus du graphique de l'app, qui garde les niveaux du plan ; Réglages : état de cTrader, Telegram et de la surveillance.
+
 ## 07/11/2026 (nuit) — ORA retiré de l'app
 - Backtest 2 ans sur l'or, mêmes coûts et même gestion : **ORA corrigé 10 trades, 20 % de réussite, −0,24 R par trade (−2,4 R)**, contre +0,33 R par trade pour l'exécution M5 en direct (50 trades, positive sur les deux moitiés). ORA trouve trop peu de setups et ceux-ci perdent.
 - L'onglet « ORA (test) » et la route `/api/ora` sont retirés : un seul verdict dans l'app. Le moteur (`server/smcMasterEngine.ts`) et son backtest restent dans le code pour pouvoir le retester ; le rapport du backtest continue d'afficher le bloc ORA pour comparaison.

@@ -5,6 +5,8 @@ import { AnalysisPanel } from './components/AnalysisPanel';
 import { JournalView } from './components/JournalView';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
+import { AlertsCard } from './components/AlertsCard';
+import { TradingViewChart } from './components/TradingViewChart';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
 import { deskCheck } from './lib/desk';
 import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, sessionNow, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson } from './lib/utils';
@@ -288,6 +290,8 @@ export default function App() {
 
         {tab === 'analyse' && (
           <>
+            <AlertsCard onAdd={addToJournal} />
+            <TradingViewChart pair={pair} />
             <CandleChart reload={reloadKey} pair={pair} decimals={meta.decimals} analysis={analyses[pair] || null} />
             <AnalysisPanel
               pair={pair}
