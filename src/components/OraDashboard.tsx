@@ -136,7 +136,7 @@ export function OraDashboard({ pair, decimals, settings }: { pair: string; decim
             </div>
             <p className="mt-2 text-[11px] text-ink/80">
               {plan.steps.filter(s => s.ok).length}/6 confluences validées · bougie M5 {plan.killZone.candleTime ? localTime(plan.killZone.candleTime) : '—'} ·{' '}
-              {plan.killZone.active ? `kill zone ${plan.killZone.name}` : 'hors kill zone (07–10 / 13–16 UTC)'}
+              {plan.killZone.active ? `kill zone ${plan.killZone.name}` : 'hors kill zone (Londres 02–05 h / New York 07–10 h, heure de New York)'}
             </p>
           </section>
 

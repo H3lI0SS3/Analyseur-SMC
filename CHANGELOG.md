@@ -1,5 +1,10 @@
 # Journal des versions
 
+## 07/11/2026 (soir) — ORA : deux idées retenues de la nouvelle version proposée
+- **Kill zones ORA à l'heure de New York**, identiques au moteur principal (Londres 02–05 h, New York 07–10 h) : 07–10 h et 12–15 h UTC en hiver, une heure plus tôt en UTC pendant l'heure d'été américaine.
+- **FVG validé seulement si le prix de la bougie active est à l'intérieur** (retour dans le FVG au moment de l'entrée) ; l'OTE reste une alternative.
+- Non repris de cette version (revue du 07/11) : score fixe à 95, contrôle R:R qui ne peut pas échouer et sans frais, suppression du R:R ≥ 2,5 vers TP2, biais par moyenne mobile, bougie active « avant-dernière » (information future dans le stop), arrêt à la première étape, seuil d'impulsion abaissé sans test, arrondi à 3 décimales.
+
 ## 07/11/2026 — ORA Trader (moteur corrigé, en test) et nouvel en-tête
 - **Moteur ORA** (`server/smcMasterEngine.ts`) intégré avec les corrections demandées : FVG ou OTE obligatoire ; R:R net TP1 ≥ 1:2 et TP2 ≥ 1:2,5 (spread et commission inclus) ; kill zones 07:00–10:00 et 13:00–16:00 UTC (sinon « EN ATTENTE - HORS KILL ZONE ») ; score de confiance dynamique sur 6 confluences. Bugs du code d'origine corrigés : FVG jamais reconnu ('BULLISH' comparé à 'BUY'), zone OTE de vente impossible (bornes inversées), TP2 possible du mauvais côté, displacement sans contrôle du sens.
 - Évalué uniquement sur des bougies clôturées (dernière M5 clôturée = bougie active), session asiatique 00:00–06:00 UTC. Route `/api/ora`.

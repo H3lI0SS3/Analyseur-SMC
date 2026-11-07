@@ -1,5 +1,6 @@
 // Backtest ORA : exécution, durée, absence d'information future. npx tsx server/oraBacktest.test.ts
 import { runOraBacktest } from './oraBacktest';
+import { oraKillZone } from './smcMasterEngine';
 import type { Candle } from './marketData';
 
 let failed = 0;
@@ -42,6 +43,6 @@ ok('Durée raisonnable (< 20 s pour 4 mois)', ms < 20_000, `${ms} ms`);
 ok('Deux moitiés = total', r.firstHalf.trades + r.secondHalf.trades === r.trades);
 const byT = new Map(m5.map(c => [c.t, c]));
 ok('Entrée = clôture de la bougie M5 qui vient de se terminer (pas d’information future)', r.last.every(t => Math.abs((byT.get(t.at - 300_000)?.c ?? NaN) - t.entry) < 0.006), r.last.slice(0, 2).map(t => `${t.entry}`).join(','));
-ok('Signaux uniquement en kill zone ORA', r.last.every(t => { const h = new Date(t.at - 300_000).getUTCHours(); return (h >= 7 && h < 10) || (h >= 13 && h < 16); }));
+ok('Signaux uniquement en kill zone ORA (heure de New York)', r.last.every(t => oraKillZone(t.at - 300_000).active));
 if (failed) { console.log(`\n${failed} test(s) en échec`); process.exit(1); }
 console.log('\nTous les tests du backtest ORA passent.');

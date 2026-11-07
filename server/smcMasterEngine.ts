@@ -8,7 +8,9 @@
  * Corrections par rapport au code d'origine (demandées par le trader le 07/11/2026) :
  *  1. FVG ou OTE OBLIGATOIRE : sans l'un des deux, le plan est REJETÉ.
  *  2. R:R strict : TP1 ≥ 1:2,0 et TP2 ≥ 1:2,5 (net du spread et de la commission), sinon plan annulé.
- *  3. Kill zones : Londres 07:00–10:00 UTC, New York 13:00–16:00 UTC ; hors fenêtre → « EN ATTENTE - HORS KILL ZONE ».
+ *  3. Kill zones à l'heure de New York, comme le moteur principal (Londres 02–05 h, New York 07–10 h ; en hiver 07–10 h et
+ *     12–15 h UTC, une heure plus tôt en UTC pendant l'heure d'été américaine) ; hors fenêtre → « EN ATTENTE - HORS KILL ZONE ».
+ *  5. (07/11, après revue) FVG validé seulement si le prix de la bougie active est à l'intérieur du FVG (retour dans le FVG).
  *  4. Score de confiance dynamique : part des 6 confluences validées (HTF, M15, AMD, displacement, FVG/OTE, R:R).
  * Corrections de bugs constatés à la relecture :
  *  - le FVG comparait 'BULLISH'/'BEARISH' à 'BUY'/'SELL' : jamais égal, le FVG n'était jamais reconnu ;
@@ -21,6 +23,8 @@
 // ============================================================================
 // 1. TYPES & INTERFACES DE BASE
 // ============================================================================
+
+import { nyParts } from './time';
 
 export interface Candle {
   timestamp: number;
@@ -111,10 +115,13 @@ export interface JournalStats {
 // 2. PARAMÈTRES
 // ============================================================================
 
-/** Kill zones en heure UTC [début, fin[ (choix du trader, 07/11/2026). */
+/**
+ * Kill zones à l'heure de New York [début, fin[, heure d'été comprise — mêmes fenêtres que le moteur principal.
+ * En hiver : Londres 07–10 h UTC, New York 12–15 h UTC ; une heure plus tôt en UTC pendant l'heure d'été américaine.
+ */
 export const ORA_KILL_ZONES: { name: 'Londres' | 'New York'; from: number; to: number }[] = [
-  { name: 'Londres', from: 7, to: 10 },
-  { name: 'New York', from: 13, to: 16 },
+  { name: 'Londres', from: 2, to: 5 },
+  { name: 'New York', from: 7, to: 10 },
 ];
 export const ORA_MIN_RR_TP1 = 2.0;
 export const ORA_MIN_RR_TP2 = 2.5;
@@ -253,10 +260,10 @@ export function validateDisplacementM5(activeCandle: Candle, m5Candles: Candle[]
   return currentBody >= avgBody * 1.4;
 }
 
-/** Kill zone de la bougie active (heure UTC de son ouverture). */
+/** Kill zone de la bougie active (heure de New York de son ouverture). */
 export function oraKillZone(timestamp: number): { name: 'Londres' | 'New York' | null; active: boolean } {
-  const d = new Date(timestamp);
-  const h = d.getUTCHours() + d.getUTCMinutes() / 60;
+  const p = nyParts(timestamp);
+  const h = p.h + p.mi / 60;
   const kz = ORA_KILL_ZONES.find(z => h >= z.from && h < z.to);
   return { name: kz?.name ?? null, active: !!kz };
 }
@@ -334,22 +341,23 @@ export function evaluateMasterSMCTrade(market: MarketDataBundle, costs: OraCosts
   let fvgDetail = 'Non évaluable sans biais HTF.';
   if (tradeDirection && activeCandle && recentM5.length >= 3) {
     const wanted = tradeDirection === 'BUY' ? 'BULLISH' : 'BEARISH'; // correction : 'BUY' ≠ 'BULLISH'
-    const fvgs = detectFairValueGaps(recentM5).filter(f => f.type === wanted);
+    const price = activeCandle.close;
+    // FVG du bon sens ET prix de la bougie active à l'intérieur (retour dans le FVG au moment de l'entrée)
+    const fvgs = detectFairValueGaps(recentM5).filter(f => f.type === wanted && price >= f.bottom && price <= f.top);
     const highestM5 = Math.max(...recentM5.map(c => c.high));
     const lowestM5 = Math.min(...recentM5.map(c => c.low));
     const ote = calculateOTEDiscountZone(highestM5, lowestM5, tradeDirection);
-    const price = activeCandle.close;
     const isInOTE = price >= ote.oteLow && price <= ote.oteHigh; // correction : bornes dans le bon ordre
     fvgOk = fvgs.length > 0 || isInOTE;
     const last = fvgs[fvgs.length - 1];
     fvgDetail = fvgOk
       ? [
-          last ? `FVG ${wanted === 'BULLISH' ? 'haussier' : 'baissier'} M5 ${round(last.bottom)} – ${round(last.top)}` : null,
+          last ? `prix (${round(price)}) dans le FVG ${wanted === 'BULLISH' ? 'haussier' : 'baissier'} M5 ${round(last.bottom)} – ${round(last.top)}` : null,
           isInOTE ? `prix dans l'OTE 0,618–0,786 (${round(ote.oteLow)} – ${round(ote.oteHigh)})` : null,
         ]
           .filter(Boolean)
           .join(' ; ') + '.'
-      : `Ni FVG ${wanted === 'BULLISH' ? 'haussier' : 'baissier'} sur les 20 dernières M5, ni prix dans l'OTE (${round(ote.oteLow)} – ${round(ote.oteHigh)}) : REJETÉ.`;
+      : `Prix (${round(price)}) ni dans un FVG ${wanted === 'BULLISH' ? 'haussier' : 'baissier'} des 20 dernières M5, ni dans l'OTE (${round(ote.oteLow)} – ${round(ote.oteHigh)}) : REJETÉ.`;
   }
   push('fvgOteValidated', fvgOk, fvgDetail);
 
@@ -394,7 +402,7 @@ export function evaluateMasterSMCTrade(market: MarketDataBundle, costs: OraCosts
   const confidenceScore = Math.round((validCount / ORA_CONFLUENCES) * 100);
   const allOk = validCount === ORA_CONFLUENCES;
   const status: OraStatus = !kz.active ? 'EN ATTENTE - HORS KILL ZONE' : allOk ? 'VALIDÉ' : 'REJETÉ';
-  if (!kz.active) rationale.push('Hors kill zone (Londres 07:00–10:00 UTC, New York 13:00–16:00 UTC) : aucune approbation possible.');
+  if (!kz.active) rationale.push('Hors kill zone (Londres 02–05 h, New York 07–10 h, heure de New York) : aucune approbation possible.');
   else rationale.push(`Kill zone ${kz.name} active.`);
 
   const approved = status === 'VALIDÉ';

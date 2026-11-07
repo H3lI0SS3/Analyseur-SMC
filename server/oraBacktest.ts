@@ -4,7 +4,7 @@ import { labStats, simulate, type LabStats } from './backtest';
 import type { Candle } from './marketData';
 import type { Setup } from './smc';
 import { marketClosed, tradingDayStart } from './time';
-import { evaluateMasterSMCTrade, ORA_KILL_ZONES, type Candle as OraCandle } from './smcMasterEngine';
+import { evaluateMasterSMCTrade, oraKillZone, type Candle as OraCandle } from './smcMasterEngine';
 import { ORA_ASIA_UTC, toOra } from './ora';
 
 const M5 = 5 * 60_000;
@@ -59,11 +59,7 @@ export function runOraBacktest(
   let busyUntil = 0;
   let signals = 0;
   const results: { at: number; r: number | null; direction: 'BUY' | 'SELL'; entry: number; sl: number; tp1: number; tp2: number }[] = [];
-  const inKz = (t: number) => {
-    const d = new Date(t);
-    const h = d.getUTCHours() + d.getUTCMinutes() / 60;
-    return ORA_KILL_ZONES.some(z => h >= z.from && h < z.to);
-  };
+  const inKz = (t: number) => oraKillZone(t).active;
 
   for (let i = firstAtOrAfter(m5, from); i < m5.length - 1; i++) {
     const active = m5[i];

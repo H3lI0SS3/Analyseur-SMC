@@ -16,8 +16,8 @@ const T = Date.UTC(2026, 10, 4, 8, 0); // mercredi 08:00 UTC : kill zone de Lond
 const costs = { spread: 0.2, commissionPerLot: 7, contract: 100 };
 
 /** Achat d'école : biais D1 haussier, prix en discount M15, sweep du bas asiatique, displacement, FVG haussier M5. */
-function bundle(over: Partial<{ t: number; fvg: boolean; dailyBull: boolean; keyHigh: number; sweep: boolean }> = {}): MarketDataBundle {
-  const o = { t: T, fvg: true, dailyBull: true, keyHigh: 2100, sweep: true, ...over };
+function bundle(over: Partial<{ t: number; fvg: boolean; dailyBull: boolean; keyHigh: number; sweep: boolean; close: number }> = {}): MarketDataBundle {
+  const o = { t: T, fvg: true, dailyBull: true, keyHigh: 2100, sweep: true, close: 2011, ...over };
   const daily = [0, 1, 2, 3, 4, 5].map(i => C(T - (6 - i) * DAY, 1990, 2000, 1980, 1995));
   daily.push(o.dailyBull ? C(T - 3_600_000, 1995, o.keyHigh, 1990, 2015) : C(T - 3_600_000, 1995, 1999, 1985, 1990));
   const m15 = Array.from({ length: 30 }, (_, i) => C(T - (30 - i) * 900_000, 2020, 2040, 2000, 2010 + (i === 29 ? 0 : 5)));
@@ -30,7 +30,8 @@ function bundle(over: Partial<{ t: number; fvg: boolean; dailyBull: boolean; key
     else m5.push(C(t, 2010, 2010.5, 2009.6, 2010.2));
   }
   // bougie active : balaie le bas asiatique (2005) puis clôture haussière avec un grand corps
-  m5.push(o.sweep ? C(o.t - 300_000, 2006, 2013, 2004, 2012) : C(o.t - 300_000, 2006, 2013, 2006, 2012));
+  // clôture par défaut à 2011 : DANS le FVG haussier 2010,5 – 2011,2
+  m5.push(o.sweep ? C(o.t - 300_000, 2006, 2013, 2004, o.close) : C(o.t - 300_000, 2006, 2013, 2006, o.close));
   return { symbol: 'XAU/USD', daily, h4: [], m15, m5, asianSession: asian };
 }
 
@@ -49,10 +50,16 @@ const noFvg = evaluateMasterSMCTrade(bundle({ fvg: false }), costs);
 ok('Sans FVG ni OTE : REJETÉ', noFvg.status === 'REJETÉ' && !noFvg.stepsValidation.fvgOteValidated, noFvg.steps[4].detail);
 ok('Score dynamique : 5/6 = 83 %', noFvg.confidenceScore === 83, String(noFvg.confidenceScore));
 
+// 2 bis. FVG présent mais prix HORS du FVG (et hors OTE) : REJETÉ
+const outside = evaluateMasterSMCTrade(bundle({ close: 2012 }), costs);
+ok('Prix au-dessus du FVG (2012 > 2011,2) : FVG/OTE refusé', !outside.stepsValidation.fvgOteValidated && outside.status === 'REJETÉ', outside.steps[4].detail);
+ok('Prix dans le FVG : confluence validée', p.stepsValidation.fvgOteValidated && /prix \(2011\) dans le FVG haussier/.test(p.steps[4].detail), p.steps[4].detail);
+
 // 3. Correction 3 : hors kill zone
 const late = evaluateMasterSMCTrade(bundle({ t: Date.UTC(2026, 10, 4, 11, 30) }), costs);
 ok('11:25 UTC : EN ATTENTE - HORS KILL ZONE', late.status === 'EN ATTENTE - HORS KILL ZONE' && !late.approved, late.status);
-ok('Kill zones UTC : 07:00 Londres, 13:00 New York, 16:00 fermé', oraKillZone(Date.UTC(2026, 10, 4, 7, 0)).name === 'Londres' && oraKillZone(Date.UTC(2026, 10, 4, 13, 0)).name === 'New York' && !oraKillZone(Date.UTC(2026, 10, 4, 16, 0)).active && !oraKillZone(Date.UTC(2026, 10, 4, 6, 55)).active);
+ok('Hiver : Londres 07–10 h UTC, New York 12–15 h UTC', oraKillZone(Date.UTC(2026, 10, 4, 7, 0)).name === 'Londres' && !oraKillZone(Date.UTC(2026, 10, 4, 6, 55)).active && oraKillZone(Date.UTC(2026, 10, 4, 12, 0)).name === 'New York' && oraKillZone(Date.UTC(2026, 10, 4, 14, 55)).active && !oraKillZone(Date.UTC(2026, 10, 4, 15, 0)).active && !oraKillZone(Date.UTC(2026, 10, 4, 10, 0)).active);
+ok('Été (heure d’été US) : une heure plus tôt en UTC — Londres 06 h, New York 11 h', oraKillZone(Date.UTC(2026, 6, 1, 6, 0)).name === 'Londres' && !oraKillZone(Date.UTC(2026, 6, 1, 9, 0)).active && oraKillZone(Date.UTC(2026, 6, 1, 11, 0)).name === 'New York' && !oraKillZone(Date.UTC(2026, 6, 1, 14, 0)).active);
 
 // 4. Correction 2 : TP2 trop proche ou du mauvais côté
 const nearTp2 = evaluateMasterSMCTrade(bundle({ keyHigh: 2030 }), costs);
