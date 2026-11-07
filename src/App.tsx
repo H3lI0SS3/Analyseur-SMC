@@ -199,14 +199,17 @@ export default function App() {
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-2xl pb-24">
+    <div className="mx-auto min-h-screen max-w-2xl pb-24 lg:max-w-4xl">
       {/* En-tête */}
-      <header className="sticky top-0 z-10 border-b border-line bg-bg/95 px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))] backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-line bg-white/90 px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))] backdrop-blur">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-base font-bold tracking-tight">
-            ORA <span className="text-gold">Trader</span>
+          <h1 className="flex shrink-0 items-center gap-2 whitespace-nowrap text-[17px] font-extrabold tracking-tight">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-gold text-white" aria-hidden>
+              <svg viewBox="0 0 100 100" className="h-4 w-4"><path d="M14 72L42 40L62 56L86 28" stroke="currentColor" strokeWidth="11" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>
+            </span>
+            ORA Trader
           </h1>
-          <div className="flex flex-wrap items-center justify-end gap-1.5 text-[11px]">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 text-[11px]">
             {/* Indicateur de session (mis à jour chaque minute) */}
             <span
               className={cx(
@@ -315,8 +318,8 @@ export default function App() {
       </main>
 
       {/* Navigation basse */}
-      <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
-        <div className="mx-auto grid max-w-2xl grid-cols-3">
+      <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+        <div className="mx-auto grid max-w-2xl grid-cols-3 lg:max-w-4xl">
           {(
             [
               ['analyse', 'Analyse', LineChart],

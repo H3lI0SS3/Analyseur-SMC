@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 07/11/2026 (nuit) — nouvelle identité visuelle
+- **Palette « lavande »** : fond clair bleuté (#F3F4FB), cartes blanches, accent indigo-violet (#5A46E0), texte indigo foncé (#1D1B3A). Police Manrope, chiffres à largeur fixe.
+- **Verdicts inchangés dans leur sens** : bandeau vert « Achat », rouge « Vente », orange « Attendre », en grand en haut de la carte du verdict.
+- **TradingView** en grand (environ deux tiers de l'écran), thème clair assorti, bouton plein écran (Échap pour quitter). L'app s'élargit sur ordinateur.
+- Graphique de l'app, en-tête, barre de navigation et icône recolorés ; titres de section en minuscules, contour de focus visible au clavier.
+
 ## 07/11/2026 (nuit) — volume profile en ticks (information)
 - Les bougies cTrader conservent le **volume en ticks** de FxPro. Calcul du **volume profile** de la journée en cours et de la veille (journée 17h–17h New York) : POC, zone de valeur à 70 % (VAH / VAL), position du prix par rapport à la zone de la veille.
 - **Information seulement** : carte « Volume profile (ticks FxPro) » dans l'analyse et champ dans le connecteur ; n'entre pas dans le verdict. Sans cTrader (Twelve Data, Yahoo), rien n'est affiché : ces sources n'ont pas de volume.

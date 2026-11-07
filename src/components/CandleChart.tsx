@@ -129,8 +129,8 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
               const yy = geom.y(p);
               return (
                 <g key={i}>
-                  <line x1={0} x2={geom.plotW} y1={yy} y2={yy} stroke="#1f252e" />
-                  <text x={geom.plotW + 6} y={yy + 3} fontSize="10" fill="#6b7380" className="num">
+                  <line x1={0} x2={geom.plotW} y1={yy} y2={yy} stroke="#e6e8f5" />
+                  <text x={geom.plotW + 6} y={yy + 3} fontSize="10" fill="#8a8fb0" className="num">
                     {fmt(p, decimals)}
                   </text>
                 </g>
@@ -143,7 +143,7 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
               const y0 = geom.y(z.top);
               const y1 = geom.y(z.bottom);
               if (y1 < 0 || y0 > H - padB) return null;
-              const col = z.dir === 'bull' ? '#3fb68b' : '#e5534b';
+              const col = z.dir === 'bull' ? '#0b8a5f' : '#d93a40';
               return (
                 <g key={z.id}>
                   <rect x={x0} y={y0} width={Math.max(4, geom.plotW - x0)} height={Math.max(2, y1 - y0)} fill={col} opacity={z.kind === 'FVG' ? 0.12 : 0.2} />
@@ -159,8 +159,8 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
               .filter(l => !l.swept && l.price > geom.lo && l.price < geom.hi)
               .map(l => (
                 <g key={l.id}>
-                  <line x1={0} x2={geom.plotW} y1={geom.y(l.price)} y2={geom.y(l.price)} stroke="#8b93a1" strokeDasharray="2 4" opacity={0.6} />
-                  <text x={4} y={geom.y(l.price) - 3} fontSize="9" fill="#8b93a1">
+                  <line x1={0} x2={geom.plotW} y1={geom.y(l.price)} y2={geom.y(l.price)} stroke="#8a8fb0" strokeDasharray="2 4" opacity={0.6} />
+                  <text x={4} y={geom.y(l.price) - 3} fontSize="9" fill="#8a8fb0">
                     {l.id.replace(/-\d+$/, '')}
                   </text>
                 </g>
@@ -170,7 +170,7 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
             {view.map((c, i) => {
               const x = i * geom.step + geom.step / 2;
               const up = c.c >= c.o;
-              const col = up ? '#3fb68b' : '#e5534b';
+              const col = up ? '#0b8a5f' : '#d93a40';
               const bw = Math.max(1.5, geom.step * 0.62);
               const yo = geom.y(c.o);
               const yc = geom.y(c.c);
@@ -187,10 +187,10 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
               (() => {
                 const p = showAnalysis.final.plan!;
                 const lines: [number | null, string, string][] = [
-                  [p.tp2, '#3fb68b', 'TP2'],
-                  [p.tp1, '#3fb68b', 'TP1'],
-                  [p.entry, '#d99a3d', 'Entrée'],
-                  [p.sl, '#e5534b', 'SL'],
+                  [p.tp2, '#0b8a5f', 'TP2'],
+                  [p.tp1, '#0b8a5f', 'TP1'],
+                  [p.entry, '#5a46e0', 'Entrée'],
+                  [p.sl, '#d93a40', 'SL'],
                 ];
                 return lines
                   .filter(l => l[0] !== null)
@@ -198,7 +198,7 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
                     <g key={lab}>
                       <line x1={0} x2={geom.plotW} y1={geom.y(v!)} y2={geom.y(v!)} stroke={col} strokeWidth={1.2} strokeDasharray={lab === 'Entrée' ? '0' : '6 3'} />
                       <rect x={geom.plotW} y={geom.y(v!) - 8} width={padR} height={16} fill={col} rx={3} />
-                      <text x={geom.plotW + 4} y={geom.y(v!) + 4} fontSize="10" fill="#0e1217" fontWeight={700} className="num">
+                      <text x={geom.plotW + 4} y={geom.y(v!) + 4} fontSize="10" fill="#ffffff" fontWeight={700} className="num">
                         {fmt(v!, decimals)}
                       </text>
                       <text x={geom.plotW - 4} y={geom.y(v!) - 4} textAnchor="end" fontSize="10" fill={col} fontWeight={600}>
@@ -211,9 +211,9 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
             {/* dernier prix */}
             {last && (
               <g>
-                <line x1={0} x2={geom.plotW} y1={geom.y(last.c)} y2={geom.y(last.c)} stroke="#e7e4dd" strokeOpacity={0.35} />
-                <rect x={geom.plotW} y={geom.y(last.c) - 8} width={padR} height={16} fill="#e7e4dd" rx={3} />
-                <text x={geom.plotW + 4} y={geom.y(last.c) + 4} fontSize="10" fill="#0e1217" fontWeight={700} className="num">
+                <line x1={0} x2={geom.plotW} y1={geom.y(last.c)} y2={geom.y(last.c)} stroke="#1d1b3a" strokeOpacity={0.35} />
+                <rect x={geom.plotW} y={geom.y(last.c) - 8} width={padR} height={16} fill="#1d1b3a" rx={3} />
+                <text x={geom.plotW + 4} y={geom.y(last.c) + 4} fontSize="10" fill="#ffffff" fontWeight={700} className="num">
                   {fmt(last.c, decimals)}
                 </text>
               </g>
@@ -222,7 +222,7 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
             {/* axe du temps */}
             {view.map((c, i) =>
               i % Math.ceil(view.length / 4) === 0 ? (
-                <text key={'t' + c.t} x={i * geom.step} y={H - 6} fontSize="10" fill="#6b7380">
+                <text key={'t' + c.t} x={i * geom.step} y={H - 6} fontSize="10" fill="#8a8fb0">
                   {tf === 'D1' || tf === 'H4'
                     ? new Date(c.t).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'Africa/Casablanca' })
                     : new Date(c.t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Casablanca' })}

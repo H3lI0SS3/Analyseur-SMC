@@ -503,12 +503,14 @@ function VerdictCard({ v, stats, score, grade }: { v: NonNullable<AnalysisRespon
   const pct = stats.viability;
   const ok = pct !== null && pct >= v.threshold;
   return (
-    <section className={cx('card border-2 p-4', v.action === 'ACHETER' ? 'border-up' : v.action === 'VENDRE' ? 'border-down' : 'border-warn/60')}>
-      <div className="label">Verdict de ta stratégie</div>
-      <div className={cx('mt-1 text-3xl font-extrabold tracking-tight', v.action === 'ACHETER' ? 'text-up' : v.action === 'VENDRE' ? 'text-down' : 'text-warn')}>
-        {v.action}
+    <section className="card overflow-hidden">
+      {/* bandeau du verdict : vert = achat, rouge = vente, orange = attendre */}
+      <div className={cx('px-4 py-3 text-white', v.action === 'ACHETER' ? 'bg-up' : v.action === 'VENDRE' ? 'bg-down' : 'bg-warn')}>
+        <div className="text-[12px] font-semibold opacity-90">Verdict de ta stratégie</div>
+        <div className="text-[34px] font-extrabold leading-tight tracking-tight">{v.action === 'ACHETER' ? 'Achat' : v.action === 'VENDRE' ? 'Vente' : 'Attendre'}</div>
       </div>
-      <p className="mt-2 text-sm leading-snug">{v.summary}</p>
+      <div className="p-4 pt-3">
+      <p className="text-sm leading-snug">{v.summary}</p>
       {score !== null && grade && (
         <div className="mt-3 flex items-center justify-between rounded-lg bg-card2 px-3 py-2">
           <span className="text-xs text-mute">Qualité du setup (grille SMC, pas une probabilité)</span>
@@ -524,7 +526,7 @@ function VerdictCard({ v, stats, score, grade }: { v: NonNullable<AnalysisRespon
         </div>
         {pct === null ? (
           <>
-            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-bg">
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-card2">
               <div className="h-full bg-gold" style={{ width: `${Math.min(100, (stats.closed / stats.minTrades) * 100)}%` }} />
             </div>
             <p className="mt-1 text-[11px] text-mute">
@@ -533,7 +535,7 @@ function VerdictCard({ v, stats, score, grade }: { v: NonNullable<AnalysisRespon
           </>
         ) : (
           <>
-            <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-full bg-bg">
+            <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-full bg-card2">
               <div className={cx('h-full', ok ? 'bg-up' : 'bg-warn')} style={{ width: `${pct}%` }} />
               <div className="absolute inset-y-0 w-0.5 bg-ink" style={{ left: `${v.threshold}%` }} />
             </div>
@@ -567,6 +569,7 @@ function VerdictCard({ v, stats, score, grade }: { v: NonNullable<AnalysisRespon
       <p className="mt-3 text-[10px] leading-snug text-mute">
         Le verdict vient uniquement des règles de ta stratégie. La viabilité est un indice de confiance, calculé sur tes trades suivis automatiquement (version actuelle des règles), que la moyenne en R soit positive. Ce n’est ni la chance de gagner ce trade, ni une preuve : avec 30 trades, une stratégie sans avantage peut dépasser 85 % par hasard. Pour le réel, vise au moins 100 trades et une fourchette entièrement au-dessus de 0. Outil d’aide à la décision, pas un conseil en investissement.
       </p>
+      </div>
     </section>
   );
 }

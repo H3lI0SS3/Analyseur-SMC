@@ -1,18 +1,21 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #0e1217;
-  --color-card: #151a21;
-  --color-card2: #1b2129;
-  --color-line: #262d37;
-  --color-ink: #e7e4dd;
-  --color-mute: #8b93a1;
-  --color-gold: #d99a3d;
-  --color-up: #3fb68b;
-  --color-down: #e5534b;
-  --color-warn: #e0b341;
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Palette « lavande » : fond clair bleuté, accent indigo-violet.
+     Les verdicts gardent leur sens : vert = achat, rouge = vente, orange = attendre. */
+  --color-bg: #f3f4fb;
+  --color-card: #ffffff;
+  --color-card2: #eceefa;
+  --color-line: #dde1f2;
+  --color-ink: #1d1b3a;
+  --color-mute: #62678a;
+  /* « gold » = couleur d'accent de l'app (nom historique conservé) : violet */
+  --color-gold: #5a46e0;
+  --color-up: #0b8a5f;
+  --color-down: #d93a40;
+  --color-warn: #c9620a;
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Manrope', ui-sans-serif, system-ui, sans-serif;
 }
 
 html,
@@ -23,22 +26,33 @@ body {
 }
 
 .num {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -0.01em;
 }
 
 .card {
   background: var(--color-card);
   border: 1px solid var(--color-line);
-  border-radius: 14px;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgb(40 30 120 / 0.04);
 }
 
 .label {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--color-mute);
-  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-ink);
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
 }
 
 @keyframes spin {
