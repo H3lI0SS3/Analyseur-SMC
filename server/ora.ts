@@ -1,9 +1,7 @@
-// ORA Trader côté serveur : prépare le paquet de bougies (D1, H4, M15, M5 clôturées, session asiatique)
-// et appelle le moteur ORA corrigé. Aucun ordre n'est passé.
-import { aggregateTrading, getM5, getSeries, PAIRS, type Candle as AppCandle } from './marketData';
-import { PAUSED_PAIRS } from './execution';
-import { marketClosed } from './time';
-import { evaluateMasterSMCTrade, type Candle, type MarketDataBundle, type MasterTradePlan } from './smcMasterEngine';
+// ORA Trader : préparation des bougies pour le moteur ORA corrigé (utilisé uniquement par le backtest depuis le 07/11/2026 :
+// 10 trades en 2 ans sur l'or, −0,24 R par trade → retiré de l'app, conservé pour pouvoir le retester).
+import { aggregateTrading, type Candle as AppCandle } from './marketData';
+import type { Candle, MarketDataBundle } from './smcMasterEngine';
 
 const M5_MS = 5 * 60_000;
 const M15_MS = 15 * 60_000;
@@ -34,52 +32,5 @@ export function buildBundle(symbol: string, h1: AppCandle[], m15: AppCandle[], m
     m15: m15c.map(toOra),
     m5: m5c.map(toOra),
     asianSession: active ? asianSession(m15c, active.t + M5_MS).map(toOra) : [],
-  };
-}
-
-export interface OraResponse {
-  pair: string;
-  generatedAt: number;
-  plan: MasterTradePlan;
-  source: string;
-  marketClosed: boolean;
-  paused: string | null;
-  /** l'or n'est évalué que sur du prix spot (pas de futures Yahoo) */
-  warnings: string[];
-  costs: { spread: number; commissionPerLot: number; contract: number };
-  lastM5: number | null;
-}
-
-export async function runOra(pair: string, opts: { spread?: number; commissionPerLot?: number } = {}): Promise<OraResponse> {
-  const info = PAIRS[pair];
-  if (!info) throw Object.assign(new Error('Actif non supporté (EUR/USD ou XAU/USD).'), { status: 400 });
-  const now = Date.now();
-  const costs = {
-    spread: Number.isFinite(opts.spread) && opts.spread! >= 0 && opts.spread! < 50 * info.pipSize ? opts.spread! : info.defaultSpread,
-    commissionPerLot: Number.isFinite(opts.commissionPerLot) && opts.commissionPerLot! >= 0 && opts.commissionPerLot! <= 100 ? opts.commissionPerLot! : 7,
-    contract: info.contract,
-  };
-  const [h1, m15] = await Promise.all([getSeries(pair, 'H1'), getSeries(pair, 'M15')]);
-  if (h1.futuresProxy || m15.futuresProxy) {
-    throw Object.assign(new Error('Données de secours en prix futures : ORA ne peut pas être évalué sur l’or sans prix spot.'), { status: 424 });
-  }
-  const m5 = await getM5(pair);
-  if (!m5) throw Object.assign(new Error('Bougies M5 indisponibles (Twelve Data) : ORA a besoin du M5.'), { status: 424 });
-  const plan = evaluateMasterSMCTrade(buildBundle(pair, h1.candles, m15.candles, m5, now), costs);
-  const closed = marketClosed(now);
-  const paused = PAUSED_PAIRS[pair] ?? null;
-  const warnings: string[] = [];
-  if (closed) warnings.push('Marché fermé : évaluation sur les dernières bougies, aucun trade possible.');
-  if (h1.fallback || m15.fallback) warnings.push('Données de secours (Yahoo Finance) : vérifie les niveaux sur ton broker.');
-  return {
-    pair,
-    generatedAt: now,
-    plan,
-    source: m15.source,
-    marketClosed: closed,
-    paused,
-    warnings,
-    costs,
-    lastM5: m5.length ? m5[m5.length - 1].t : null,
   };
 }

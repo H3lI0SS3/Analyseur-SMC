@@ -1,5 +1,10 @@
 # Journal des versions
 
+## 07/11/2026 (nuit) — ORA retiré de l'app
+- Backtest 2 ans sur l'or, mêmes coûts et même gestion : **ORA corrigé 10 trades, 20 % de réussite, −0,24 R par trade (−2,4 R)**, contre +0,33 R par trade pour l'exécution M5 en direct (50 trades, positive sur les deux moitiés). ORA trouve trop peu de setups et ceux-ci perdent.
+- L'onglet « ORA (test) » et la route `/api/ora` sont retirés : un seul verdict dans l'app. Le moteur (`server/smcMasterEngine.ts`) et son backtest restent dans le code pour pouvoir le retester ; le rapport du backtest continue d'afficher le bloc ORA pour comparaison.
+- L'en-tête (ORA Trader, indicateur de session, statut de connexion) est conservé.
+
 ## 07/11/2026 (soir) — ORA : deux idées retenues de la nouvelle version proposée
 - **Kill zones ORA à l'heure de New York**, identiques au moteur principal (Londres 02–05 h, New York 07–10 h) : 07–10 h et 12–15 h UTC en hiver, une heure plus tôt en UTC pendant l'heure d'été américaine.
 - **FVG validé seulement si le prix de la bougie active est à l'intérieur** (retour dans le FVG au moment de l'entrée) ; l'OTE reste une alternative.

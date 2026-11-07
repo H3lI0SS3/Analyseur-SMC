@@ -17,7 +17,7 @@
  *  - la zone OTE d'une vente avait ses bornes inversées : condition impossible ;
  *  - TP2 (liquidité HTF) pouvait se trouver du mauvais côté de l'entrée : il est maintenant contrôlé ;
  *  - toutes les étapes sont évaluées (au lieu de s'arrêter à la première) pour afficher le panneau complet et le score.
- * Le moteur est pur (aucun accès réseau) : il est utilisé par le serveur, le backtest et l'interface (journal).
+ * Retiré de l’app le 07/11/2026 après le backtest sur 2 ans (or : 10 trades, −0,24 R par trade) ; conservé pour le backtest.
  */
 
 // ============================================================================

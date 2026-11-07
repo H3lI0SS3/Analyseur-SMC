@@ -9,7 +9,6 @@ import { runAnalysis, AnalysisError } from './server/analysis';
 import { mountMcp } from './server/mcp';
 import { RULES_VERSION } from './server/smc';
 import { advanceAll, getJob, startBacktest, advanceJobAsync } from './server/backtestJobs';
-import { runOra } from './server/ora';
 
 dotenv.config();
 
@@ -65,17 +64,6 @@ app.get('/api/candles', async (req, res) => {
   } catch (err: any) {
     // 424 et non 502 : le proxy de l'aperçu AI Studio remplace les 502/503 par une page HTML
     res.status(424).json({ error: `Données indisponibles : ${err.message}` });
-  }
-});
-
-// ---------- ORA Trader (moteur corrigé, en test) ----------
-app.get('/api/ora', async (req, res) => {
-  try {
-    const out = await runOra(String(req.query.pair || 'XAU/USD'), { spread: Number(req.query.spread), commissionPerLot: Number(req.query.commission) });
-    res.json(out);
-  } catch (err: any) {
-    // 424 et non 502 : le proxy de l'aperçu AI Studio remplace les 502/503 par une page HTML
-    res.status(err?.status === 400 ? 400 : 424).json({ error: err?.message || 'Analyse ORA impossible.' });
   }
 });
 

@@ -233,7 +233,7 @@ function buildServer() {
         historique_limite_par_la_source: r.limitedBySource,
         moteur_ora_corrige: r.ora
           ? {
-              regle: 'ORA Trader corrigé (FVG/OTE obligatoire, R:R net TP1 ≥ 2 et TP2 ≥ 2,5, kill zones à l’heure de New York comme le moteur principal, prix dans le FVG ou l’OTE), rejoué en M5, mêmes coûts et même gestion que le moteur actuel.',
+              regle: 'Retiré de l’app le 07/11 (non rentable au backtest), suivi ici pour comparaison. ORA Trader corrigé (FVG/OTE obligatoire, R:R net TP1 ≥ 2 et TP2 ≥ 2,5, kill zones à l’heure de New York comme le moteur principal, prix dans le FVG ou l’OTE), rejoué en M5, mêmes coûts et même gestion que le moteur actuel.',
               signaux: r.ora.signals,
               toute_la_periode: r.ora.all,
               premiere_moitie: r.ora.firstHalf,

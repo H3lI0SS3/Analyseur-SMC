@@ -1,17 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { BookOpen, FlaskConical, KeyRound, LineChart, Settings2, ShieldAlert } from 'lucide-react';
+import { BookOpen, KeyRound, LineChart, Settings2, ShieldAlert } from 'lucide-react';
 import { CandleChart } from './components/CandleChart';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { JournalView } from './components/JournalView';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
-import { OraDashboard } from './components/OraDashboard';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
 import { deskCheck } from './lib/desk';
 import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, sessionNow, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson } from './lib/utils';
 import { isTracked, strategyStats, trackJournal } from './lib/tracker';
 
-type Tab = 'analyse' | 'ora' | 'journal' | 'reglages';
+type Tab = 'analyse' | 'journal' | 'reglages';
 
 const DEFAULT_SETTINGS: RiskSettings = {
   capital: 10000,
@@ -302,7 +301,6 @@ export default function App() {
             />
           </>
         )}
-        {tab === 'ora' && <OraDashboard pair={pair} decimals={meta.decimals} settings={settings} />}
         {tab === 'journal' && (
           <>
             <JournalView journal={journal} setJournal={setJournal} rulesVersion={status?.rulesVersion} />
@@ -314,11 +312,10 @@ export default function App() {
 
       {/* Navigation basse */}
       <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
-        <div className="mx-auto grid max-w-2xl grid-cols-4">
+        <div className="mx-auto grid max-w-2xl grid-cols-3">
           {(
             [
               ['analyse', 'Analyse', LineChart],
-              ['ora', 'ORA (test)', FlaskConical],
               ['journal', 'Journal', BookOpen],
               ['reglages', 'Réglages', Settings2],
             ] as const
