@@ -175,6 +175,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
         </section>
       )}
       {a.execution && <ExecutionCard x={a.execution} dec={dec} shift={broker.offset} />}
+      {a.volumeProfile && <VolumeProfileCard vp={a.volumeProfile} dec={dec} shift={broker.offset} />}
       {a.pipeline && <PipelineCard p={a.pipeline} dec={dec} />}
 
       {/* Verdict */}
@@ -722,6 +723,40 @@ const STAGE_LABEL: Record<M5Execution['stage'], { label: string; tone: string }>
   annulé: { label: 'annulé', tone: 'bg-down/15 text-down' },
   indisponible: { label: 'M5 indisponible', tone: 'bg-down/15 text-down' },
 };
+
+/** Volume profile en ticks FxPro : repères d'information, hors verdict. */
+function VolumeProfileCard({ vp, dec, shift }: { vp: NonNullable<AnalysisResponse['volumeProfile']>; dec: number; shift: number }) {
+  const s = (v: number) => fmt(v + shift, dec);
+  const Row = ({ label, p }: { label: string; p: NonNullable<typeof vp.today> | null }) =>
+    p ? (
+      <div className="grid grid-cols-4 gap-2 rounded-lg bg-card2 px-3 py-2 text-[11px]">
+        <div className="text-mute">{label}</div>
+        <div><span className="text-mute">POC </span><span className="num font-semibold text-gold">{s(p.poc)}</span></div>
+        <div><span className="text-mute">VAH </span><span className="num">{s(p.vah)}</span></div>
+        <div><span className="text-mute">VAL </span><span className="num">{s(p.val)}</span></div>
+      </div>
+    ) : null;
+  return (
+    <section className="card p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="label">Volume profile (ticks FxPro)</div>
+        <span className="rounded px-1.5 py-0.5 text-[10px] font-bold text-mute">information</span>
+      </div>
+      <div className="space-y-1.5">
+        <Row label="Aujourd’hui" p={vp.today} />
+        <Row label="Veille" p={vp.yesterday} />
+      </div>
+      {vp.priceVsYesterday && (
+        <p className="mt-2 text-[11px] text-ink/80">
+          Prix {vp.priceVsYesterday === 'dans' ? 'dans la' : `${vp.priceVsYesterday} de la`} zone de valeur de la veille.
+        </p>
+      )}
+      <p className="mt-1 text-[10px] leading-snug text-mute">
+        Volume en ticks du broker (pas de volume centralisé sur le forex et l’or spot). POC = prix le plus échangé, VAH/VAL = zone de 70 % du volume. Repère seulement : il ne compte pas dans le verdict tant qu’il n’a pas été validé au backtest.
+      </p>
+    </section>
+  );
+}
 
 /** Exécution affinée M5 : le setup M15 est valide, l'entrée attend le CHoCH M5 dans la zone. */
 function ExecutionCard({ x, dec, shift }: { x: M5Execution; dec: number; shift: number }) {

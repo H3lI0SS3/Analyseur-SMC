@@ -130,6 +130,7 @@ function buildServer() {
           condition_attente: a.final.signal === 'attendre' ? a.final.notes[0] ?? e.waitCondition : null,
           execution_m5: a.execution ? { etape: a.execution.stage, message: a.execution.message, zone: a.execution.zone, niveau_choch: a.execution.chochLevel, ordre: a.execution.order } : null,
           actif_en_pause: a.paused,
+          volume_profile_ticks: a.volumeProfile ?? 'indisponible (volume en ticks seulement avec cTrader)',
           score_confluence: `${e.checklist.filter(c => c.ok).length}/${e.checklist.length}`,
           score_qualite: `${e.score}/100 (classe ${e.grade})`,
           plan: p

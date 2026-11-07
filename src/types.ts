@@ -294,6 +294,13 @@ export interface AnalysisResponse {
   execution?: M5Execution | null;
   /** actif en pause : raison (aucun trade proposé) */
   paused?: string | null;
+  /** volume profile en ticks FxPro (cTrader uniquement) — information, hors verdict */
+  volumeProfile?: {
+    today: VolumeProfileView | null;
+    yesterday: VolumeProfileView | null;
+    priceVsYesterday: 'au-dessus' | 'dans' | 'en dessous' | null;
+    bin: number;
+  } | null;
 }
 
 export type PipelineStepKey = 'htf' | 'declencheur' | 'zone' | 'risque';
@@ -381,4 +388,14 @@ export interface M5Execution {
   extreme: number | null;
   chochLevel: number | null;
   order: { entry: number; sl: number; tp1: number; tp2: number | null; rr1: number; rr2: number | null; validUntil: number; chochAt: number } | null;
+}
+
+export interface VolumeProfileView {
+  from: number;
+  to: number;
+  poc: number;
+  vah: number;
+  val: number;
+  totalTicks: number;
+  bars: number;
 }

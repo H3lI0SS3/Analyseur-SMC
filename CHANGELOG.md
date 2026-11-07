@@ -1,5 +1,10 @@
 # Journal des versions
 
+## 07/11/2026 (nuit) — volume profile en ticks (information)
+- Les bougies cTrader conservent le **volume en ticks** de FxPro. Calcul du **volume profile** de la journée en cours et de la veille (journée 17h–17h New York) : POC, zone de valeur à 70 % (VAH / VAL), position du prix par rapport à la zone de la veille.
+- **Information seulement** : carte « Volume profile (ticks FxPro) » dans l'analyse et champ dans le connecteur ; n'entre pas dans le verdict. Sans cTrader (Twelve Data, Yahoo), rien n'est affiché : ces sources n'ont pas de volume.
+- Étape suivante, après l'activation de cTrader : tester au backtest, sur l'historique FxPro, une règle « zone d'entrée alignée avec le POC ou la zone de valeur ».
+
 ## 07/11/2026 — cTrader (FxPro), surveillance automatique, alertes Telegram, TradingView
 - **cTrader Open API** (`server/ctrader.ts`) : bougies M5 / M15 / H1 au prix FxPro, en priorité sur Twelve Data (qui reste en secours, puis Yahoo). Protocole JSON sur WebSocket (port 5036), lecture seule : aucun message de trading n'existe dans le code. Jeton renouvelé automatiquement s'il expire (refresh token), sans jamais être affiché. Clés dans les Secrets (`CTRADER_*`).
 - **Surveillance automatique** (`server/watch.ts`, route `/api/watch/tick?key=WATCH_SECRET`) : appelée toutes les 5 minutes par cron-job.org (l'hébergement AI Studio se met en veille). Pendant les kill zones uniquement, sur l'or : moteur principal + exécution M5 (règles 3.11). Analyse rapide sans IA, puis analyse complète avec Gemini seulement si un setup apparaît. Deux alertes, sans doublon : « setup en préparation » et « ordre prêt ».

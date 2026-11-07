@@ -99,7 +99,15 @@ export function toCandle(bar: any): Candle | null {
   const low = Number(bar?.low);
   if (!Number.isFinite(t) || !Number.isFinite(low) || t <= 0) return null;
   const d = (k: string) => Number(bar?.[k] ?? 0); // les champs à 0 sont absents du JSON
-  return { t, o: (low + d('deltaOpen')) / PRICE_SCALE, h: (low + d('deltaHigh')) / PRICE_SCALE, l: low / PRICE_SCALE, c: (low + d('deltaClose')) / PRICE_SCALE };
+  const v = Number(bar?.volume);
+  return {
+    t,
+    o: (low + d('deltaOpen')) / PRICE_SCALE,
+    h: (low + d('deltaHigh')) / PRICE_SCALE,
+    l: low / PRICE_SCALE,
+    c: (low + d('deltaClose')) / PRICE_SCALE,
+    ...(Number.isFinite(v) && v > 0 ? { v } : {}),
+  };
 }
 
 const norm = (s: string) => s.replace(/[^A-Z0-9]/gi, '').toUpperCase();

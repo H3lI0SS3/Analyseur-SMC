@@ -14,6 +14,8 @@ export interface Candle {
   h: number;
   l: number;
   c: number;
+  /** volume en ticks (cTrader uniquement ; absent avec Twelve Data et Yahoo) */
+  v?: number;
 }
 
 export type Timeframe = 'M15' | 'H1' | 'H4' | 'D1';

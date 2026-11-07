@@ -1,6 +1,7 @@
 // Logique d'analyse partagée entre l'interface web (/api/analyze) et le connecteur MCP.
 import { PAIRS, TIMEFRAMES, getLivePrice, getM5, getSeries, withLivePrice, type Timeframe, type Candle } from './marketData';
 import { M5_EXECUTION_PAIRS, applyExecution } from './execution';
+import { sessionProfiles } from './volumeProfile';
 import { getNews, NEWS_CURRENCIES } from './news';
 import type { CandlePattern } from './candlePatterns';
 import { auditEngine } from './audit';
@@ -312,6 +313,8 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     candlePatterns,
     execution,
     paused,
+    // volume profile en ticks (cTrader uniquement) : information, n'entre pas dans le verdict
+    volumeProfile: sessionProfiles(series.M15, series.M15[series.M15.length - 1].c, pair === 'XAU/USD' ? 0.5 : info.pipSize, now),
   };
 }
 
