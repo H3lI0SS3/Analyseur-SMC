@@ -1,5 +1,8 @@
 // Secours Yahoo Finance quand Twelve Data est épuisé : npx tsx server/fallback.test.ts
 process.env.TWELVE_DATA_API_KEY = 'test';
+// horloge figée un mercredi : le week-end, l'app garde volontairement son cache 30 min (marché fermé), ce qui fausserait le test
+const FIXED_NOW = Date.UTC(2026, 10, 4, 9, 0);
+Date.now = () => FIXED_NOW;
 import { estimateBasis, getSeries } from './marketData';
 
 let failed = 0;
