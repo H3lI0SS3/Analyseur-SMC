@@ -120,7 +120,11 @@ export class CTraderClient {
   private seq = 0;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private idle: ReturnType<typeof setTimeout> | null = null;
-  private accountId: number | null;
+  private accountId: number | null = null;
+  private candidates: { id: number; login: number | null; broker: string | null }[] = [];
+  /** compte utilisé (numéro de login affiché chez le broker) et comptes autorisés par le jeton — aucun secret */
+  accountInfo: { login: number | null; broker: string | null } | null = null;
+  availableAccounts: { login: number | null; live: boolean; broker: string | null }[] = [];
   private symbolIds = new Map<string, number>();
   /** dernier problème rencontré (affiché dans le statut de l'app) */
   lastError: string | null = null;
@@ -132,9 +136,7 @@ export class CTraderClient {
     private cfg: CTraderConfig,
     private factory: SocketFactory = defaultFactory,
     private opts: { timeoutMs?: number; idleMs?: number; heartbeatMs?: number } = {}
-  ) {
-    this.accountId = cfg.accountId;
-  }
+  ) {}
 
   get url() {
     return `wss://${this.cfg.env}.ctraderapi.com:5036`;
@@ -190,26 +192,60 @@ export class CTraderClient {
     const sc = res?.permissionScope;
     this.scope = sc === 1 || sc === '1' || sc === 'SCOPE_TRADE' ? 'SCOPE_TRADE' : 'SCOPE_VIEW';
     if (this.scope === 'SCOPE_TRADE') console.warn('[cTrader] Jeton avec droit de trading : l’app ne l’utilise qu’en lecture, mais un jeton « accounts » (lecture seule) est plus sûr.');
-    if (this.accountId) return;
     const accounts: any[] = res?.ctidTraderAccount ?? [];
+    const login = (a: any) => (a?.traderLogin !== undefined && a?.traderLogin !== null ? Number(a.traderLogin) : null);
+    this.availableAccounts = accounts.map(a => ({ login: login(a), live: !!a.isLive, broker: a.brokerTitleShort ?? null }));
     const wantLive = this.cfg.env === 'live';
-    const acc = accounts.find(a => !!a.isLive === wantLive);
-    if (!acc) throw new CTraderError('NO_ACCOUNT', `Aucun compte ${wantLive ? 'réel' : 'démo'} autorisé pour ce jeton cTrader (vérifie CTRADER_ENV).`);
-    this.accountId = Number(acc.ctidTraderAccountId);
+    const recent = (a: any) => Math.max(Number(a.lastBalanceUpdateTimestamp ?? 0), Number(a.lastClosingDealTimestamp ?? 0));
+    const listTxt = () => this.availableAccounts.map(a => `${a.login ?? '?'} (${a.live ? 'réel' : 'démo'}${a.broker ? `, ${a.broker}` : ''})`).join(', ') || 'aucun';
+    let list = accounts.filter(a => !!a.isLive === wantLive).sort((a, b) => recent(b) - recent(a));
+    if (this.cfg.accountId) {
+      // CTRADER_ACCOUNT_ID : identifiant cTrader interne OU numéro de login affiché chez le broker
+      list = accounts.filter(a => Number(a.ctidTraderAccountId) === this.cfg.accountId || login(a) === this.cfg.accountId);
+      if (!list.length) throw new CTraderError('NO_ACCOUNT', `CTRADER_ACCOUNT_ID (${this.cfg.accountId}) ne correspond à aucun compte de ce jeton. Comptes autorisés : ${listTxt()}.`);
+    }
+    if (!list.length) throw new CTraderError('NO_ACCOUNT', `Aucun compte ${wantLive ? 'réel' : 'démo'} autorisé pour ce jeton cTrader (vérifie CTRADER_ENV). Comptes autorisés : ${listTxt()}.`);
+    this.candidates = list.map(a => ({ id: Number(a.ctidTraderAccountId), login: login(a), broker: a.brokerTitleShort ?? null }));
   }
 
+  /**
+   * Authentifie le premier compte qui l'accepte, du plus récemment actif au plus ancien : un ancien compte démo expiré
+   * reste souvent dans la liste du cTrader ID et répond « CH_CTID_TRADER_ACCOUNT_NOT_FOUND ».
+   */
   private async authAccount() {
+    const tried: string[] = [];
+    for (const c of this.candidates) {
+      try {
+        await this.authOne(c.id);
+        this.accountId = c.id;
+        this.accountInfo = { login: c.login, broker: c.broker };
+        return;
+      } catch (e: any) {
+        if (e instanceof CTraderError && /ACCOUNT_NOT_FOUND|NOT_AUTHORIZED|ACCOUNT_DISABLED|ACCOUNT_NOT_ALLOWED/i.test(e.code)) {
+          tried.push(`${c.login ?? c.id} (${e.code})`);
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw new CTraderError(
+      'NO_ACCOUNT',
+      `Aucun compte ${this.cfg.env === 'live' ? 'réel' : 'démo'} n’accepte la connexion : ${tried.join(', ')}. Vérifie que ton compte cTrader FxPro est actif, ou renseigne CTRADER_ACCOUNT_ID avec son numéro de login.`
+    );
+  }
+
+  private async authOne(id: number) {
     try {
-      await this.request(PT.ACCOUNT_AUTH_REQ, { ctidTraderAccountId: this.accountId, accessToken: this.cfg.accessToken }, PT.ACCOUNT_AUTH_RES);
+      await this.request(PT.ACCOUNT_AUTH_REQ, { ctidTraderAccountId: id, accessToken: this.cfg.accessToken }, PT.ACCOUNT_AUTH_RES);
     } catch (e: any) {
       // jeton expiré : on le renouvelle une fois avec le refresh token (en mémoire, jamais affiché ni journalisé)
-      if (!(e instanceof CTraderError) || !/TOKEN|ACCESS_DENIED|INVALID/i.test(e.code) || !this.cfg.refreshToken) throw e;
+      if (!(e instanceof CTraderError) || !/TOKEN|ACCESS_DENIED|INVALID/i.test(e.code) || !this.cfg.refreshToken || this.tokenRefreshedAt) throw e;
       const r = await this.request(PT.REFRESH_TOKEN_REQ, { refreshToken: this.cfg.refreshToken }, PT.REFRESH_TOKEN_RES);
       if (!r?.accessToken) throw e;
       this.cfg = { ...this.cfg, accessToken: r.accessToken, refreshToken: r.refreshToken || this.cfg.refreshToken };
       this.tokenRefreshedAt = Date.now();
       console.warn('[cTrader] Jeton renouvelé automatiquement. Génère un nouveau jeton et mets à jour CTRADER_ACCESS_TOKEN / CTRADER_REFRESH_TOKEN.');
-      await this.request(PT.ACCOUNT_AUTH_REQ, { ctidTraderAccountId: this.accountId, accessToken: this.cfg.accessToken }, PT.ACCOUNT_AUTH_RES);
+      await this.request(PT.ACCOUNT_AUTH_REQ, { ctidTraderAccountId: id, accessToken: this.cfg.accessToken }, PT.ACCOUNT_AUTH_RES);
     }
   }
 
@@ -345,6 +381,8 @@ export function ctraderStatus() {
     env: cfg.env,
     lastError: c.lastError,
     readOnly: c.scope ? c.scope === 'SCOPE_VIEW' : null,
+    account: c.accountInfo,
+    accounts: c.availableAccounts,
     tokenRefreshed: c.tokenRefreshedAt !== null,
   };
 }

@@ -1,5 +1,10 @@
 # Journal des versions
 
+## cTrader : choix du compte démo
+- Les comptes démo du cTrader ID sont essayés du plus récemment actif au plus ancien ; un ancien compte expiré (CH_CTID_TRADER_ACCOUNT_NOT_FOUND) est sauté.
+- CTRADER_ACCOUNT_ID accepte aussi le numéro de login FxPro.
+- Le statut indique le compte utilisé et les comptes autorisés (numéros seulement).
+
 ## 09/11/2026 — cTrader : compatibilité Node
 - Premier essai réel : l'app basculait sur Twelve Data. Cause la plus probable : le serveur AI Studio tourne sur une version de Node sans WebSocket intégré. Ajout de la bibliothèque **ws** en secours (même interface, testée contre un serveur local qui imite cTrader).
 - Le connecteur (outil « etat ») affiche maintenant l'état de cTrader (configuré, environnement, dernière erreur, lecture seule) et la version de Node, sans aucun secret.

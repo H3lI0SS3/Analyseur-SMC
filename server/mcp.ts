@@ -36,7 +36,7 @@ async function testCTrader() {
   try {
     const bars = await c.trendbars('XAU/USD', 'M15', 100);
     const last = bars[bars.length - 1];
-    return { ok: true, bougies_m15: bars.length, derniere: last ? { heure_utc: new Date(last.t).toISOString(), cloture: last.c, volume_ticks: last.v ?? null } : null, lecture_seule: c.scope === 'SCOPE_VIEW', duree_ms: Date.now() - t0 };
+    return { ok: true, bougies_m15: bars.length, derniere: last ? { heure_utc: new Date(last.t).toISOString(), cloture: last.c, volume_ticks: last.v ?? null } : null, lecture_seule: c.scope === 'SCOPE_VIEW', compte: c.accountInfo, duree_ms: Date.now() - t0 };
   } catch (e: any) {
     return { ok: false, code: e?.code ?? null, erreur: String(e?.message || e), duree_ms: Date.now() - t0 };
   }
@@ -51,7 +51,7 @@ function buildServer() {
     {
       title: 'État de l’app',
       description: 'Source des données de marché, IA disponibles et actifs suivis. tester_ctrader = true : tente une vraie connexion cTrader (lecture seule) et renvoie le résultat ou l’erreur exacte.',
-      inputSchema: { tester_ctrader: z.boolean().optional().describe('Tester la connexion cTrader maintenant') },
+      inputSchema: { tester_ctrader: z.preprocess(v => v === true || v === 'true', z.boolean()).optional().describe('Tester la connexion cTrader maintenant (true)') },
       annotations: readOnly,
     },
     async ({ tester_ctrader }) =>

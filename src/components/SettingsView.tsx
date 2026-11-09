@@ -98,7 +98,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
           <KeyRow
             name="CTRADER_CLIENT_ID · CTRADER_CLIENT_SECRET · CTRADER_ACCESS_TOKEN"
             ok={!!status?.ctrader?.configured && !(status.ctrader as any).lastError}
-            desc={`Bougies au prix FxPro via cTrader Open API, en lecture seule${status?.ctrader?.configured ? ` (compte ${(status.ctrader as any).env === 'live' ? 'réel' : 'démo'})` : ''}. Facultatifs : CTRADER_REFRESH_TOKEN, CTRADER_ENV (demo / live), CTRADER_ACCOUNT_ID`}
+            desc={`Bougies au prix FxPro via cTrader Open API, en lecture seule${status?.ctrader?.configured ? ` (compte ${(status.ctrader as any).env === 'live' ? 'réel' : 'démo'}${(status.ctrader as any).account?.login ? ` n° ${(status.ctrader as any).account.login}` : ''})` : ''}. Facultatifs : CTRADER_REFRESH_TOKEN, CTRADER_ENV (demo / live), CTRADER_ACCOUNT_ID`}
             optional
           />
           <KeyRow name="TWELVE_DATA_API_KEY" ok={status?.dataSource === 'Twelve Data' || (!!status?.ctrader?.configured && status?.dataSource !== 'Yahoo Finance')} desc="Cotations spot EUR/USD et XAU/USD (gratuit sur twelvedata.com) ; en secours si cTrader est configuré" optional />

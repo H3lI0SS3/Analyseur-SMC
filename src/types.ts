@@ -28,7 +28,7 @@ export interface Status {
   mcpEnabled?: boolean;
   accessRequired?: boolean;
   rulesVersion?: string;
-  ctrader?: { configured: false } | { configured: true; env: 'demo' | 'live'; lastError: string | null; readOnly: boolean | null; tokenRefreshed: boolean };
+  ctrader?: { configured: false } | { configured: true; env: 'demo' | 'live'; lastError: string | null; readOnly: boolean | null; tokenRefreshed: boolean; account?: { login: number | null; broker: string | null } | null; accounts?: { login: number | null; live: boolean; broker: string | null }[] };
   telegram?: boolean;
   watchConfigured?: boolean;
   pairs: PairMeta[];

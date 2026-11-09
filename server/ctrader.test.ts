@@ -8,7 +8,7 @@ const ok = (label: string, cond: boolean, info = '') => {
 };
 
 /** Serveur cTrader simulé : répond comme l'Open API JSON (port 5036). */
-function fakeServer(opts: { expiredToken?: boolean; symbols?: { symbolId: number; symbolName: string }[]; dropAfter?: number } = {}) {
+function fakeServer(opts: { expiredToken?: boolean; symbols?: { symbolId: number; symbolName: string }[]; dropAfter?: number; accounts?: any[]; deadAccounts?: number[] } = {}) {
   const sent: any[] = [];
   let tokenOk = !opts.expiredToken;
   const urls: string[] = [];
@@ -33,8 +33,10 @@ function fakeServer(opts: { expiredToken?: boolean; symbols?: { symbolId: number
           case PT.APP_AUTH_REQ:
             return msg.payload.clientSecret === 'secret' ? reply(PT.APP_AUTH_RES, {}) : reply(PT.ERROR_RES, { errorCode: 'CH_CLIENT_AUTH_FAILURE', description: 'bad secret' });
           case PT.ACCOUNTS_BY_TOKEN_REQ:
-            return reply(PT.ACCOUNTS_BY_TOKEN_RES, { accessToken: msg.payload.accessToken, permissionScope: 'SCOPE_VIEW', ctidTraderAccount: [{ ctidTraderAccountId: 999, isLive: true }, { ctidTraderAccountId: 123, isLive: false }] });
+            return reply(PT.ACCOUNTS_BY_TOKEN_RES, { accessToken: msg.payload.accessToken, permissionScope: 'SCOPE_VIEW', ctidTraderAccount: opts.accounts ?? [{ ctidTraderAccountId: 999, isLive: true }, { ctidTraderAccountId: 123, isLive: false }] });
           case PT.ACCOUNT_AUTH_REQ:
+            if (opts.deadAccounts?.includes(msg.payload.ctidTraderAccountId))
+              return reply(PT.ERROR_RES, { errorCode: 'CH_CTID_TRADER_ACCOUNT_NOT_FOUND', description: `Unable to find cTID trader account with id=${msg.payload.ctidTraderAccountId}` });
             if (!tokenOk && msg.payload.accessToken === 'old') return reply(PT.ERROR_RES, { errorCode: 'CH_ACCESS_TOKEN_INVALID', description: 'expired' });
             return reply(PT.ACCOUNT_AUTH_RES, { ctidTraderAccountId: msg.payload.ctidTraderAccountId });
           case PT.REFRESH_TOKEN_REQ:
@@ -122,6 +124,30 @@ const cfg = { clientId: 'id', clientSecret: 'secret', accessToken: 'tok', refres
   const c5 = new CTraderClient({ ...cfg, symbols: { 'XAU/USD': 'GOLD', 'EUR/USD': 'EURUSD' } }, fakeServer({ symbols: [{ symbolId: 7, symbolName: 'GOLD' }] }).factory, { heartbeatMs: 60_000 });
   ok('Nom de symbole personnalisé (GOLD)', (await c5.trendbars('XAU/USD', 'M5', 10, NOW)).length === 10);
   c5.close();
+  // comptes démo : un ancien compte expiré en tête de liste ne bloque plus la connexion
+  const accts = [
+    { ctidTraderAccountId: 22755317, isLive: false, traderLogin: 5001, brokerTitleShort: 'FxPro', lastBalanceUpdateTimestamp: NOW - 400 * 86_400_000 },
+    { ctidTraderAccountId: 999, isLive: true, traderLogin: 7001, brokerTitleShort: 'FxPro' },
+    { ctidTraderAccountId: 30001, isLive: false, traderLogin: 5002, brokerTitleShort: 'FxPro', lastBalanceUpdateTimestamp: NOW - 86_400_000 },
+    { ctidTraderAccountId: 30002, isLive: false, traderLogin: 5003, brokerTitleShort: 'FxPro', lastBalanceUpdateTimestamp: NOW - 3 * 86_400_000 },
+  ];
+  const s7 = fakeServer({ accounts: accts, deadAccounts: [30001] });
+  const c7 = new CTraderClient(cfg, s7.factory, { heartbeatMs: 60_000 });
+  const b7 = await c7.trendbars('XAU/USD', 'M5', 10, NOW);
+  const tried7 = s7.sent.filter(m => m.payloadType === PT.ACCOUNT_AUTH_REQ).map(m => m.payload.ctidTraderAccountId);
+  ok('Comptes démo essayés du plus récent au plus ancien, compte refusé sauté', b7.length === 10 && tried7.join(',') === '30001,30002', tried7.join(','));
+  ok('Statut : compte utilisé = login 5003 (FxPro), comptes listés sans secret', c7.accountInfo?.login === 5003 && c7.availableAccounts.length === 4 && !JSON.stringify(c7.availableAccounts).includes('secret'));
+  const s8 = fakeServer({ accounts: accts });
+  const c8 = new CTraderClient({ ...cfg, accountId: 5001 }, s8.factory, { heartbeatMs: 60_000 });
+  await c8.trendbars('XAU/USD', 'M5', 5, NOW);
+  ok('CTRADER_ACCOUNT_ID = numéro de login FxPro', s8.sent.find(m => m.payloadType === PT.ACCOUNT_AUTH_REQ)?.payload.ctidTraderAccountId === 22755317);
+  const c9 = new CTraderClient(cfg, fakeServer({ accounts: accts, deadAccounts: [22755317, 30001, 30002] }).factory, { heartbeatMs: 60_000 });
+  const e9 = await c9.trendbars('XAU/USD', 'M5', 5, NOW).catch(e => e);
+  ok('Aucun compte démo valide : message clair avec les logins essayés', e9 instanceof Error && /5001/.test(e9.message) && /CTRADER_ACCOUNT_ID/.test(e9.message), e9?.message);
+  const c10 = new CTraderClient({ ...cfg, accountId: 8888 }, fakeServer({ accounts: accts }).factory, { heartbeatMs: 60_000 });
+  const e10 = await c10.trendbars('XAU/USD', 'M5', 5, NOW).catch(e => e);
+  ok('CTRADER_ACCOUNT_ID inconnu : comptes autorisés listés', e10 instanceof Error && /5002/.test(e10.message), e10?.message);
+
   const c6 = new CTraderClient(cfg, () => { const w: any = { send() {}, close() {}, onopen: null, onmessage: null, onclose: null, onerror: null }; setTimeout(() => w.onerror?.(), 1); return w; }, { heartbeatMs: 60_000 });
   const e6 = await c6.trendbars('XAU/USD', 'M5', 10, NOW).catch(e => e);
   ok('Serveur injoignable : erreur explicite et nouvelle tentative possible', e6 instanceof Error && /impossible/.test(e6.message) && c6.lastError !== null);
