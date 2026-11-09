@@ -1,5 +1,10 @@
 # Journal des versions
 
+## Heure du Maroc et dépendances
+- Heure du Maroc = GMT depuis le 20/09/2026, codée dans l’app : le serveur AI Studio (base de fuseaux ancienne) affichait +1 h.
+- Volume profile : le lundi, la veille est la séance du vendredi.
+- cTrader utilise le WebSocket natif de Node 22 : dépendance « ws » retirée (package.json aligné sur le package-lock).
+
 ## cTrader : historique H1 fiable
 - Requêtes d’historique espacées (limite cTrader : 5 par seconde) et refus de fréquence réessayés.
 - Plage trop longue refusée : tranches raccourcies automatiquement.

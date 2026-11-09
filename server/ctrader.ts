@@ -9,7 +9,6 @@
 //   CTRADER_ACCOUNT_ID                          facultatif : ctidTraderAccountId (sinon premier compte de l'environnement)
 //   CTRADER_ENV                                 demo (défaut) ou live
 //   CTRADER_SYMBOL_XAU, CTRADER_SYMBOL_EUR      facultatifs : nom du symbole chez le broker (défaut XAUUSD / EURUSD)
-import NodeWS from 'ws';
 import type { Candle } from './marketData';
 
 export const PT = {
@@ -84,7 +83,9 @@ export interface SocketLike {
 export type SocketFactory = (url: string) => SocketLike;
 // WebSocket intégré à Node 22+, sinon la bibliothèque « ws » (même interface onopen / onmessage / send / close)
 const defaultFactory: SocketFactory = url => {
-  const WS = (globalThis as any).WebSocket ?? NodeWS;
+  // WebSocket natif de Node (≥ 22), aucune dépendance
+  const WS = (globalThis as any).WebSocket;
+  if (!WS) throw new CTraderError('NO_WEBSOCKET', 'WebSocket indisponible : Node 22 ou plus récent requis pour cTrader.');
   return new WS(url) as SocketLike;
 };
 

@@ -25,8 +25,9 @@ eq('Jour de trading de mer. 15/7 21:30 UTC', iso(tradingDayStart(Date.UTC(2026, 
 // Changement d'heure US (dimanche 1/11/2026) : la semaine démarre dim. 17h00 NY = 22h00 UTC
 eq('Semaine de mar. 3/11', iso(tradingWeekStart(Date.UTC(2026, 10, 3, 12))), '2026-11-01T22:00');
 eq('Semaine de jeu. 29/10', iso(tradingWeekStart(Date.UTC(2026, 9, 29, 12))), '2026-10-25T21:00');
-// Heure du Maroc (UTC+1 hors Ramadan) : 12:30 UTC = 13:30 au Maroc
-eq('Heure Maroc de 12:30 UTC le 6/11', maTime(Date.UTC(2026, 10, 6, 12, 30)), '13:30');
+// Heure du Maroc : retour définitif à GMT le 20/09/2026 (12:30 UTC = 12:30 au Maroc), quelle que soit la base de fuseaux du serveur
+eq('Heure Maroc de 12:30 UTC le 6/11', maTime(Date.UTC(2026, 10, 6, 12, 30)), '12:30');
+eq('Heure Maroc de 02:30 UTC le 20/09 (après le passage, GMT)', maTime(Date.UTC(2026, 8, 20, 2, 30)), '02:30');
 
 if (failed) {
   console.log(`\n${failed} test(s) en échec`);
