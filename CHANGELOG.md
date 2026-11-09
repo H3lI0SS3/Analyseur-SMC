@@ -1,5 +1,11 @@
 # Journal des versions
 
+## cTrader : historique H1 fiable
+- Requêtes d’historique espacées (limite cTrader : 5 par seconde) et refus de fréquence réessayés.
+- Plage trop longue refusée : tranches raccourcies automatiquement.
+- Erreurs suivies par série (M5, M15, H1) : une série qui marche n’efface plus l’erreur d’une autre.
+- Le test cTrader du connecteur vérifie M15, H1 (5000 bougies) et M5.
+
 ## cTrader : choix du compte démo
 - Les comptes démo du cTrader ID sont essayés du plus récemment actif au plus ancien ; un ancien compte expiré (CH_CTID_TRADER_ACCOUNT_NOT_FOUND) est sauté.
 - CTRADER_ACCOUNT_ID accepte aussi le numéro de login FxPro.

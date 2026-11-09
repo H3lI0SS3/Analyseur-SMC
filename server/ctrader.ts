@@ -89,10 +89,14 @@ const defaultFactory: SocketFactory = url => {
 };
 
 export class CTraderError extends Error {
-  constructor(public code: string, message: string) {
+  constructor(public code: string, message: string, public retryAfter?: number) {
     super(message);
   }
 }
+
+/** Limite cTrader : 5 requêtes d'historique par seconde. On reste sous 4 par seconde. */
+const HIST_GAP_MS = 260;
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** Barre cTrader → bougie de l'app (prix bid du broker). */
 export function toCandle(bar: any): Candle | null {
@@ -121,6 +125,11 @@ export class CTraderClient {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private idle: ReturnType<typeof setTimeout> | null = null;
   private accountId: number | null = null;
+  private histQueue: Promise<void> = Promise.resolve();
+  private lastHist = 0;
+  private chunkMs = new Map<CtTf, number>();
+  /** dernière erreur par série (« XAU/USD H1 » → message) : une série qui marche n'efface plus l'erreur d'une autre */
+  seriesErrors = new Map<string, string>();
   private candidates: { id: number; login: number | null; broker: string | null }[] = [];
   /** compte utilisé (numéro de login affiché chez le broker) et comptes autorisés par le jeton — aucun secret */
   accountInfo: { login: number | null; broker: string | null } | null = null;
@@ -149,10 +158,31 @@ export class CTraderClient {
     if (!symbolId) throw new CTraderError('SYMBOL_NOT_FOUND', `Symbole ${this.cfg.symbols[pairId] ?? pairId} introuvable chez le broker (renseigne CTRADER_SYMBOL_XAU / CTRADER_SYMBOL_EUR).`);
     const byT = new Map<number, Candle>();
     let to = now + TF_MS[tf];
-    const maxChunks = Math.ceil((count * TF_MS[tf]) / CHUNK_MS[tf]) + 4; // marge pour les week-ends
-    for (let k = 0; k < maxChunks && byT.size < count; k++) {
-      const from = to - CHUNK_MS[tf];
-      const res = await this.request(PT.GET_TRENDBARS_REQ, { ctidTraderAccountId: this.accountId, symbolId, period: PERIOD[tf], fromTimestamp: from, toTimestamp: to }, PT.GET_TRENDBARS_RES);
+    let chunk = this.chunkMs.get(tf) ?? CHUNK_MS[tf];
+    const maxChunks = Math.ceil((count * TF_MS[tf]) / chunk) + 4; // marge pour les week-ends
+    let retries = 0;
+    for (let k = 0; k < maxChunks * 4 && byT.size < count; k++) {
+      const from = to - chunk;
+      let res: any;
+      try {
+        res = await this.historical({ ctidTraderAccountId: this.accountId, symbolId, period: PERIOD[tf], fromTimestamp: from, toTimestamp: to });
+      } catch (e: any) {
+        if (!(e instanceof CTraderError) || retries >= 4) throw e;
+        if (/FREQUENCY|BLOCKED|TOO_MANY/i.test(e.code)) {
+          // trop de requêtes : on attend le délai indiqué par cTrader puis on réessaie la même tranche
+          retries++;
+          await sleep(Math.min(10_000, (e.retryAfter ?? 1) * 1000));
+          continue;
+        }
+        if (/BOUNDAR|RANGE|PERIOD|INCORRECT|INVALID_REQUEST/i.test(e.code) && chunk > 86_400_000) {
+          // plage trop longue pour cette unité de temps : tranches deux fois plus courtes (mémorisé)
+          retries++;
+          chunk = Math.max(86_400_000, Math.floor(chunk / 2));
+          this.chunkMs.set(tf, chunk);
+          continue;
+        }
+        throw e;
+      }
       for (const bar of res?.trendbar ?? []) {
         const c = toCandle(bar);
         if (c) byT.set(c.t, c);
@@ -161,6 +191,18 @@ export class CTraderClient {
     }
     this.touch();
     return [...byT.values()].sort((a, b) => a.t - b.t).slice(-count);
+  }
+
+  /** Requête d'historique espacée (file commune à toutes les unités de temps et à tous les actifs). */
+  private historical(payload: any): Promise<any> {
+    const run = this.histQueue.then(async () => {
+      const wait = this.lastHist + HIST_GAP_MS - Date.now();
+      if (wait > 0) await sleep(wait);
+      this.lastHist = Date.now();
+      return this.request(PT.GET_TRENDBARS_REQ, payload, PT.GET_TRENDBARS_RES);
+    });
+    this.histQueue = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   /** Connexion + authentification application et compte + liste des symboles (une seule fois par connexion). */
@@ -301,7 +343,8 @@ export class CTraderClient {
     if (type === PT.ERROR_RES || type === PT.COMMON_ERROR) {
       const code = String(msg.payload?.errorCode ?? 'ERROR');
       const desc = String(msg.payload?.description ?? '');
-      p.reject(new CTraderError(code, `cTrader : ${code}${desc ? ` (${desc})` : ''}`));
+      const ra = Number(msg.payload?.retryAfter);
+      p.reject(new CTraderError(code, `cTrader : ${code}${desc ? ` (${desc})` : ''}`, Number.isFinite(ra) && ra > 0 ? ra : undefined));
     } else p.resolve({ __type: type, ...(msg.payload ?? {}) });
   }
 
@@ -379,7 +422,7 @@ export function ctraderStatus() {
   return {
     configured: true as const,
     env: cfg.env,
-    lastError: c.lastError,
+    lastError: c.lastError ?? ([...c.seriesErrors.entries()].map(([k, v]) => `${k} : ${v}`).join(' · ') || null),
     readOnly: c.scope ? c.scope === 'SCOPE_VIEW' : null,
     account: c.accountInfo,
     accounts: c.availableAccounts,

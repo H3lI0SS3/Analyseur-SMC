@@ -8,7 +8,9 @@ const ok = (label: string, cond: boolean, info = '') => {
 };
 
 /** Serveur cTrader simulé : répond comme l'Open API JSON (port 5036). */
-function fakeServer(opts: { expiredToken?: boolean; symbols?: { symbolId: number; symbolName: string }[]; dropAfter?: number; accounts?: any[]; deadAccounts?: number[] } = {}) {
+function fakeServer(opts: { expiredToken?: boolean; symbols?: { symbolId: number; symbolName: string }[]; dropAfter?: number; accounts?: any[]; deadAccounts?: number[]; freqFails?: number; maxRangeMs?: number } = {}) {
+  let freqFails = opts.freqFails ?? 0;
+  const histTimes: number[] = [];
   const sent: any[] = [];
   let tokenOk = !opts.expiredToken;
   const urls: string[] = [];
@@ -46,6 +48,12 @@ function fakeServer(opts: { expiredToken?: boolean; symbols?: { symbolId: number
             return reply(PT.SYMBOLS_LIST_RES, { ctidTraderAccountId: 123, symbol: opts.symbols ?? [{ symbolId: 41, symbolName: 'XAUUSD' }, { symbolId: 1, symbolName: 'EURUSD' }] });
           case PT.GET_TRENDBARS_REQ: {
             const { fromTimestamp, toTimestamp, period } = msg.payload;
+            histTimes.push(Date.now());
+            if (freqFails > 0) {
+              freqFails--;
+              return reply(PT.ERROR_RES, { errorCode: 'REQUEST_FREQUENCY_EXCEEDED', description: 'too many', retryAfter: 0 });
+            }
+            if (opts.maxRangeMs && toTimestamp - fromTimestamp > opts.maxRangeMs) return reply(PT.ERROR_RES, { errorCode: 'INCORRECT_BOUNDARIES', description: 'range too big' });
             const step = period === 5 ? 300_000 : period === 7 ? 900_000 : 3_600_000;
             const bars = [];
             for (let t = Math.ceil(fromTimestamp / step) * step; t < toTimestamp && t <= NOW; t += step) {
@@ -64,7 +72,7 @@ function fakeServer(opts: { expiredToken?: boolean; symbols?: { symbolId: number
     setTimeout(() => ws.onopen?.(), 1);
     return ws;
   };
-  return { factory, sent, urls };
+  return { factory, sent, urls, histTimes };
 }
 
 const NOW = Date.UTC(2026, 10, 4, 9, 2);
@@ -147,6 +155,18 @@ const cfg = { clientId: 'id', clientSecret: 'secret', accessToken: 'tok', refres
   const c10 = new CTraderClient({ ...cfg, accountId: 8888 }, fakeServer({ accounts: accts }).factory, { heartbeatMs: 60_000 });
   const e10 = await c10.trendbars('XAU/USD', 'M5', 5, NOW).catch(e => e);
   ok('CTRADER_ACCOUNT_ID inconnu : comptes autorisés listés', e10 instanceof Error && /5002/.test(e10.message), e10?.message);
+
+  // limite de 5 requêtes d'historique par seconde : requêtes espacées, refus de fréquence réessayé
+  const s11 = fakeServer({ freqFails: 1 });
+  const c11 = new CTraderClient(cfg, s11.factory, { heartbeatMs: 60_000 });
+  const [h11, m11] = await Promise.all([c11.trendbars('XAU/USD', 'H1', 5000, NOW), c11.trendbars('XAU/USD', 'M15', 700, NOW)]);
+  const gaps = s11.histTimes.slice(1).map((t, i) => t - s11.histTimes[i]);
+  ok('H1 et M15 en parallèle : requêtes d’historique espacées (≤ 4 par seconde)', gaps.every(g => g >= 240), gaps.join(','));
+  ok('Refus « REQUEST_FREQUENCY_EXCEEDED » : réessayé, données complètes', h11.length === 5000 && m11.length === 700, `${h11.length} / ${m11.length}`);
+  const s12 = fakeServer({ maxRangeMs: 35 * 86_400_000 });
+  const c12 = new CTraderClient(cfg, s12.factory, { heartbeatMs: 60_000 });
+  const h12 = await c12.trendbars('XAU/USD', 'H1', 2000, NOW).catch(e => e);
+  ok('Plage trop longue pour cTrader : tranches raccourcies automatiquement', Array.isArray(h12) && h12.length === 2000, Array.isArray(h12) ? String(h12.length) : h12?.message);
 
   const c6 = new CTraderClient(cfg, () => { const w: any = { send() {}, close() {}, onopen: null, onmessage: null, onclose: null, onerror: null }; setTimeout(() => w.onerror?.(), 1); return w; }, { heartbeatMs: 60_000 });
   const e6 = await c6.trendbars('XAU/USD', 'M5', 10, NOW).catch(e => e);

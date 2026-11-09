@@ -32,14 +32,20 @@ const fail = (msg: string) => ({ content: [{ type: 'text' as const, text: msg }]
 async function testCTrader() {
   const c = getCTrader();
   if (!c) return { ok: false, erreur: 'cTrader non configuré (CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN).' };
-  const t0 = Date.now();
-  try {
-    const bars = await c.trendbars('XAU/USD', 'M15', 100);
-    const last = bars[bars.length - 1];
-    return { ok: true, bougies_m15: bars.length, derniere: last ? { heure_utc: new Date(last.t).toISOString(), cloture: last.c, volume_ticks: last.v ?? null } : null, lecture_seule: c.scope === 'SCOPE_VIEW', compte: c.accountInfo, duree_ms: Date.now() - t0 };
-  } catch (e: any) {
-    return { ok: false, code: e?.code ?? null, erreur: String(e?.message || e), duree_ms: Date.now() - t0 };
-  }
+  const one = async (tf: 'M5' | 'M15' | 'H1', n: number) => {
+    const t0 = Date.now();
+    try {
+      const bars = await c.trendbars('XAU/USD', tf, n);
+      const last = bars[bars.length - 1];
+      return { ok: true, bougies: bars.length, derniere: last ? { heure_utc: new Date(last.t).toISOString(), cloture: last.c } : null, duree_ms: Date.now() - t0 };
+    } catch (e: any) {
+      return { ok: false, code: e?.code ?? null, erreur: String(e?.message || e), duree_ms: Date.now() - t0 };
+    }
+  };
+  const m15 = await one('M15', 100);
+  const h1 = await one('H1', 5000);
+  const m5 = await one('M5', 150);
+  return { ok: m15.ok && h1.ok && m5.ok, M15: m15, H1_5000: h1, M5: m5, lecture_seule: c.scope === 'SCOPE_VIEW', compte: c.accountInfo, erreurs_series: Object.fromEntries(c.seriesErrors) };
 }
 
 function buildServer() {
