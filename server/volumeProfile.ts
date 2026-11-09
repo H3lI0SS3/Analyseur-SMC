@@ -78,9 +78,15 @@ export interface SessionProfiles {
 export function sessionProfiles(m15: Candle[], price: number, bin: number, now: number): SessionProfiles | null {
   if (!m15.some(c => (c.v ?? 0) > 0)) return null;
   const today0 = tradingDayStart(now);
-  const yest0 = tradingDayStart(today0 - 3_600_000);
   const today = volumeProfile(m15.filter(c => c.t >= today0 && c.t <= now), bin);
-  const yesterday = volumeProfile(m15.filter(c => c.t >= yest0 && c.t < today0), bin);
+  // veille = dernière séance avec du volume (le lundi : vendredi, pas le week-end)
+  let end = today0;
+  let yesterday: VolumeProfile | null = null;
+  for (let k = 0; k < 4 && !yesterday; k++) {
+    const start = tradingDayStart(end - 3_600_000);
+    yesterday = volumeProfile(m15.filter(c => c.t >= start && c.t < end), bin);
+    end = start;
+  }
   const priceVsYesterday = yesterday ? (price > yesterday.vah ? 'au-dessus' : price < yesterday.val ? 'en dessous' : 'dans') : null;
   return { today, yesterday, priceVsYesterday, bin };
 }

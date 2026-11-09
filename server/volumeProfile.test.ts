@@ -32,6 +32,13 @@ ok('Profil de la veille (journée 17h–17h New York)', !!sp.yesterday && Math.a
 ok('Profil du jour', !!sp.today && Math.abs(sp.today.poc - 4020) <= 2, String(sp.today?.poc));
 ok('Prix au-dessus de la zone de valeur de la veille', sp.priceVsYesterday === 'au-dessus');
 
+// lundi : la veille est la séance du vendredi (le week-end n'a pas de volume)
+const mon = Date.UTC(2026, 10, 9, 16, 0); // lundi 11h00 New York
+const fri = Array.from({ length: 20 }, (_, i) => ({ t: Date.UTC(2026, 10, 6, 12, 0) + i * 900_000, o: 4050, h: 4052, l: 4048, c: 4050, v: 100 }));
+const monBars = Array.from({ length: 10 }, (_, i) => ({ t: Date.UTC(2026, 10, 9, 10, 0) + i * 900_000, o: 4100, h: 4102, l: 4098, c: 4100, v: 100 }));
+const spm = sessionProfiles([...fri, ...monBars], 4100, 0.5, mon)!;
+ok('Lundi : profil de la veille = vendredi', !!spm.yesterday && Math.abs(spm.yesterday.poc - 4050) <= 2 && spm.priceVsYesterday === 'au-dessus', String(spm.yesterday?.poc));
+
 // 4. Volume lu depuis les barres cTrader
 const k = toCandle({ volume: 1234, low: 400_000_000, deltaHigh: 100_000, utcTimestampInMinutes: T / 60_000 });
 ok('Volume en ticks conservé depuis cTrader', k?.v === 1234);
