@@ -22,10 +22,12 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const tracked = (j: JournalEntry) => j.auto !== undefined;
   const [confirmReset, setConfirmReset] = useState(false);
-  const st = strategyStats(journal, undefined, rulesVersion);
-  const withP = strategyStats(journal, j => !!j.pattern, rulesVersion);
-  const withoutP = strategyStats(journal, j => j.pattern === null, rulesVersion);
-  const closed = journal.filter(j => j.rMultiple !== null && ['gagne', 'perdu', 'breakeven'].includes(j.result));
+  // les trades d'entraînement (TEST) ne comptent jamais dans la viabilité du protocole
+  const st = strategyStats(journal, j => !j.test, rulesVersion);
+  const withP = strategyStats(journal, j => !j.test && !!j.pattern, rulesVersion);
+  const withoutP = strategyStats(journal, j => !j.test && j.pattern === null, rulesVersion);
+  const tst = strategyStats(journal, j => !!j.test, rulesVersion);
+  const closed = journal.filter(j => !j.test && j.rMultiple !== null && ['gagne', 'perdu', 'breakeven'].includes(j.result));
   const wins = closed.filter(j => (j.rMultiple as number) > 0).length;
   const totalR = closed.reduce((s, j) => s + (j.rMultiple as number), 0);
   const winRate = closed.length ? Math.round((wins / closed.length) * 100) : null;
@@ -105,6 +107,13 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
             Bougies japonaises — avec figure : {withP.closed} trades{withP.avgR !== null ? `, ${withP.avgR >= 0 ? '+' : ''}${withP.avgR} R en moyenne` : ''} · sans figure : {withoutP.closed} trades{withoutP.avgR !== null ? `, ${withoutP.avgR >= 0 ? '+' : ''}${withoutP.avgR} R en moyenne` : ''}.
           </p>
         )}
+        {tst.closed + journal.filter(j => j.test).length > 0 && (
+          <p className="mt-2 rounded-lg border border-dashed border-gold/60 px-2 py-1.5 text-[11px] leading-snug text-mute">
+            Entraînement (TEST, à part) : {journal.filter(j => j.test).length} trades pris, {tst.closed} clos
+            {tst.avgR !== null ? ` · ${tst.avgR >= 0 ? '+' : ''}${tst.avgR} R en moyenne · total ${tst.totalR >= 0 ? '+' : ''}${tst.totalR} R` : ''}
+            {tst.winRate !== null ? ` · ${tst.winRate} % gagnants` : ''}.
+          </p>
+        )}
       </section>
       {expectancy !== null && (
         <p className="px-1 text-[11px] text-mute">
@@ -162,6 +171,7 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
                 <div>
                   <div className="text-sm font-semibold">
                     <span className={j.direction === 'acheter' ? 'text-up' : 'text-down'}>{j.direction === 'acheter' ? 'Achat' : 'Vente'}</span> {j.pair}
+                    {j.test && <span className="ml-1.5 rounded bg-gold px-1 py-0.5 align-middle text-[9px] font-bold text-white">TEST</span>}
                   </div>
                   <div className="text-[11px] text-mute">{localDateTime(j.createdAt)}</div>
                   <TrackBadge j={j} />

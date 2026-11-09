@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResponse, M5Execution, PipelineReport, RiskSettings, Status, Timeframe } from '../types';
-import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade, readJson, maTz } from '../lib/utils';
+import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade, readJson, maTz, TEST_RISK_PCT } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 import { splitOrders } from '../lib/desk';
 
@@ -21,7 +21,7 @@ interface Props {
   settings: RiskSettings;
   analysis: AnalysisResponse | null;
   setAnalysis: (a: AnalysisResponse | null) => void;
-  onAddJournal: (a: AnalysisResponse) => string | null;
+  onAddJournal: (a: AnalysisResponse, test?: boolean) => string | null;
   dailyBlocked: boolean;
   stats: StrategyStats;
 }
@@ -144,12 +144,12 @@ export function AnalysisPanel({ pair, status, settings, analysis, setAnalysis, o
         {error && <p className="rounded-lg bg-down/10 px-3 py-2 text-xs text-down">{error}</p>}
       </section>
 
-      {a && <div key={a.generatedAt}><Result a={a} settings={settings} stats={stats} added={added} dailyBlocked={dailyBlocked} addError={addError} onAdd={() => { const err = onAddJournal(a); setAddError(err); setAdded(!err); }} /></div>}
+      {a && <div key={a.generatedAt}><Result a={a} settings={settings} stats={stats} added={added} dailyBlocked={dailyBlocked} addError={addError} onAdd={() => { const err = onAddJournal(a); setAddError(err); setAdded(!err); }} onAddTest={() => onAddJournal(a, true)} /></div>}
     </div>
   );
 }
 
-function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { a: AnalysisResponse; settings: RiskSettings; stats: StrategyStats; added: boolean; addError: string | null; onAdd: () => void; dailyBlocked: boolean }) {
+function Result({ a, settings, stats, added, addError, onAdd, onAddTest, dailyBlocked }: { a: AnalysisResponse; settings: RiskSettings; stats: StrategyStats; added: boolean; addError: string | null; onAdd: () => void; onAddTest: () => string | null; dailyBlocked: boolean }) {
   const { engine: e, final, ai } = a;
   const dec = a.decimals;
   const plan = final.plan;
@@ -175,6 +175,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
         </section>
       )}
       {a.execution && <ExecutionCard x={a.execution} dec={dec} shift={broker.offset} />}
+      {e.training && final.signal === 'attendre' && <TrainingCard a={a} settings={settings} shift={broker.offset} onAdd={onAddTest} dailyBlocked={dailyBlocked} />}
       {a.volumeProfile && <VolumeProfileCard vp={a.volumeProfile} dec={dec} shift={broker.offset} />}
       {a.pipeline && <PipelineCard p={a.pipeline} dec={dec} />}
 
@@ -757,6 +758,47 @@ function VolumeProfileCard({ vp, dec, shift }: { vp: NonNullable<AnalysisRespons
       <p className="mt-1 text-[10px] leading-snug text-mute">
         Volume en ticks du broker (pas de volume centralisé sur le forex et l’or spot). POC = prix le plus échangé, VAH/VAL = zone de 70 % du volume. Repère seulement : il ne compte pas dans le verdict tant qu’il n’a pas été validé au backtest.
       </p>
+    </section>
+  );
+}
+
+/** Mode entraînement (TEST, compte démo) : déclencheur M15 complet mais contexte assoupli, risque 0,25 %. */
+function TrainingCard({ a, settings, shift, onAdd, dailyBlocked }: { a: AnalysisResponse; settings: RiskSettings; shift: number; onAdd: () => string | null; dailyBlocked: boolean }) {
+  const t = a.engine.training!;
+  const p = t.setup;
+  const dec = a.decimals;
+  const s = (v: number | null) => (v === null ? '—' : fmt(v + shift, dec));
+  const comm = a.costs?.commissionPerLot ?? 0;
+  const lots = lotSize(a.pair, settings.capital, TEST_RISK_PCT, p.entry, p.sl, comm, lotScale(settings.broker));
+  const long = p.direction === 'acheter';
+  const [msg, setMsg] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  return (
+    <section className="card border border-dashed border-gold/60 p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="label">Entraînement (TEST) — compte démo uniquement</div>
+        <span className={cx('rounded px-1.5 py-0.5 text-[10px] font-bold text-white', long ? 'bg-up' : 'bg-down')}>{long ? 'ACHAT TEST' : 'VENTE TEST'}</span>
+      </div>
+      <p className="text-xs leading-snug text-ink/90">
+        Balayage → displacement → CHoCH M15 présents, mais ce n’est pas un signal du protocole. Il manque : {t.missing.join(', ') || '—'}.
+      </p>
+      <div className="mt-3 grid grid-cols-4 gap-2 rounded-lg bg-card2 px-3 py-2 text-[11px]">
+        <div><div className="text-mute">{p.entryType === 'limite' ? (long ? 'Buy Limit' : 'Sell Limit') : 'Au marché'}</div><div className="num font-semibold">{s(p.entry)}</div></div>
+        <div><div className="text-mute">Stop</div><div className="num">{s(p.sl)}</div></div>
+        <div><div className="text-mute">TP1 (1:{p.rr1})</div><div className="num">{s(p.tp1)}</div></div>
+        <div><div className="text-mute">TP2{p.rr2 ? ` (1:${p.rr2})` : ''}</div><div className="num">{s(p.tp2)}</div></div>
+      </div>
+      <p className="mt-2 text-[11px] text-mute">
+        Risque fixé à {TEST_RISK_PCT} % : {lots ? `${lots} lot` : 'lot minimum trop risqué'}{p.validUntil ? ` · valable jusqu’à ${localTime(p.validUntil)}` : ''}. Résultats suivis à part dans le journal.
+      </p>
+      <button
+        disabled={done || dailyBlocked}
+        onClick={() => { const err = onAdd(); setMsg(err ?? 'Ajouté au journal (TEST) : place l’ordre toi-même sur ta démo FxPro.'); setDone(!err); }}
+        className="mt-3 w-full rounded-lg bg-gold py-2 text-[12px] font-bold text-white disabled:cursor-not-allowed disabled:bg-card2 disabled:text-mute"
+      >
+        {done ? 'Suivi dans le journal (TEST)' : dailyBlocked ? 'Perte maximale du jour atteinte' : '📌 Prendre en TEST (démo)'}
+      </button>
+      {msg && <p className="mt-1 text-center text-[11px] text-mute">{msg}</p>}
     </section>
   );
 }

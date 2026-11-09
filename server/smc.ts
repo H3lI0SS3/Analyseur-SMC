@@ -14,6 +14,13 @@ export const RULES_VERSION = '3.11';
 export const MIN_CONFLUENCES = 3; // (règles ≤ 3.6, conservé pour le laboratoire du backtest)
 /** R:R net minimal (spread et commission compris) pour qu'un plan soit exploitable. */
 export const MIN_RR = 2.5;
+/**
+ * Mode entraînement (compte démo uniquement) : signaux « TEST » pour pratiquer l'app tous les jours.
+ * Gardé : biais D1/H4, balayage → displacement → CHoCH M15, FVG/OB né de l'impulsion, annonces, rollover, choc contre le plan.
+ * Assoupli : contexte HTF, premium/discount, kill zone (facultatifs) et R:R net minimal 1:2 au lieu de 1:2,5.
+ * Ces signaux ne sont PAS le protocole : leurs résultats sont suivis à part (journal et backtest).
+ */
+export const TRAINING_MIN_RR = 2;
 /** Score minimal pour la classe A+ (en dessous : classe B, risque divisé par 2). */
 export const GRADE_A = 70;
 export const RULES_FROZEN_AT = Date.UTC(2026, 10, 6, 20, 0); // 06/11/2026 20:00 UTC (3.11 : or exécuté en M5 — CHoCH M5 dans la zone M15, ordre limite à mi-jambe, stop M5 —, EUR/USD en pause ; 3.10 : le timing s'applique à l'entrée (kill zone), balayage en session = bonus ; 3.9 : pas d'entrée au rollover, ordres limite expirés avant 16h45 NY, classe B au mieux les jours d'annonce à horaire inconnu ; 3.8 : R:R net minimal 1:2,5, double validation moteur + Gemini ; 3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
@@ -126,6 +133,8 @@ export interface EngineResult {
   grade: 'A+' | 'B' | 'C';
   signal: 'acheter' | 'vendre' | 'attendre';
   waitCondition: string | null;
+  /** signal d'entraînement (TEST, compte démo) quand le protocole complet n'est pas rempli ; null sinon */
+  training: { setup: Setup; missing: string[] } | null;
   nextNews: { t: number; currency: string; title: string } | null;
   /** annonces fortes du jour sans horaire confirmé */
   tentativeNews: string[];
@@ -1260,6 +1269,24 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     waitCondition = 'Marché fermé : analyse à revoir à la réouverture (dimanche 17h00 New York).';
   }
 
+  // ----- Mode entraînement (TEST) : déclencheur M15 complet, conditions de contexte assouplies -----
+  let training: EngineResult['training'] = null;
+  if (
+    signal === 'attendre' &&
+    trigSetup &&
+    bias !== 'neutre' &&
+    trigSetup.direction === wantDir &&
+    newsOk &&
+    !(shock && !ltfOk) &&
+    !inRollover(now) &&
+    !marketClosed(now) &&
+    (trigSetup.rr2 ?? trigSetup.rr1) >= TRAINING_MIN_RR
+  ) {
+    const missing = checklist.filter(c => c.core && !c.ok && c.key !== 'rr').map(c => c.label.replace(/^\d\. /, ''));
+    if (finalRR < MIN_RR) missing.push(`R:R net 1:${(trigSetup.rr2 ?? trigSetup.rr1).toFixed(2)} (< 1:${MIN_RR})`);
+    training = { setup: { ...trigSetup, validUntil: Math.min(now + 4 * HOUR, nextRollover(now)) }, missing };
+  }
+
   return {
     price: r(price),
     priceTime,
@@ -1278,6 +1305,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     grade,
     signal,
     waitCondition,
+    training,
     nextNews,
     tentativeNews: tentativeToday.map(e => `${e.title} (${e.currency})`),
     newsAvailable,

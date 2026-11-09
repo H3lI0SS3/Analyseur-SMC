@@ -1,4 +1,4 @@
-// Chaîne réelle : moteur sur les vraies bougies du 03/11 → exécution M5 → plan final ; EUR/USD en pause.
+// Chaîne réelle : moteur sur les vraies bougies du 03/11 → exécution M5 → plan final , EUR/USD aussi en M5.
 // npx tsx server/executionLive.test.ts
 import data from './fixtures/real-2026-11-03.json';
 import { analyze } from './smc';
@@ -66,13 +66,13 @@ ok('Au moins une étape M5 évaluée sur le signal réel', stages.some(s => !s.i
   const r = applyExecution('XAU/USD', e, final, null, t0, costs, 2);
   ok('M5 indisponibles : Attendre', r.execution?.stage === 'indisponible' && final.signal === 'attendre');
 }
-// 3. EUR/USD en pause : un signal devient Attendre, avec la raison
+// 3. EUR/USD réactivé (09/11) : exécuté en M5 comme l'or, plus de pause
 {
-  const e = at(t0); // moteur réel ; on le présente comme un signal EUR/USD pour tester la pause seule
+  const e = at(t0); // moteur réel ; on le présente comme un signal EUR/USD
   const final: any = { signal: 'vendre', plan: { ...e.setup!, origin: 'moteur' }, notes: [] };
   const r = applyExecution('EUR/USD', e, final, null, t0, costs, 2);
-  ok('EUR/USD : pas d’exécution M5', r.execution === null);
-  ok('EUR/USD en pause : signal → Attendre, raison en tête', final.signal === "attendre" && /en pause/.test(final.notes[0]) && !!r.paused, final.notes[0]?.slice(0, 80));
+  ok('EUR/USD : exécution M5 exigée (M5 indisponibles → Attendre)', r.execution?.stage === 'indisponible' && final.signal === 'attendre');
+  ok('EUR/USD : plus en pause', r.paused === null);
 }
 // 4. Sans signal, rien ne change
 {

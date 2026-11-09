@@ -72,8 +72,8 @@ const climb = [
   const m5 = [bar(0, 1, 1, 1, 1), bar(1, 1, 1, 1, 1)];
   ok('Bougie M5 en cours exclue', closedM5(m5, T0 + M5 + 60_000).length === 1);
 }
-// 9. décisions du 06/11
-ok('EUR/USD en pause', !!PAUSED_PAIRS['EUR/USD'] && !PAUSED_PAIRS['XAU/USD']);
-ok('Or exécuté en M5', M5_EXECUTION_PAIRS.has('XAU/USD') && !M5_EXECUTION_PAIRS.has('EUR/USD'));
+// 9. décisions du 09/11 : EUR/USD réactivé, les deux actifs exécutés en M5
+ok('Aucun actif en pause', !PAUSED_PAIRS['EUR/USD'] && !PAUSED_PAIRS['XAU/USD']);
+ok('Or et EUR/USD exécutés en M5', M5_EXECUTION_PAIRS.has('XAU/USD') && M5_EXECUTION_PAIRS.has('EUR/USD'));
 
 console.log('\nTous les tests d’exécution passent.');

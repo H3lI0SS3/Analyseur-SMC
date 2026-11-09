@@ -1,8 +1,8 @@
 // Backtest : rejoue le moteur bougie par bougie sur l'historique réel, sans regarder le futur,
 // puis simule chaque plan comme un trader discipliné (ordre limite expirant, stop, prises partielles).
 // Deux variantes sont mesurées en un seul passage :
-//  - « strict »  : ta règle d'origine, pas de trade sans balayage de liquidité préalable ;
-//  - « souple »  : le balayage n'est qu'un bonus de confluence.
+//  - « strict »  : le protocole complet (seuls ces signaux sont des trades réels) ;
+//  - « souple »  : protocole + signaux du mode entraînement (TEST, compte démo), pour mesurer leur fréquence et leur résultat.
 
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
 import { analyze, MIN_CONFLUENCES, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
@@ -411,17 +411,13 @@ export class BacktestRun {
 
       this.collectCandidate(eng, now, k);
 
-      const souple = eng.signal !== 'attendre' && !!eng.setup;
-      const sweepOk = !!eng.checklist.find(c => c.key === 'sweep')?.ok;
-      const optionalOk = eng.checklist.filter(c => !c.core && c.ok).length;
-      // 3.7 : le balayage fait partie du déclencheur obligatoire, les deux variantes sont identiques
-      void sweepOk; void optionalOk;
-      const strict = souple;
+      const strict = eng.signal !== 'attendre' && !!eng.setup;
+      const souple = strict || !!eng.training;
 
       for (const variant of ['strict', 'souple'] as const) {
         const take = variant === 'strict' ? strict : souple;
         if (!take || now < this.busyUntil[variant]) continue; // un seul trade à la fois par variante
-        const setup = eng.setup!;
+        const setup = variant === 'souple' && !strict ? eng.training!.setup : eng.setup!;
         const sim = simulate(setup, now, m15, k + 1, this.costs.spread);
         const r = sim.outcome === 'expiré' || sim.outcome === 'en cours' ? null : (sim.pnl - this.commUnit) / (sim.risk + this.commUnit);
         this.trades.push({
@@ -616,7 +612,7 @@ const LABELS: Record<keyof SetupFeatures, (f: SetupFeatures) => string> = {
  * Du plus précis au plus large : on garde le premier niveau qui réunit au moins 30 trades clôturés.
  */
 export function similarHistory(trades: BtTrade[], f: SetupFeatures, period: { from: number; to: number }, minTrades = 30): SimilarHistory | null {
-  const pool = trades.filter(t => t.variant === 'souple' && t.features);
+  const pool = trades.filter(t => t.variant === 'strict' && t.features);
   const levels: (keyof SetupFeatures)[][] = [
     ['direction', 'zoneKind', 'zoneTf', 'session', 'sweep', 'amd'],
     ['direction', 'zoneKind', 'zoneTf', 'session', 'sweep'],

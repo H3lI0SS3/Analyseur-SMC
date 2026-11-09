@@ -35,6 +35,8 @@ const resp = (over: any) => ({ pair: 'XAU/USD', generatedAt: KZ, final: { signal
   let next: any = resp({});
   const providers: string[] = [];
   const messages: string[] = [];
+  ok('Paires surveillées par défaut : or et EUR/USD (EUR/USD réactivé en M5)', new Watcher(async () => null).pairs.join(',') === 'EUR/USD,XAU/USD', new Watcher(async () => null).pairs.join(','));
+  let offKz = false;
   const w = new Watcher(
     async ({ provider }) => {
       providers.push(provider);
@@ -43,9 +45,10 @@ const resp = (over: any) => ({ pair: 'XAU/USD', generatedAt: KZ, final: { signal
     async html => {
       messages.push(html);
       return { ok: true };
-    }
+    },
+    () => offKz,
+    ['XAU/USD']
   );
-  ok('Paires surveillées : l’or seul (EUR/USD en pause)', w.pairs.join(',') === 'XAU/USD', w.pairs.join(','));
 
   const sat = await w.tick(Date.UTC(2026, 11, 5, 13, 0));
   ok('Samedi : rien n’est analysé', sat.skipped === 'Marché fermé.' && providers.length === 0);
@@ -74,6 +77,20 @@ const resp = (over: any) => ({ pair: 'XAU/USD', generatedAt: KZ, final: { signal
   next = resp({ execution: { stage: 'annulé', zone, message: 'Stop M15 touché.' } });
   const t4 = await w.tick(KZ + 1_500_000);
   ok('Setup annulé : pas d’alerte', t4.checked[0].alert === null && messages.length === 2);
+
+  // mode entraînement : alerte TEST, aussi hors kill zone quand la source est cTrader (gratuite)
+  const tsetup = { direction: 'acheter', entryType: 'limite', entry: 4100.5, sl: 4094.2, tp1: 4115, tp2: 4120, rr1: 2.1, rr2: 2.9, zoneId: 'M15-FVG-1', validUntil: KZ + 7_200_000 };
+  next = resp({ engine: { setup: null, training: { setup: tsetup, missing: ['Zone en discount de l’impulsion (< 50 %)'] } } });
+  const t6 = await w.tick(KZ + 1_800_000);
+  ok('Signal d’entraînement : alerte « TEST » avec entrée, stop, conditions manquantes et risque 0,25 %', t6.checked[0].alert === 'test' && /TEST entraînement/.test(messages[2]) && /Buy Limit : 4100\.50/.test(messages[2]) && /discount/.test(messages[2]) && /0,25 %/.test(messages[2]), messages[2]?.slice(0, 160));
+  await w.tick(KZ + 2_100_000);
+  ok('Même signal TEST 5 min plus tard : pas de doublon', messages.length === 3);
+  providers.length = 0;
+  const offSkip = await w.tick(Date.UTC(2026, 11, 2, 17, 0));
+  ok('Hors kill zone sans cTrader : rien n’est analysé (crédits Twelve Data)', !!offSkip.skipped && providers.length === 0);
+  offKz = true;
+  const offRun = await w.tick(Date.UTC(2026, 11, 2, 17, 0));
+  ok('Hors kill zone avec cTrader : analyse rapide sans IA (signaux TEST possibles)', offRun.skipped === null && providers.join(',') === 'none');
 
   // une erreur d'analyse ne casse pas la surveillance
   const w2 = new Watcher(async () => { throw new Error('Twelve Data indisponible'); }, async () => ({ ok: true }));

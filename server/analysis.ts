@@ -271,6 +271,8 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   if (pipeline?.status === 'INDISPONIBLE' && final.signal !== 'attendre') warnings.push(pipeline.message);
 
   if (newsCut) final.notes.push(newsCut);
+  // mode entraînement : jamais sur données douteuses, prix futures ou marché fermé
+  if (blockers.length || marketIsClosed || futuresProxy) engine.training = null;
   if (blockers.length || marketIsClosed) {
     final.signal = 'attendre';
     final.plan = futuresProxy ? null : final.plan;

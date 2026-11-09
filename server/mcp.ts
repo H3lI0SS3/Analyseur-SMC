@@ -48,6 +48,9 @@ async function testCTrader() {
   return { ok: m15.ok && h1.ok && m5.ok, M15: m15, H1_5000: h1, M5: m5, lecture_seule: c.scope === 'SCOPE_VIEW', compte: c.accountInfo, erreurs_series: Object.fromEntries(c.seriesErrors) };
 }
 
+/** Trades par jour de bourse (5 jours sur 7). */
+const perDay = (trades: number, from: number, to: number) => Number((trades / Math.max(1, ((to - from) / 86_400_000) * (5 / 7))).toFixed(2));
+
 function buildServer() {
   const server = new McpServer({ name: 'analyseur-smc', version: '2.2.0' });
   const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
@@ -155,6 +158,9 @@ function buildServer() {
           condition_attente: a.final.signal === 'attendre' ? a.final.notes[0] ?? e.waitCondition : null,
           execution_m5: a.execution ? { etape: a.execution.stage, message: a.execution.message, zone: a.execution.zone, niveau_choch: a.execution.chochLevel, ordre: a.execution.order } : null,
           actif_en_pause: a.paused,
+          signal_entrainement_test: a.engine.training
+            ? { regle: 'TEST, compte démo uniquement, risque 0,25 % : pas un signal du protocole.', plan: a.engine.training.setup, conditions_manquantes: a.engine.training.missing }
+            : null,
           volume_profile_ticks: a.volumeProfile ?? 'indisponible (volume en ticks seulement avec cTrader)',
           score_confluence: `${e.checklist.filter(c => c.ok).length}/${e.checklist.length}`,
           score_qualite: `${e.score}/100 (classe ${e.grade})`,
@@ -247,13 +253,18 @@ function buildServer() {
         periode: `${maDateTime(r.from)} → ${maDateTime(r.to)}`,
         pas_analyses: r.stepsEvaluated,
         duree_calcul_s: Math.round(r.durationMs / 1000),
-        regle_stricte_sweep_obligatoire: { resume: describeBt(r.strict), ...r.strict },
-        regle_souple_sweep_bonus: { resume: describeBt(r.souple), ...r.souple },
+        protocole_complet: { resume: describeBt(r.strict), trades_par_jour_de_bourse: perDay(r.strict.trades, r.from, r.to), ...r.strict },
+        protocole_plus_entrainement_test: {
+          regle: 'Protocole complet + signaux du mode entraînement (TEST) : déclencheur M15 complet, contexte HTF / premium-discount / kill zone facultatifs, R:R net ≥ 1:2. Exécution M15 (sans affinage M5).',
+          resume: describeBt(r.souple),
+          trades_par_jour_de_bourse: perDay(r.souple.trades, r.from, r.to),
+          ...r.souple,
+        },
         depuis_gel_des_regles: {
           date_gel: maDateTime(r.frozenFrom),
           version_regles: r.rulesVersion,
-          stricte: describeBt(r.strictForward),
-          souple: describeBt(r.soupleForward),
+          protocole: describeBt(r.strictForward),
+          protocole_plus_entrainement: describeBt(r.soupleForward),
         },
         bougies_m15: r.m15Count,
         historique_limite_par_la_source: r.limitedBySource,

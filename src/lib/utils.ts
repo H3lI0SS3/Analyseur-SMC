@@ -156,6 +156,9 @@ export async function readJson<T = any>(res: Response): Promise<T> {
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
 /** Risque à appliquer selon la classe du setup : classe B = risque divisé par deux (grille SMC). */
+/** Risque des trades d'entraînement (TEST) : 0,25 % du capital, quel que soit le réglage. */
+export const TEST_RISK_PCT = 0.25;
+
 export const riskForGrade = (riskPct: number, grade?: 'A+' | 'B' | 'C') => (grade === 'B' ? riskPct / 2 : riskPct);
 
 /** Taille au format eToro : unités (EUR ou onces), valeur exposée en $ et montant à investir selon le levier. */

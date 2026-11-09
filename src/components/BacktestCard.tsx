@@ -91,8 +91,8 @@ export function BacktestCard({ pair, settings }: Props) {
           </p>
           <div className="label">Toute la période</div>
           <div className="grid grid-cols-2 gap-2">
-            <Variant title="Sweep obligatoire (ta règle)" v={res.strict} />
-            <Variant title="Sweep en bonus" v={res.souple} />
+            <Variant title="Protocole complet" v={res.strict} />
+            <Variant title="Protocole + entraînement (TEST)" v={res.souple} />
           </div>
           {Math.min(res.strict.trades, res.souple.trades) < 100 && (
             <p className="text-[11px] leading-snug text-warn">
@@ -104,8 +104,8 @@ export function BacktestCard({ pair, settings }: Props) {
             Signaux apparus après la date où les règles ont été figées : ils n’ont pas pu influencer la conception du moteur. C’est l’équivalent d’un suivi en direct ; il se remplit semaine après semaine.
           </p>
           <div className="grid grid-cols-2 gap-2">
-            <Variant title="Sweep obligatoire" v={res.strictForward} />
-            <Variant title="Sweep en bonus" v={res.soupleForward} />
+            <Variant title="Protocole complet" v={res.strictForward} />
+            <Variant title="Protocole + entraînement (TEST)" v={res.soupleForward} />
           </div>
           {res.lab && <LabTable lab={res.lab} />}
           <details className="text-[11px] text-mute">

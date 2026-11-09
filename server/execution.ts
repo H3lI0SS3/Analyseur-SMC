@@ -7,15 +7,13 @@ import { maTime, nyParts, nyToUtc } from './time';
 
 /**
  * Actifs en pause : le moteur continue d'analyser (pour le suivi), mais aucun trade n'est proposé.
- * Décision du 06/11/2026 après le backtest sur 2 ans (règles 3.10).
+ * 06/11/2026 : EUR/USD mis en pause (−0,19 R par trade sur 2 ans en exécution M15).
+ * 09/11/2026 : EUR/USD réactivé en exécution M5 (backtest M5 : +0,34 R puis 0,00 R par trade selon la moitié) — à suivre de près.
  */
-export const PAUSED_PAIRS: Record<string, string> = {
-  'EUR/USD':
-    'EUR/USD en pause : sur 2 ans, la stratégie y perd (−0,19 R par trade sur 180 trades, sur les deux moitiés de l’historique). Les setups restent affichés pour le suivi, mais aucun trade n’est proposé.',
-};
+export const PAUSED_PAIRS: Record<string, string> = {};
 
 /** Actifs exécutés en M5 : le scénario M15 complet reste obligatoire, l'entrée se fait sur CHoCH M5 dans la zone. */
-export const M5_EXECUTION_PAIRS = new Set(['XAU/USD']);
+export const M5_EXECUTION_PAIRS = new Set(['XAU/USD', 'EUR/USD']);
 
 export type M5StageKind = 'attente_zone' | 'attente_choch' | 'ordre' | 'manqué' | 'annulé' | 'indisponible';
 

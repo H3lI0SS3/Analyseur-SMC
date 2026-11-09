@@ -9,7 +9,7 @@ import { AlertsCard } from './components/AlertsCard';
 import { TradingViewChart } from './components/TradingViewChart';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
 import { deskCheck } from './lib/desk';
-import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, sessionNow, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson } from './lib/utils';
+import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, sessionNow, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson, TEST_RISK_PCT } from './lib/utils';
 import { isTracked, strategyStats, trackJournal } from './lib/tracker';
 
 type Tab = 'analyse' | 'journal' | 'reglages';
@@ -87,9 +87,9 @@ export default function App() {
   const blocked = lossToday >= settings.dailyLossPct;
 
   /** Ajoute le trade au suivi ; renvoie un message d'erreur si on refuse (analyse périmée, doublon). */
-  const addToJournal = (a: AnalysisResponse): string | null => {
-    const p = a.final.plan;
-    if (!p) return 'Pas de plan à suivre.';
+  const addToJournal = (a: AnalysisResponse, test = false): string | null => {
+    const p = test ? a.engine.training?.setup : a.final.plan;
+    if (!p) return test ? 'Pas de signal d’entraînement à suivre.' : 'Pas de plan à suivre.';
     if (Date.now() - a.generatedAt > 10 * 60_000) return 'Analyse de plus de 10 minutes : relance l’analyse avant de prendre le trade.';
     const dup = journal.some(j => isTracked(j) && j.pair === a.pair && j.direction === p.direction && Math.abs(j.entry - p.entry) < 1e-9);
     if (dup) return 'Ce trade est déjà suivi dans le journal.';
@@ -106,8 +106,8 @@ export default function App() {
         sl: p.sl,
         tp: p.tp2 ?? p.tp1,
         rrPlanned: p.rr2 ?? p.rr1,
-        riskPct: riskForGrade(settings.riskPct, a.engine.grade),
-        lots: lotSize(a.pair, settings.capital, riskForGrade(settings.riskPct, a.engine.grade), p.entry, p.sl, costs.commissionPerLot, lotScale(settings.broker)),
+        riskPct: test ? TEST_RISK_PCT : riskForGrade(settings.riskPct, a.engine.grade),
+        lots: lotSize(a.pair, settings.capital, test ? TEST_RISK_PCT : riskForGrade(settings.riskPct, a.engine.grade), p.entry, p.sl, costs.commissionPerLot, lotScale(settings.broker)),
         result: p.entryType === 'limite' ? 'attente' : 'en_cours',
         rMultiple: null,
         note: '',
@@ -115,7 +115,7 @@ export default function App() {
         entryType: p.entryType,
         tp1: p.tp1,
         tp2: p.tp2,
-        validUntil: a.engine.setup?.validUntil,
+        validUntil: test ? a.engine.training?.setup.validUntil : a.engine.setup?.validUntil,
         spread: costs.spread,
         commissionPerLot: costs.commissionPerLot,
         contract: a.contract ?? CONTRACT[a.pair],
@@ -124,6 +124,7 @@ export default function App() {
         exitAt: null,
         rulesVersion: a.rulesVersion,
         pattern: (a.candlePatterns || []).find(cp => cp.dir === (p.direction === 'acheter' ? 'haussier' : 'baissier'))?.name ?? null,
+        ...(test ? { test: true } : {}),
       },
       ...journal,
     ]);
@@ -152,7 +153,7 @@ export default function App() {
       clearInterval(id);
     };
   }, [openCount, reloadKey]);
-  const stats = strategyStats(journal, undefined, status?.rulesVersion);
+  const stats = strategyStats(journal, j => !j.test, status?.rulesVersion);
   const [session, setSession] = useState(() => sessionNow());
   useEffect(() => {
     const id = setInterval(() => setSession(sessionNow()), 60_000);

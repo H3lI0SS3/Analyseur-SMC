@@ -190,6 +190,8 @@ export interface EngineResult {
   grade?: 'A+' | 'B' | 'C';
   signal: Signal;
   waitCondition: string | null;
+  /** signal d'entraînement (TEST, démo) : déclencheur M15 complet, contexte assoupli */
+  training?: { setup: Setup; missing: string[] } | null;
   nextNews: { t: number; currency: string; title: string } | null;
   tentativeNews?: string[];
   newsAvailable: boolean;
@@ -377,6 +379,8 @@ export interface JournalEntry {
   exitAt?: number | null;
   rulesVersion?: string;
   pattern?: string | null; // figure japonaise dans le sens du trade au moment de la prise (null = aucune)
+  /** trade du mode entraînement (TEST, compte démo) : statistiques séparées du protocole */
+  test?: boolean;
 }
 
 export interface M5Execution {

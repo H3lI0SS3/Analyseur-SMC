@@ -90,7 +90,7 @@ const setup = (p: Partial<Setup>): Setup => ({
   const strictV = res.lab.variants.find(v => v.id === 'aplus')!;
   const sum = (x: { trades: number; totalR: number }, y: { trades: number; totalR: number } | null) => ({ trades: x.trades + (y?.trades ?? 0), totalR: Number((x.totalR + (y?.totalR ?? 0)).toFixed(2)) });
   const bAll = sum(baseV.inSample, baseV.outOfSample);
-  ok('Labo : la référence reproduit le backtest actuel', bAll.trades === res.souple.trades && Math.abs(bAll.totalR - res.souple.totalR) < 0.05, `${bAll.trades} trades ${bAll.totalR} R vs ${res.souple.trades} trades ${res.souple.totalR} R`);
+  ok('Labo : la référence reproduit le backtest actuel', bAll.trades === res.strict.trades && Math.abs(bAll.totalR - res.strict.totalR) < 0.05, `${bAll.trades} trades ${bAll.totalR} R vs ${res.souple.trades} trades ${res.strict.totalR} R`);
   ok('Labo : la variante A+ prend au plus autant de trades que le backtest (1re moitié)', strictV.inSample.trades <= res.strict.trades, `${strictV.inSample.trades} ≤ ${res.strict.trades}`);
   const revealed = res.lab.variants.filter(v => v.outOfSample !== null).map(v => v.id);
   ok('Labo : 2e moitié révélée seulement pour la référence et au plus 3 variantes', revealed.includes('base') && revealed.length <= 4, revealed.join(', '));
@@ -162,7 +162,7 @@ const setup = (p: Partial<Setup>): Setup => ({
 {
   const f: SetupFeatures = { direction: 'vendre', zoneKind: 'OB', zoneTf: 'M15', session: 'Kill zone de New York', sweep: true, amd: true, premiumDiscount: true, entryType: 'limite' };
   const mk = (over: Partial<SetupFeatures>, r: number | null, i: number): BtTrade => ({
-    variant: 'souple', signalAt: i, filledAt: r === null ? null : i, exitAt: i, direction: (over.direction ?? f.direction), entry: 1, sl: 1, tp1: 1, tp2: null,
+    variant: 'strict', signalAt: i, filledAt: r === null ? null : i, exitAt: i, direction: (over.direction ?? f.direction), entry: 1, sl: 1, tp1: 1, tp2: null,
     plannedRR: 2, outcome: r === null ? 'expiré' : r > 0 ? 'gagné' : 'perdu', r, session: '', amdPhase: '', features: { ...f, ...over },
   });
   const trades: BtTrade[] = [];
@@ -189,7 +189,7 @@ const setup = (p: Partial<Setup>): Setup => ({
   ok('normCdf(1,036) ≈ 0,85', Math.abs(normCdf(1.036) - 0.85) < 0.001, `${normCdf(1.036).toFixed(4)}`);
   ok('normCdf(-1,96) ≈ 0,025', Math.abs(normCdf(-1.96) - 0.025) < 0.001);
   const f: SetupFeatures = { direction: 'vendre', zoneKind: 'OB', zoneTf: 'M15', session: 'Kill zone de Londres', sweep: true, amd: false, premiumDiscount: true, entryType: 'limite' };
-  const mk = (r: number | null, i: number): BtTrade => ({ variant: 'souple', signalAt: i, filledAt: r === null ? null : i, exitAt: i, direction: 'vendre', entry: 1, sl: 1, tp1: 1, tp2: null, plannedRR: 2, outcome: r === null ? 'expiré' : r > 0 ? 'gagné' : 'perdu', r, session: '', amdPhase: '', features: f });
+  const mk = (r: number | null, i: number): BtTrade => ({ variant: 'strict', signalAt: i, filledAt: r === null ? null : i, exitAt: i, direction: 'vendre', entry: 1, sl: 1, tp1: 1, tp2: null, plannedRR: 2, outcome: r === null ? 'expiré' : r > 0 ? 'gagné' : 'perdu', r, session: '', amdPhase: '', features: f });
   const strong = Array.from({ length: 100 }, (_, i) => mk(i % 2 ? 2.5 : -1, i)); // moyenne +0,75 R
   const weak = Array.from({ length: 100 }, (_, i) => mk(i % 4 ? -1 : 3, i)); // moyenne 0 R
   const hs = similarHistory(strong, f, { from: 0, to: 1 })!;

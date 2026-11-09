@@ -6,7 +6,7 @@ import { api, cx, localDateTime, readJson } from '../lib/utils';
 
 export interface WatchAlertView {
   id: string;
-  kind: 'ordre' | 'setup';
+  kind: 'ordre' | 'setup' | 'test';
   pair: string;
   at: number;
   title: string;
@@ -23,7 +23,7 @@ interface AlertsPayload {
 
 const FRESH_MS = 10 * 60_000;
 
-export function AlertsCard({ onAdd }: { onAdd: (a: AnalysisResponse) => string | null }) {
+export function AlertsCard({ onAdd }: { onAdd: (a: AnalysisResponse, test?: boolean) => string | null }) {
   const [data, setData] = useState<AlertsPayload | null>(null);
   const [msg, setMsg] = useState<Record<string, string>>({});
   const [, setTick] = useState(0);
@@ -67,21 +67,21 @@ export function AlertsCard({ onAdd }: { onAdd: (a: AnalysisResponse) => string |
           {recent.map(a => {
             const fresh = Date.now() - a.at < FRESH_MS;
             return (
-              <li key={a.id} className={cx('rounded-lg p-3 text-[12px]', a.kind === 'ordre' ? 'border border-up/40 bg-up/5' : 'bg-card2')}>
+              <li key={a.id} className={cx('rounded-lg p-3 text-[12px]', a.kind === 'ordre' ? 'border border-up/40 bg-up/5' : a.kind === 'test' ? 'border border-dashed border-gold/60 bg-card2' : 'bg-card2')}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold">{a.title}</span>
                   <span className="shrink-0 text-[10px] text-mute">{localDateTime(a.at)}</span>
                 </div>
                 <p className="mt-1 whitespace-pre-line text-[11px] leading-snug text-ink/80">{a.text.split('\n').slice(1).join('\n')}</p>
                 {!a.telegram.ok && a.telegram.error && <p className="mt-1 text-[10px] text-warn">{a.telegram.error}</p>}
-                {a.kind === 'ordre' && (
+                {(a.kind === 'ordre' || a.kind === 'test') && (
                   <div className="mt-2">
                     <button
                       disabled={!fresh}
-                      onClick={() => setMsg(m => ({ ...m, [a.id]: onAdd(a.analysis) ?? 'Ajouté au journal : place l’ordre toi-même sur FxPro.' }))}
-                      className="w-full rounded-lg bg-up py-2 text-[12px] font-bold text-bg disabled:cursor-not-allowed disabled:bg-card2 disabled:text-mute"
+                      onClick={() => setMsg(m => ({ ...m, [a.id]: onAdd(a.analysis, a.kind === 'test') ?? (a.kind === 'test' ? 'Ajouté au journal (TEST) : place l’ordre toi-même sur ta démo FxPro.' : 'Ajouté au journal : place l’ordre toi-même sur FxPro.') }))}
+                      className={cx('w-full rounded-lg py-2 text-[12px] font-bold disabled:cursor-not-allowed disabled:bg-card2 disabled:text-mute', a.kind === 'test' ? 'bg-gold text-white' : 'bg-up text-bg')}
                     >
-                      {fresh ? 'Ajouter au journal' : 'Alerte de plus de 10 min : relance l’analyse'}
+                      {fresh ? (a.kind === 'test' ? 'Ajouter au journal (TEST)' : 'Ajouter au journal') : 'Alerte de plus de 10 min : relance l’analyse'}
                     </button>
                     {msg[a.id] && <p className="mt-1 text-center text-[11px] text-mute">{msg[a.id]}</p>}
                   </div>

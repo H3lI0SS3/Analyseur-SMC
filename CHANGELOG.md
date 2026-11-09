@@ -1,5 +1,12 @@
 # Journal des versions
 
+## EUR/USD réactivé et mode entraînement (TEST)
+- EUR/USD réactivé, exécuté en M5 comme l’or (même règle que le backtest).
+- Mode entraînement (compte démo) : quand le déclencheur M15 est complet (balayage → displacement → CHoCH, FVG/OB de l’impulsion) mais que le contexte HTF, le premium/discount ou la kill zone manque, ou que le R:R net est entre 1:2 et 1:2,5, l’app propose un signal « TEST » (carte dédiée, alerte Telegram 🧪, risque 0,25 %).
+- Journal : trades TEST marqués et comptés à part ; ils n’entrent jamais dans la viabilité du protocole.
+- Surveillance : hors kill zone, analyse rapide sans IA si la source est cTrader (gratuite), pour les signaux TEST.
+- Backtest : la 2e variante mesure « protocole + entraînement » (fréquence par jour de bourse et résultat en R).
+
 ## Heure du Maroc et dépendances
 - Heure du Maroc = GMT depuis le 20/09/2026, codée dans l’app : le serveur AI Studio (base de fuseaux ancienne) affichait +1 h.
 - Volume profile : le lundi, la veille est la séance du vendredi.

@@ -23,7 +23,7 @@ export interface PairSnapshot {
 
 export function exportTrades(trades: BtTrade[]): string {
   return trades
-    .filter(t => t.variant === 'souple' && t.features)
+    .filter(t => t.variant === 'strict' && t.features)
     .map(t => {
       const f = t.features;
       const s = Math.max(0, SESSIONS.indexOf(f.session));
@@ -50,7 +50,7 @@ export function importTrades(rows: string): BtTrade[] {
     const direction = d === 'a' ? 'acheter' : 'vendre';
     const session = SESSIONS[Number(s)] ?? SESSIONS[0];
     return {
-      variant: 'souple',
+      variant: 'strict',
       signalAt: i,
       filledAt: f === '1' ? i : null,
       exitAt: null,

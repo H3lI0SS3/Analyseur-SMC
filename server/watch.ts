@@ -3,6 +3,7 @@
 // Moteur principal + exécution M5 (règles en direct). Aucun ordre n'est passé : on prévient, le trader décide.
 import { PAIRS } from './marketData';
 import { PAUSED_PAIRS, killzoneStart } from './execution';
+import { getCTrader } from './ctrader';
 import { marketClosed, maTime } from './time';
 import { esc, sendTelegram } from './telegram';
 
@@ -11,7 +12,7 @@ export type NotifyFn = (html: string) => Promise<{ ok: boolean; error?: string }
 
 export interface WatchAlert {
   id: string;
-  kind: 'ordre' | 'setup';
+  kind: 'ordre' | 'setup' | 'test';
   pair: string;
   at: number;
   title: string;
@@ -39,18 +40,22 @@ export class Watcher {
 
   constructor(
     private analyze: AnalyzeFn,
-    private notify: NotifyFn = sendTelegram
+    private notify: NotifyFn = sendTelegram,
+    /** hors kill zone, on cherche quand même les signaux d'entraînement si la source est gratuite (cTrader) */
+    private offKillzone: () => boolean = () => !!getCTrader(),
+    private onlyPairs?: string[]
   ) {}
 
-  /** Paires surveillées : toutes celles qui ne sont pas en pause (aujourd'hui l'or). */
+  /** Paires surveillées : toutes celles qui ne sont pas en pause. */
   get pairs() {
-    return Object.keys(PAIRS).filter(p => !PAUSED_PAIRS[p]);
+    return (this.onlyPairs ?? Object.keys(PAIRS)).filter(p => !PAUSED_PAIRS[p]);
   }
 
   async tick(now = Date.now()): Promise<TickResult> {
     const result: TickResult = { at: now, skipped: null, checked: [] };
     if (marketClosed(now)) result.skipped = 'Marché fermé.';
-    else if (killzoneStart(now) === null) result.skipped = 'Hors kill zone (Londres 02–05 h, New York 07–10 h, heure de New York) : aucune entrée possible.';
+    else if (killzoneStart(now) === null && !this.offKillzone())
+      result.skipped = 'Hors kill zone (Londres 02–05 h, New York 07–10 h, heure de New York) : aucune entrée possible.';
     if (result.skipped) {
       this.lastTick = result;
       return result;
@@ -87,12 +92,15 @@ export class Watcher {
     } else if (x && (x.stage === 'attente_zone' || x.stage === 'attente_choch') && plan) {
       kind = 'setup';
       key = `setup|${a.pair}|${plan.direction}|${x.zone.bottom}|${x.zone.top}`;
+    } else if (a?.final?.signal === 'attendre' && a?.engine?.training?.setup) {
+      kind = 'test';
+      key = `test|${a.pair}|${a.engine.training.setup.direction}|${a.engine.training.setup.zoneId}`;
     }
     if (!kind || this.sent.has(key)) return null;
     this.sent.set(key, now);
     const dec = PAIRS[a.pair]?.decimals ?? 2;
     const f = (v: number | null | undefined) => (v === null || v === undefined ? '—' : Number(v).toFixed(dec));
-    const dir = plan.direction === 'acheter' ? 'ACHAT' : 'VENTE';
+    const dir = (plan ?? a.engine?.training?.setup)?.direction === 'acheter' ? 'ACHAT' : 'VENTE';
     let title: string;
     let lines: string[];
     if (kind === 'ordre') {
@@ -105,6 +113,19 @@ export class Watcher {
         until ? `Valable jusqu'à ${maTime(until)} (heure du Maroc)` : '',
         x?.message ? `\n${x.message}` : '',
         `\nOuvre l'app pour la taille de lot et le ticket, vérifie le prix sur FxPro, puis décide. Rien n'est passé automatiquement.`,
+      ];
+    } else if (kind === 'test') {
+      const t = a.engine.training;
+      const p = t.setup;
+      const tdir = p.direction === 'acheter' ? 'ACHAT' : 'VENTE';
+      title = `🧪 TEST entraînement — ${tdir} ${a.pair} (démo uniquement)`;
+      lines = [
+        `Ordre ${p.direction === 'acheter' ? 'Buy' : 'Sell'} ${p.entryType === 'limite' ? 'Limit' : 'au marché'} : ${f(p.entry)}`,
+        `Stop : ${f(p.sl)}`,
+        `TP1 : ${f(p.tp1)} (1:${p.rr1 ?? '—'})${p.tp2 !== null && p.tp2 !== undefined ? `  ·  TP2 : ${f(p.tp2)} (1:${p.rr2 ?? '—'})` : ''}`,
+        p.validUntil ? `Valable jusqu'à ${maTime(p.validUntil)} (heure du Maroc)` : '',
+        `\nPas un signal du protocole. Il manque : ${t.missing.join(', ') || '—'}.`,
+        `Risque conseillé : 0,25 %. Rien n'est passé automatiquement.`,
       ];
     } else {
       title = `🟡 ORA Trader — setup ${dir.toLowerCase()} ${a.pair} en préparation`;
