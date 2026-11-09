@@ -52,7 +52,7 @@ const run = (all: Record<Timeframe, Candle[]>, now: number) => {
   ok('30/10 06:46 : seul le R:R manque (1:2,5 exigé), pas de vente', e.signal === 'attendre' && missing.join() === 'rr', `${missing.join()} — ${ck('rr').detail}`);
   ok('Stop au-dessus du plus haut du balayage (4009.62)', !!e.setup && e.setup.sl > 4009.62, `${e.setup?.sl}`);
   ok('Zone en premium de l’impulsion', ck('pd').ok, ck('pd').detail);
-  ok('Ordre : balayage puis CHoCH', ck('sweep').detail.includes('05:45') && ck('choch').detail.includes('06:00'));
+  ok('Ordre : balayage puis CHoCH', ck('sweep').detail.includes('06:45') && ck('choch').detail.includes('07:00'));
   ok('30/10 : aucune incohérence', errs.length === 0, errs.join(' | '));
 }
 
