@@ -2,6 +2,7 @@
 // Adresse : https://<ton-app>/mcp — protégée par le secret MCP_TOKEN.
 // Lecture seule : aucun outil ne passe d'ordre chez un broker.
 
+import { ctraderStatus } from './ctrader';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -46,6 +47,9 @@ function buildServer() {
         modeles: { claude: CLAUDE_MODEL, gemini: GEMINI_MODEL },
         actifs: Object.values(PAIRS).map(p => p.id),
         heure_serveur_utc: new Date().toISOString(),
+        // aucun secret : configuré ou non, environnement, dernière erreur, lecture seule
+        ctrader: ctraderStatus(),
+        version_node: process.version,
       })
   );
 

@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 09/11/2026 — cTrader : compatibilité Node
+- Premier essai réel : l'app basculait sur Twelve Data. Cause la plus probable : le serveur AI Studio tourne sur une version de Node sans WebSocket intégré. Ajout de la bibliothèque **ws** en secours (même interface, testée contre un serveur local qui imite cTrader).
+- Le connecteur (outil « etat ») affiche maintenant l'état de cTrader (configuré, environnement, dernière erreur, lecture seule) et la version de Node, sans aucun secret.
+
 ## 07/11/2026 (nuit) — nouvelle identité visuelle
 - **Palette « lavande »** : fond clair bleuté (#F3F4FB), cartes blanches, accent indigo-violet (#5A46E0), texte indigo foncé (#1D1B3A). Police Manrope, chiffres à largeur fixe.
 - **Verdicts inchangés dans leur sens** : bandeau vert « Achat », rouge « Vente », orange « Attendre », en grand en haut de la carte du verdict.
