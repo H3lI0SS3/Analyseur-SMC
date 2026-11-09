@@ -2,7 +2,7 @@
 // Adresse : https://<ton-app>/mcp — protégée par le secret MCP_TOKEN.
 // Lecture seule : aucun outil ne passe d'ordre chez un broker.
 
-import { ctraderStatus } from './ctrader';
+import { ctraderStatus, getCTrader } from './ctrader';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -28,6 +28,20 @@ function lots(pair: string, capital: number, riskPct: number, entry: number, sl:
 const text = (obj: unknown) => ({ content: [{ type: 'text' as const, text: typeof obj === 'string' ? obj : JSON.stringify(obj, null, 1) }] });
 const fail = (msg: string) => ({ content: [{ type: 'text' as const, text: msg }], isError: true });
 
+/** Connexion cTrader réelle (lecture seule) dans la même requête : résultat ou erreur exacte, sans aucun secret. */
+async function testCTrader() {
+  const c = getCTrader();
+  if (!c) return { ok: false, erreur: 'cTrader non configuré (CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN).' };
+  const t0 = Date.now();
+  try {
+    const bars = await c.trendbars('XAU/USD', 'M15', 100);
+    const last = bars[bars.length - 1];
+    return { ok: true, bougies_m15: bars.length, derniere: last ? { heure_utc: new Date(last.t).toISOString(), cloture: last.c, volume_ticks: last.v ?? null } : null, lecture_seule: c.scope === 'SCOPE_VIEW', duree_ms: Date.now() - t0 };
+  } catch (e: any) {
+    return { ok: false, code: e?.code ?? null, erreur: String(e?.message || e), duree_ms: Date.now() - t0 };
+  }
+}
+
 function buildServer() {
   const server = new McpServer({ name: 'analyseur-smc', version: '2.2.0' });
   const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
@@ -36,12 +50,13 @@ function buildServer() {
     'etat',
     {
       title: 'État de l’app',
-      description: 'Source des données de marché, IA disponibles et actifs suivis.',
-      inputSchema: {},
+      description: 'Source des données de marché, IA disponibles et actifs suivis. tester_ctrader = true : tente une vraie connexion cTrader (lecture seule) et renvoie le résultat ou l’erreur exacte.',
+      inputSchema: { tester_ctrader: z.boolean().optional().describe('Tester la connexion cTrader maintenant') },
       annotations: readOnly,
     },
-    async () =>
+    async ({ tester_ctrader }) =>
       text({
+        ...(tester_ctrader ? { test_ctrader: await testCTrader() } : {}),
         source_donnees: dataSourceName(),
         ia_disponibles: availableProviders(),
         modeles: { claude: CLAUDE_MODEL, gemini: GEMINI_MODEL },

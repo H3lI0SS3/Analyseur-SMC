@@ -177,9 +177,11 @@ async function getRaw(pairId: string, tf: 'M15' | 'H1', maxAgeMs?: number): Prom
           const candles = await ct.trendbars(pairId, tf, tf === 'M15' ? 700 : 5000);
           if (candles.length < 60) throw new Error(`Pas assez de bougies cTrader pour ${pairId} ${tf} (${candles.length}).`);
           const res: SeriesResult = { pair: pairId, tf, candles, source: CTRADER_SOURCE, futuresProxy: false, fromStaleCache: false, fetchedAt: Date.now() };
+          ct.lastError = null;
           cache.set(key, res);
           return res;
         } catch (err) {
+          ct.lastError = `${pairId} ${tf} : ${(err as Error).message}`;
           console.warn(`[cTrader ${pairId} ${tf}] ${(err as Error).message} : bascule sur Twelve Data.`);
         }
       }
@@ -299,6 +301,7 @@ export async function getM5(pairId: string, maxAgeMs = 60_000): Promise<Candle[]
         return candles;
       }
     } catch (e: any) {
+      ct.lastError = `${pairId} M5 : ${e?.message || e}`;
       console.warn(`[cTrader M5 ${pairId}] ${e?.message || e} : bascule sur Twelve Data.`);
     }
   }
