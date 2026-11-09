@@ -50,7 +50,7 @@ export function TradingViewChart({ pair }: { pair: string }) {
       autosize: true,
       symbol: TV_SYMBOLS[pair] ?? 'OANDA:XAUUSD',
       interval,
-      timezone: 'Africa/Casablanca',
+      timezone: 'Etc/UTC', // heure du Maroc (GMT depuis le 20/09/2026)
       theme: 'light',
       style: '1',
       locale: 'fr',

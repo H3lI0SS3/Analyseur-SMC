@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResponse, M5Execution, PipelineReport, RiskSettings, Status, Timeframe } from '../types';
-import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade, readJson } from '../lib/utils';
+import { api, brokerOffset, costsFor, cx, distanceLabel, etoroSize, fmt, localDateTime, localTime, lotScale, lotSize, minLotRiskUsd, realRiskUsd, riskForGrade, readJson, maTz } from '../lib/utils';
 import type { StrategyStats } from '../lib/tracker';
 import { splitOrders } from '../lib/desk';
 
@@ -230,7 +230,7 @@ function Result({ a, settings, stats, added, addError, onAdd, dailyBlocked }: { 
           <span>
             Prix <span className="num text-ink">{fmt(e.price, dec)}</span>{' '}
             {a.livePriceAt
-              ? `en direct à ${new Date(a.livePriceAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Africa/Casablanca' })}`
+              ? `en direct à ${new Date(a.livePriceAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: maTz(a.livePriceAt) })}`
               : `à ${localTime(e.priceTime)} (prix en direct indisponible : vérifie chez ton broker)`}
           </span>
           <span>{e.session.name}</span>

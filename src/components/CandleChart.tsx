@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { AnalysisResponse, Candle, Timeframe } from '../types';
-import { api, cx, fmt, localDateTime, readJson } from '../lib/utils';
+import { api, cx, fmt, localDateTime, readJson, maTz } from '../lib/utils';
 
 interface Props {
   pair: string;
@@ -224,8 +224,8 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
               i % Math.ceil(view.length / 4) === 0 ? (
                 <text key={'t' + c.t} x={i * geom.step} y={H - 6} fontSize="10" fill="#8a8fb0">
                   {tf === 'D1' || tf === 'H4'
-                    ? new Date(c.t).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'Africa/Casablanca' })
-                    : new Date(c.t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Casablanca' })}
+                    ? new Date(c.t).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: maTz(c.t) })
+                    : new Date(c.t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: maTz(c.t) })}
                 </text>
               ) : null
             )}

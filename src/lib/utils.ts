@@ -5,13 +5,15 @@ export const fmt = (v: number | null | undefined, dec: number) =>
 
 export const timeUtc = (t: number) => new Date(t).toISOString().slice(11, 16) + ' UTC';
 
-// Toutes les heures affichées sont en heure du Maroc.
-const TZ = 'Africa/Casablanca';
+// Toutes les heures affichées sont en heure du Maroc. Le Maroc est revenu définitivement à GMT le 20/09/2026 :
+// règle codée ici pour ne pas dépendre d'une base de fuseaux pas encore à jour (navigateur ou serveur).
+const MA_GMT_SINCE = Date.UTC(2026, 8, 20, 2, 0);
+export const maTz = (t: number) => (t >= MA_GMT_SINCE ? 'UTC' : 'Africa/Casablanca');
 export const localTime = (t: number) =>
-  new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
+  new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: maTz(t) });
 
 export const localDateTime = (t: number) =>
-  new Date(t).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: TZ });
+  new Date(t).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: maTz(t) });
 
 /** Taille d'un contrat standard (1 lot) par actif. Compte supposé en USD. */
 export const CONTRACT: Record<string, number> = { 'EUR/USD': 100_000, 'XAU/USD': 100 };
