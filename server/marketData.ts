@@ -566,8 +566,10 @@ export async function getQuotes(): Promise<Record<string, QuoteInfo>> {
     Object.keys(PAIRS).map(async id => {
       try {
         const [m15s, d1] = await Promise.all([getSeries(id, 'M15'), getSeries(id, 'D1')]);
-        // prix en direct déjà récupéré par une analyse récente : réutilisé sans requête supplémentaire
-        const m15 = { ...m15s, candles: withLivePrice(m15s.candles, m15s.futuresProxy ? null : peekLivePrice(id)) };
+        // prix en direct : avec cTrader (gratuit) on le demande à chaque fois (cache 60 s) ; sinon on réutilise
+        // seulement celui d'une analyse récente, pour ne pas consommer de crédits Twelve Data
+        const live = m15s.futuresProxy ? null : getCTrader() ? await getLivePrice(id).catch(() => null) : peekLivePrice(id);
+        const m15 = { ...m15s, candles: withLivePrice(m15s.candles, live) };
         const last = m15.candles[m15.candles.length - 1];
         const today = tradingDayStart(last.t);
         const prevClose = [...d1.candles].reverse().find(c => c.t < today)?.c;
@@ -575,7 +577,8 @@ export async function getQuotes(): Promise<Record<string, QuoteInfo>> {
           price: Number(last.c.toFixed(PAIRS[id].decimals)),
           time: last.t,
           changePct: prevClose ? Number((((last.c - prevClose) / prevClose) * 100).toFixed(2)) : null,
-          stale: marketClosed(Date.now()) || Date.now() - last.t > 20 * 60_000,
+          // en retard = aucune bougie M15 terminée depuis plus de 10 min (le cache M15 dure 5 min)
+          stale: marketClosed(Date.now()) || Date.now() - (last.t + TF_MS.M15) > 10 * 60_000,
           source: m15.source,
           futuresProxy: m15.futuresProxy,
         };
