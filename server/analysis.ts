@@ -184,6 +184,10 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     engine.setup.validUntil = Math.max(now, engine.nextNews.t - 30 * 60_000);
     newsCut = `Ordre limite à annuler avant ${maTime(engine.setup.validUntil)} (heure du Maroc) : annonce forte ${engine.nextNews.title} (${engine.nextNews.currency}) à ${maTime(engine.nextNews.t)}.`;
   }
+  // même règle pour le signal d'entraînement (TEST) : jamais d'ordre ouvert pendant l'annonce
+  const tr = engine.training?.setup;
+  if (tr?.validUntil && engine.nextNews && engine.nextNews.t - 30 * 60_000 < tr.validUntil) tr.validUntil = Math.max(now, engine.nextNews.t - 30 * 60_000);
+  if (engine.training && tr?.validUntil !== undefined && tr.validUntil <= now) engine.training = null;
 
   // ----- Bougies japonaises (ebook) : calculées par le moteur, critère de confluence -----
   const candlePatterns: CandlePattern[] = futuresProxy ? [] : engine.ict.candlePatterns;
@@ -291,7 +295,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
     engine.alternatives = [];
   }
   warnings.unshift(...blockers);
-  const verdict = buildVerdict(engine, final, ai, blockers, candlePatterns, pipeline);
+  const verdict = buildVerdict(engine, final, ai, blockers, candlePatterns, pipeline, newsCut);
 
   return {
     verdict,
@@ -338,7 +342,8 @@ function buildVerdict(
   ai: AiReview | null,
   blockers: string[],
   patterns: CandlePattern[] = [],
-  pipeline: PipelineReport | null = null
+  pipeline: PipelineReport | null = null,
+  newsCut: string | null = null
 ): Verdict {
   const pour: string[] = [];
   const contre: string[] = [];
@@ -369,7 +374,8 @@ function buildVerdict(
   const long = plan?.direction === 'acheter';
   const summary = take
     ? `${long ? 'Achat' : 'Vente'} : toutes les conditions obligatoires de ta stratégie sont réunies (${engine.checklist.filter(c => c.ok).length}/${engine.checklist.length} critères, qualité ${engine.grade} ${engine.score}/100${engine.grade === 'B' ? ', risque divisé par 2' : ''}). Ordre ${plan!.entryType === 'limite' ? 'limite' : 'au marché'} à ${plan!.entry}, stop ${plan!.sl}, TP1 ${plan!.tp1}${plan!.tp2 ? `, TP2 ${plan!.tp2}` : ''}.`
-    : `On attend : ${final.notes[0] || engine.waitCondition || 'les conditions de ta stratégie ne sont pas réunies.'}`;
+    : // la vraie raison d'attendre d'abord ; l'annulation avant annonce n'est qu'une précision (sinon : « Attendre » + « ordre à annuler », incohérent)
+      `On attend : ${final.notes.find(n => n !== newsCut) || engine.waitCondition || 'les conditions de ta stratégie ne sont pas réunies.'}${newsCut ? ` ${newsCut.replace('Ordre limite à annuler', 'Si le setup se valide, ordre limite à annuler')}` : ''}`;
   const confirmation = !take || !pipeline ? '' : pipeline.status === 'VALIDÉ' ? ' Plan confirmé par le pipeline Gemini.' : ' Pipeline Gemini indisponible : plan du moteur seul, vérifie-le toi-même.';
   const action: Verdict['action'] = !take ? 'ATTENDRE' : long ? 'ACHETER' : 'VENDRE';
   return { action, threshold: VIABILITY_THRESHOLD, summary: summary + confirmation, pour, contre };
