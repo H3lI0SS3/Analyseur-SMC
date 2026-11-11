@@ -41,7 +41,12 @@ export interface FxTrade {
 }
 
 export interface FxStats {
+  /** positions clôturées (avec ou sans R) */
   closed: number;
+  /** clôturées dont le R est connu (stop connu) : base des statistiques en R */
+  withR: number;
+  /** clôturées sans R : stop introuvable, à saisir */
+  missingStop: number;
   wins: number;
   winRate: number | null;
   totalR: number;
@@ -66,7 +71,8 @@ function normCdf(x: number) {
 }
 
 export function fxStats(trades: FxTrade[]): FxStats {
-  const done = trades.filter(t => t.closedAt !== null && t.r !== null);
+  const closedAll = trades.filter(t => t.closedAt !== null);
+  const done = closedAll.filter(t => t.r !== null);
   const rs = done.map(t => t.r as number);
   const n = rs.length;
   const totalR = rs.reduce((s, r) => s + r, 0);
@@ -81,12 +87,15 @@ export function fxStats(trades: FxTrade[]): FxStats {
     ciLow = Number((avgR - 1.96 * se).toFixed(2));
     ciHigh = Number((avgR + 1.96 * se).toFixed(2));
   }
-  const wins = rs.filter(r => r > 0).length;
-  const netUsd = trades.filter(t => t.net !== null).reduce((s, t) => s + (t.net as number), 0);
+  // gagnants : selon le R quand il est connu, sinon selon le résultat net
+  const wins = closedAll.filter(t => (t.r ?? t.net ?? 0) > 0).length;
+  const netUsd = closedAll.filter(t => t.net !== null).reduce((s, t) => s + (t.net as number), 0);
   return {
-    closed: n,
+    closed: closedAll.length,
+    withR: n,
+    missingStop: closedAll.length - n,
     wins,
-    winRate: n ? Math.round((wins / n) * 100) : null,
+    winRate: closedAll.length ? Math.round((wins / closedAll.length) * 100) : null,
     totalR: Number(totalR.toFixed(2)),
     avgR: avgR === null ? null : Number(avgR.toFixed(2)),
     ciLow,
@@ -158,8 +167,19 @@ export function buildTrades(deals: any[], orders: any[], pairOf: (symbolId: numb
     const direction = long ? 'acheter' : 'vendre';
     const ann: Annotation = store.annotations[positionId] ?? {};
     const signal = matchSignal(store.signals, pair, direction, openedAt);
+    // stop posé à l'ouverture : absolu (stopLoss) ou relatif à l'entrée (relativeStopLoss, en 1/100000 de prix),
+    // sinon sur un autre ordre de la même position (stop ajouté ou modifié ensuite)
     const openOrder = opening.length ? orderById.get(String(opening[0].orderId)) : null;
-    const orderStop = num(openOrder?.stopLoss);
+    const stopOf = (o: any): number | null => {
+      if (!o) return null;
+      const abs = num(o.stopLoss);
+      if (abs !== null && abs > 0) return abs;
+      const rel = num(o.relativeStopLoss);
+      if (rel !== null && rel > 0) return long ? entry - rel / 100_000 : entry + rel / 100_000;
+      return null;
+    };
+    const orderStop =
+      stopOf(openOrder) ?? orders.filter(o => String(o.positionId) === positionId).map(stopOf).find((v): v is number => v !== null) ?? null;
     const annStop = num(ann.sl);
     const stop = annStop ?? signal?.sl ?? orderStop ?? null;
     const stopSource: FxTrade['stopSource'] = annStop !== null ? 'saisi' : signal ? 'plan' : orderStop !== null ? 'ordre' : null;
@@ -247,7 +267,12 @@ export async function getFxJournal(
   try {
     const from = now - HISTORY_DAYS * 86_400_000;
     const deals = await client.deals(from, now);
-    const orders = await client.orders(from, now).catch(() => []);
+    let ordersError: string | null = null;
+    const orders = await client.orders(from, now).catch(e => {
+      ordersError = String(e?.message || e);
+      return [];
+    });
+    if (ordersError) console.warn('[journal] ordres cTrader indisponibles (stops non lus) :', ordersError);
     const value = base(buildTrades(deals, orders, id => client.pairOfSymbol(id), data, decimals), null);
     cache = { at: now, value };
     return value;

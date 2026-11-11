@@ -55,7 +55,14 @@ ok('Sens opposé : pas de rapprochement', matchSignal([sigTest], 'EUR/USD', 'ach
 
 // statistiques
 const s = fxStats(trades.filter(t => t.kind !== 'hors'));
-ok('Stats : 1 trade clos, +1,96 R, 681,17 $', s.closed === 1 && s.totalR === 1.96 && s.netUsd === 681.17 && s.viability === null);
+ok('Stats : 1 trade clos, +1,96 R, 681,17 $', s.closed === 1 && s.withR === 1 && s.totalR === 1.96 && s.netUsd === 681.17 && s.viability === null);
+// position clôturée sans stop connu : comptée comme close, signalée, hors stats en R
+const noStop = buildTrades(deals.slice(0, 2), [], pairOf, { v: 1, signals: [], annotations: { '155532150': { kind: 'test' } } }, decimals);
+const sn = fxStats(noStop);
+ok('Sans stop : trade compté comme clos (et gagnant), R manquant signalé', noStop[0].r === null && sn.closed === 1 && sn.withR === 0 && sn.missingStop === 1 && sn.wins === 1 && sn.netUsd === 681.17);
+// stop relatif posé avec l'ordre au marché (en 1/100000 de prix)
+const rel = buildTrades(deals.slice(0, 2), [{ orderId: 11, relativeStopLoss: 348 }], pairOf, { v: 1, signals: [], annotations: {} }, decimals)[0];
+ok('Stop relatif de l’ordre (34,8 pips) → stop 1.12532, R +1,96', rel.stopSource === 'ordre' && Math.abs((rel.stop ?? 0) - 1.12532) < 1e-9 && rel.r === 1.96, `${rel.stop} ${rel.r}`);
 
 // sauvegarde Telegram (fichier épinglé)
 (async () => {

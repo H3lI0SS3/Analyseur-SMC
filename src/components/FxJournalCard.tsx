@@ -6,6 +6,8 @@ import { api, cx, localDateTime, readJson } from '../lib/utils';
 
 export interface FxStatsView {
   closed: number;
+  withR: number;
+  missingStop: number;
   wins: number;
   winRate: number | null;
   totalR: number;
@@ -136,7 +138,7 @@ export function FxJournalCard({ data, reload }: { data: FxJournalView | null; re
             </div>
             <div className="rounded-lg bg-card2 py-2">
               <div className={cx('num text-lg font-bold', s.totalR >= 0 ? 'text-up' : 'text-down')}>{sign(s.totalR)}{s.totalR} R</div>
-              <div className="text-[10px] text-mute">{s.avgR !== null ? `${sign(s.avgR)}${s.avgR} R par trade` : 'total'}</div>
+              <div className="text-[10px] text-mute">{s.avgR !== null ? `${sign(s.avgR)}${s.avgR} R par trade (${s.withR} avec stop)` : 'aucun R calculé'}</div>
             </div>
             <div className="rounded-lg bg-card2 py-2">
               <div className={cx('num text-lg font-bold', s.netUsd >= 0 ? 'text-up' : 'text-down')}>{sign(s.netUsd)}{Math.round(s.netUsd)} $</div>
@@ -146,8 +148,13 @@ export function FxJournalCard({ data, reload }: { data: FxJournalView | null; re
           <p className="mt-2 text-[11px] text-mute">
             {s.viability !== null
               ? `Viabilité : ${s.viability} % (R moyen entre ${s.ciLow} et ${s.ciHigh} à 95 %).`
-              : `${s.closed}/${s.minTrades} trades : la viabilité s’affichera à partir de ${s.minTrades} trades de l’app (protocole + TEST).`}
+              : `${s.withR}/${s.minTrades} trades avec R : la viabilité s’affichera à partir de ${s.minTrades} trades de l’app (protocole + TEST).`}
           </p>
+          {data.trades.some(t => t.closedAt && t.r === null) && (
+            <p className="mt-2 rounded-lg border border-warn/40 bg-warn/5 px-2 py-1.5 text-[11px] text-warn">
+              {data.trades.filter(t => t.closedAt && t.r === null).length} position(s) clôturée(s) sans stop connu : le R ne peut pas être calculé. Saisis le « stop prévu » sur chaque ligne, et choisis son type (Protocole, TEST ou Hors app).
+            </p>
+          )}
           <div className="mt-2 grid grid-cols-3 gap-2">
             <StatBox title="Protocole" v={data.protocole} />
             <StatBox title="TEST" v={data.test} dashed />
@@ -207,6 +214,7 @@ function TradeRow({ t, onAnnotate }: { key?: string; t: FxTradeView; onAnnotate:
         </div>
       </div>
       {t.riskUsd !== null && <div className="mt-1 text-[10px] text-mute">Risque réel : {t.riskUsd.toFixed(0)} $</div>}
+      {t.closedAt && t.r === null && <div className="mt-1 text-[10px] font-semibold text-warn">R inconnu : saisis le stop prévu ci-dessous.</div>}
       {t.gaps.map(g => (
         <div key={g} className="mt-1 text-[10px] text-warn">
           Écart avec le plan : {g}
