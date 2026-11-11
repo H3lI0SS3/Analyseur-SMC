@@ -1,5 +1,12 @@
 # Journal des versions
 
+## Journal automatique FxPro
+- Le journal lit tes positions sur ton compte cTrader (lecture seule : deals et ordres) : entrée et sortie réelles, lots, résultat net (frais et swap compris). Les mêmes sur tous tes appareils, sans saisie.
+- Chaque position est rapprochée du signal de l’app qui l’a proposée (protocole ou TEST, même actif et même sens pendant sa validité). Le R est le résultat net réel divisé par le risque réel (ton entrée → le stop du plan) ; les écarts avec le plan sont signalés.
+- Statistiques et viabilité : tous les trades de l’app (protocole + TEST), avec le détail par type ; les trades « hors app » ne comptent pas.
+- Type, stop et note modifiables ; sauvegarde persistante dans un fichier épinglé de ta conversation Telegram (le serveur AI Studio ne garde rien).
+- Outil connecteur « journal ».
+
 ## Signal TEST : validité fixe
 - La validité d’un signal TEST est ancrée sur la cassure M15 (4 h après, comme le backtest) au lieu de glisser à chaque analyse ; passé ce délai, plus de signal TEST sur ce déclencheur.
 

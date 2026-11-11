@@ -22,6 +22,8 @@ export const PT = {
   SYMBOLS_LIST_RES: 2115,
   GET_TRENDBARS_REQ: 2137,
   GET_TRENDBARS_RES: 2138,
+  DEAL_LIST_REQ: 2133,
+  DEAL_LIST_RES: 2134,
   ERROR_RES: 2142,
   TOKEN_INVALIDATED_EVENT: 2147,
   CLIENT_DISCONNECT_EVENT: 2148,
@@ -29,7 +31,12 @@ export const PT = {
   ACCOUNTS_BY_TOKEN_RES: 2150,
   REFRESH_TOKEN_REQ: 2173,
   REFRESH_TOKEN_RES: 2174,
+  ORDER_LIST_REQ: 2175,
+  ORDER_LIST_RES: 2176,
 } as const;
+
+/** Historique : l'API limite une requête de deals / d'ordres à une semaine. */
+const HISTORY_CHUNK_MS = 7 * 86_400_000;
 
 /** ProtoOATrendbarPeriod */
 export const PERIOD = { M5: 5, M15: 7, H1: 9 } as const;
@@ -194,13 +201,41 @@ export class CTraderClient {
     return [...byT.values()].sort((a, b) => a.t - b.t).slice(-count);
   }
 
+  /** Actif de l'app correspondant à un identifiant de symbole du broker (null si autre symbole). */
+  pairOfSymbol(symbolId: number): string | null {
+    for (const [pair, id] of this.symbolIds) if (id === Number(symbolId)) return pair;
+    return null;
+  }
+
+  /** Deals (exécutions) du compte entre deux dates, tranches d'une semaine, du plus ancien au plus récent. Lecture seule. */
+  async deals(from: number, to = Date.now()): Promise<any[]> {
+    await this.connect();
+    return this.history(PT.DEAL_LIST_REQ, PT.DEAL_LIST_RES, 'deal', from, to);
+  }
+
+  /** Ordres du compte entre deux dates (pour retrouver le stop posé à l'ouverture). Lecture seule. */
+  async orders(from: number, to = Date.now()): Promise<any[]> {
+    await this.connect();
+    return this.history(PT.ORDER_LIST_REQ, PT.ORDER_LIST_RES, 'order', from, to);
+  }
+
+  private async history(req: number, res: number, field: string, from: number, to: number): Promise<any[]> {
+    const out: any[] = [];
+    for (let end = to; end > from; end -= HISTORY_CHUNK_MS) {
+      const start = Math.max(from, end - HISTORY_CHUNK_MS);
+      const r = await this.historical({ ctidTraderAccountId: this.accountId, fromTimestamp: start, toTimestamp: end, maxRows: 1000 }, req, res);
+      out.push(...(r?.[field] ?? []));
+    }
+    return out;
+  }
+
   /** Requête d'historique espacée (file commune à toutes les unités de temps et à tous les actifs). */
-  private historical(payload: any): Promise<any> {
+  private historical(payload: any, req: number = PT.GET_TRENDBARS_REQ, resType: number = PT.GET_TRENDBARS_RES): Promise<any> {
     const run = this.histQueue.then(async () => {
       const wait = this.lastHist + HIST_GAP_MS - Date.now();
       if (wait > 0) await sleep(wait);
       this.lastHist = Date.now();
-      return this.request(PT.GET_TRENDBARS_REQ, payload, PT.GET_TRENDBARS_RES);
+      return this.request(req, payload, resType);
     });
     this.histQueue = run.then(() => undefined, () => undefined);
     return run;

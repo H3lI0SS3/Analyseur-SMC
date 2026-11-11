@@ -11,7 +11,9 @@ import { RULES_VERSION } from './server/smc';
 import { advanceAll, getJob, startBacktest, advanceJobAsync } from './server/backtestJobs';
 import { getWatcher } from './server/watch';
 import { sendTelegram, telegramChats, telegramConfig } from './server/telegram';
-import { ctraderStatus } from './server/ctrader';
+import { ctraderStatus, getCTrader } from './server/ctrader';
+import { getJournalStore } from './server/journalStore';
+import { getFxJournal, invalidateFxJournal } from './server/fxJournal';
 
 dotenv.config();
 
@@ -120,6 +122,20 @@ app.get('/api/alerts', (_req, res) => {
     watchConfigured: (process.env.WATCH_SECRET || '').trim().length >= 16,
     ctrader: ctraderStatus(),
   });
+});
+
+// ---------- Journal automatique (positions cTrader + signaux de l'app), commun à tous les appareils ----------
+const decimalsByPair = Object.fromEntries(Object.entries(PAIRS).map(([id, p]) => [id, p.decimals]));
+app.get('/api/journal', async (req, res) => {
+  if (req.query.refresh) invalidateFxJournal();
+  res.json(await getFxJournal(getCTrader(), getJournalStore(), decimalsByPair));
+});
+app.post('/api/journal/annotate', async (req, res) => {
+  const { positionId, kind, note, sl } = req.body ?? {};
+  if (!positionId || (kind !== undefined && !['protocole', 'test', 'hors'].includes(kind))) return res.status(400).json({ error: 'Requête invalide.' });
+  const a = await getJournalStore().annotate(String(positionId), { kind, note: typeof note === 'string' ? note : undefined, sl: sl === undefined ? undefined : sl === null || sl === '' ? null : Number(sl) });
+  invalidateFxJournal();
+  res.json({ ok: true, annotation: a });
 });
 
 // ---------- Cotations ----------

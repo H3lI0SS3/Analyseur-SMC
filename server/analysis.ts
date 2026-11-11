@@ -5,6 +5,7 @@ import { sessionProfiles } from './volumeProfile';
 import { getNews, NEWS_CURRENCIES } from './news';
 import type { CandlePattern } from './candlePatterns';
 import { auditEngine } from './audit';
+import { getJournalStore } from './journalStore';
 import { marketClosed, maTime } from './time';
 import { analyze, RULES_VERSION, type EngineResult } from './smc';
 /** Délai maximal de la relecture IA (au-delà, le prix « en direct » vieillit et l'analyse paraît bloquée). */
@@ -296,6 +297,29 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   }
   warnings.unshift(...blockers);
   const verdict = buildVerdict(engine, final, ai, blockers, candlePatterns, pipeline, newsCut);
+
+  // ----- Journal automatique : on garde la trace de chaque signal proposé (protocole ou TEST) -----
+  // pour rapprocher ensuite tes positions cTrader du plan qui les a déclenchées. Jamais bloquant.
+  if (!futuresProxy && !blockers.length) {
+    const rec = (kind: 'protocole' | 'test', p: { direction: 'acheter' | 'vendre'; entry: number; sl: number; tp1: number | null; tp2?: number | null; validUntil?: number; zoneId?: string; zoneLabel?: string }) =>
+      getJournalStore()
+        .addSignal({
+          id: `${kind}|${pair}|${p.direction}|${p.zoneId ?? p.entry}`,
+          pair,
+          kind,
+          direction: p.direction,
+          entry: p.entry,
+          sl: p.sl,
+          tp1: p.tp1 ?? null,
+          tp2: p.tp2 ?? null,
+          at: now,
+          validUntil: p.validUntil ?? null,
+          zone: p.zoneLabel ?? null,
+        })
+        .catch(() => false);
+    if (final.signal !== 'attendre' && final.plan) rec('protocole', { ...final.plan, validUntil: engine.setup?.validUntil, zoneId: engine.setup?.zoneId, zoneLabel: engine.setup?.zoneLabel } as any);
+    else if (engine.training) rec('test', engine.training.setup as any);
+  }
 
   return {
     verdict,

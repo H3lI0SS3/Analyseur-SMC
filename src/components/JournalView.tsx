@@ -22,12 +22,14 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const tracked = (j: JournalEntry) => j.auto !== undefined;
   const [confirmReset, setConfirmReset] = useState(false);
-  // les trades d'entraînement (TEST) ne comptent jamais dans la viabilité du protocole
-  const st = strategyStats(journal, j => !j.test, rulesVersion);
-  const withP = strategyStats(journal, j => !j.test && !!j.pattern, rulesVersion);
-  const withoutP = strategyStats(journal, j => !j.test && j.pattern === null, rulesVersion);
+  // tous les trades proposés par l'app comptent (protocole + TEST) : le but est de mesurer la pertinence de ses analyses ;
+  // le détail par type reste affiché pour voir lequel performe le mieux
+  const st = strategyStats(journal, undefined, rulesVersion);
+  const withP = strategyStats(journal, j => !!j.pattern, rulesVersion);
+  const withoutP = strategyStats(journal, j => j.pattern === null, rulesVersion);
   const tst = strategyStats(journal, j => !!j.test, rulesVersion);
-  const closed = journal.filter(j => !j.test && j.rMultiple !== null && ['gagne', 'perdu', 'breakeven'].includes(j.result));
+  const pro = strategyStats(journal, j => !j.test, rulesVersion);
+  const closed = journal.filter(j => j.rMultiple !== null && ['gagne', 'perdu', 'breakeven'].includes(j.result));
   const wins = closed.filter(j => (j.rMultiple as number) > 0).length;
   const totalR = closed.reduce((s, j) => s + (j.rMultiple as number), 0);
   const winRate = closed.length ? Math.round((wins / closed.length) * 100) : null;
@@ -107,12 +109,21 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
             Bougies japonaises — avec figure : {withP.closed} trades{withP.avgR !== null ? `, ${withP.avgR >= 0 ? '+' : ''}${withP.avgR} R en moyenne` : ''} · sans figure : {withoutP.closed} trades{withoutP.avgR !== null ? `, ${withoutP.avgR >= 0 ? '+' : ''}${withoutP.avgR} R en moyenne` : ''}.
           </p>
         )}
-        {tst.closed + journal.filter(j => j.test).length > 0 && (
-          <p className="mt-2 rounded-lg border border-dashed border-gold/60 px-2 py-1.5 text-[11px] leading-snug text-mute">
-            Entraînement (TEST, à part) : {journal.filter(j => j.test).length} trades pris, {tst.closed} clos
-            {tst.avgR !== null ? ` · ${tst.avgR >= 0 ? '+' : ''}${tst.avgR} R en moyenne · total ${tst.totalR >= 0 ? '+' : ''}${tst.totalR} R` : ''}
-            {tst.winRate !== null ? ` · ${tst.winRate} % gagnants` : ''}.
-          </p>
+        {journal.some(j => j.test) && (
+          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] leading-snug">
+            {[
+              { t: 'Protocole complet', v: pro },
+              { t: 'Entraînement (TEST)', v: tst },
+            ].map(({ t, v }) => (
+              <div key={t} className={cx('rounded-lg px-2 py-1.5', t.startsWith('Entra') ? 'border border-dashed border-gold/60' : 'bg-card2')}>
+                <div className="font-semibold">{t}</div>
+                <div className="text-mute">
+                  {v.closed} clos{v.avgR !== null ? ` · ${v.avgR >= 0 ? '+' : ''}${v.avgR} R moy. · total ${v.totalR >= 0 ? '+' : ''}${v.totalR} R` : ''}
+                  {v.winRate !== null ? ` · ${v.winRate} % gagnants` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </section>
       {expectancy !== null && (
@@ -125,7 +136,7 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
       <section className="card p-3">
         <div className="mb-3 flex items-center justify-between">
           <div className="label flex items-center gap-1.5">
-            <BookOpen className="h-3.5 w-3.5 text-gold" /> Journal
+            <BookOpen className="h-3.5 w-3.5 text-gold" /> Plans suivis sur cet appareil
           </div>
           <div className="flex items-center gap-1">
             <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importJson(f); e.target.value = ''; }} />

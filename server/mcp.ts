@@ -15,6 +15,8 @@ import { advanceJobAsync, finishedTrades, getJob, startBacktest } from './backte
 import { exportTrades } from './historySnapshot';
 import { describe as describeBt } from './backtest';
 import { maDateTime } from './time';
+import { getJournalStore } from './journalStore';
+import { getFxJournal } from './fxJournal';
 
 const CONTRACT: Record<string, number> = { 'EUR/USD': 100_000, 'XAU/USD': 100 };
 const PAIR_ENUM = z.enum(['EUR/USD', 'XAU/USD']);
@@ -95,6 +97,31 @@ function buildServer() {
           ])
         )
       );
+    }
+  );
+
+  server.registerTool(
+    'journal',
+    {
+      title: 'Journal automatique',
+      description: 'Positions lues sur le compte cTrader (lecture seule), rapprochées des signaux de l’app (protocole / TEST), avec résultat net, R réel et statistiques.',
+      inputSchema: {},
+      annotations: readOnly,
+    },
+    async () => {
+      const j = await getFxJournal(getCTrader(), getJournalStore(), Object.fromEntries(Object.entries(PAIRS).map(([id, p]) => [id, p.decimals])));
+      return text({
+        disponible: j.available,
+        erreur: j.error,
+        sauvegarde_persistante: j.persistent,
+        erreur_sauvegarde: j.storeError,
+        compte: j.account,
+        stats_app_protocole_plus_test: j.stats,
+        stats_protocole: j.protocole,
+        stats_test: j.test,
+        stats_hors_app: j.hors,
+        trades: j.trades.slice(0, 40).map(t => ({ ...t, ouvert: maDateTime(t.openedAt), clos: t.closedAt ? maDateTime(t.closedAt) : null })),
+      });
     }
   );
 

@@ -3,6 +3,7 @@ import { BookOpen, KeyRound, LineChart, Settings2, ShieldAlert } from 'lucide-re
 import { CandleChart } from './components/CandleChart';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { JournalView } from './components/JournalView';
+import { FxJournalCard, useFxJournal } from './components/FxJournalCard';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
 import { AlertsCard } from './components/AlertsCard';
@@ -153,7 +154,10 @@ export default function App() {
       clearInterval(id);
     };
   }, [openCount, reloadKey]);
-  const stats = strategyStats(journal, j => !j.test, status?.rulesVersion);
+  // statistiques : celles du journal FxPro automatique (positions réelles, tous appareils) dès qu'il est disponible
+  const fx = useFxJournal();
+  const localStats = strategyStats(journal, undefined, status?.rulesVersion);
+  const stats = fx.data?.available ? fx.data.stats : localStats;
   const [session, setSession] = useState(() => sessionNow());
   useEffect(() => {
     const id = setInterval(() => setSession(sessionNow()), 60_000);
@@ -311,6 +315,7 @@ export default function App() {
         )}
         {tab === 'journal' && (
           <>
+            <FxJournalCard data={fx.data} reload={fx.reload} />
             <JournalView journal={journal} setJournal={setJournal} rulesVersion={status?.rulesVersion} />
             <BacktestCard pair={pair} settings={settings} />
           </>
