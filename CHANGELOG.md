@@ -1,5 +1,8 @@
 # Journal des versions
 
+## Signal TEST : validité fixe
+- La validité d’un signal TEST est ancrée sur la cassure M15 (4 h après, comme le backtest) au lieu de glisser à chaque analyse ; passé ce délai, plus de signal TEST sur ce déclencheur.
+
 ## EUR/USD réactivé et mode entraînement (TEST)
 - EUR/USD réactivé, exécuté en M5 comme l’or (même règle que le backtest).
 - Mode entraînement (compte démo) : quand le déclencheur M15 est complet (balayage → displacement → CHoCH, FVG/OB de l’impulsion) mais que le contexte HTF, le premium/discount ou la kill zone manque, ou que le R:R net est entre 1:2 et 1:2,5, l’app propose un signal « TEST » (carte dédiée, alerte Telegram 🧪, risque 0,25 %).

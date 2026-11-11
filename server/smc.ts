@@ -1284,7 +1284,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
   ) {
     const missing = checklist.filter(c => c.core && !c.ok && c.key !== 'rr').map(c => c.label.replace(/^\d\. /, ''));
     if (finalRR < MIN_RR) missing.push(`R:R net 1:${(trigSetup.rr2 ?? trigSetup.rr1).toFixed(2)} (< 1:${MIN_RR})`);
-    training = { setup: { ...trigSetup, validUntil: Math.min(now + 4 * HOUR, nextRollover(now)) }, missing };
+    // validité ancrée sur la cassure (CHoCH/BOS M15) : 4 h après, comme dans le backtest — elle ne glisse pas à chaque analyse
+    const until = Math.min((trigger?.mss.t ?? now) + TF_MS.M15 + 4 * HOUR, nextRollover(now));
+    if (until > now) training = { setup: { ...trigSetup, validUntil: until }, missing };
   }
 
   return {
