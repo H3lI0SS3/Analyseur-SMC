@@ -134,7 +134,7 @@ export interface EngineResult {
   signal: 'acheter' | 'vendre' | 'attendre';
   waitCondition: string | null;
   /** signal d'entraînement (TEST, compte démo) quand le protocole complet n'est pas rempli ; null sinon */
-  training: { setup: Setup; missing: string[] } | null;
+  training: { setup: Setup; missing: string[]; missingKeys: string[] } | null;
   nextNews: { t: number; currency: string; title: string } | null;
   /** annonces fortes du jour sans horaire confirmé */
   tentativeNews: string[];
@@ -1282,11 +1282,16 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     !marketClosed(now) &&
     (trigSetup.rr2 ?? trigSetup.rr1) >= TRAINING_MIN_RR
   ) {
-    const missing = checklist.filter(c => c.core && !c.ok && c.key !== 'rr').map(c => c.label.replace(/^\d\. /, ''));
-    if (finalRR < MIN_RR) missing.push(`R:R net 1:${(trigSetup.rr2 ?? trigSetup.rr1).toFixed(2)} (< 1:${MIN_RR})`);
+    const failed = checklist.filter(c => c.core && !c.ok && c.key !== 'rr');
+    const missing = failed.map(c => c.label.replace(/^\d\. /, ''));
+    const missingKeys = failed.map(c => c.key);
+    if (finalRR < MIN_RR) {
+      missing.push(`R:R net 1:${(trigSetup.rr2 ?? trigSetup.rr1).toFixed(2)} (< 1:${MIN_RR})`);
+      missingKeys.push('rr');
+    }
     // validité ancrée sur la cassure (CHoCH/BOS M15) : 4 h après, comme dans le backtest — elle ne glisse pas à chaque analyse
     const until = Math.min((trigger?.mss.t ?? now) + TF_MS.M15 + 4 * HOUR, nextRollover(now));
-    if (until > now) training = { setup: { ...trigSetup, validUntil: until }, missing };
+    if (until > now) training = { setup: { ...trigSetup, validUntil: until }, missing, missingKeys };
   }
 
   return {

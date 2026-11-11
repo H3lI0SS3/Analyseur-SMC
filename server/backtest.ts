@@ -98,6 +98,8 @@ export interface BacktestResult {
   soupleForward: VariantStats;
   lastTrades: BtTrade[];
   lab: LabResult;
+  /** ventilation par condition manquante (mesure seule) */
+  breakdown?: ReturnType<typeof runBreakdown>;
   /** moteur ORA corrigé rejoué sur les mêmes bougies (si les M5 sont disponibles) */
   ora?: OraBacktest | null;
 }
@@ -449,9 +451,11 @@ export class BacktestRun {
 
   /** Enregistre chaque setup qui passe les conditions obligatoires, avec son résultat pour chaque gestion. */
   private collectCandidate(eng: EngineResult, now: number, k: number) {
-    const s = eng.setup;
+    // protocole complet, ou setup du mode entraînement (déclencheur complet, contexte assoupli) pour la ventilation
+    const full = !!eng.setup && eng.checklist.filter(c => c.core).every(c => c.ok);
+    const s = full ? eng.setup : eng.training?.setup;
     if (!s) return;
-    if (!eng.checklist.filter(c => c.core).every(c => c.ok)) return;
+    const missing = full ? [] : eng.training!.missingKeys;
     const ok = (key: string) => !!eng.checklist.find(c => c.key === key)?.ok;
     const res = {} as Candidate['res'];
     for (const mode of ['partiel', 'tp1', 'final'] as Management[]) {
@@ -483,6 +487,7 @@ export class BacktestRun {
     const [zoneTf] = s.zoneId.split('-');
     this.candidates.push({
       t: now,
+      missing,
       direction: s.direction,
       entryType: s.entryType,
       zoneTf,
@@ -535,6 +540,7 @@ export class BacktestRun {
         .sort((a, b) => b.signalAt - a.signalAt)
         .slice(0, 20),
       lab: runLab(this.candidates, this.startT, m15[m15.length - 1].t),
+      breakdown: runBreakdown(this.candidates, this.startT, m15[m15.length - 1].t),
     };
   }
 }
@@ -686,6 +692,8 @@ interface Candidate {
   ltf: boolean;
   killzone: boolean;
   rr: number;
+  /** conditions obligatoires manquantes ([] = protocole complet ; sinon setup du mode entraînement) */
+  missing: string[];
   res: Record<Management, { filledAt: number | null; exitAt: number | null; r: number | null }>;
   /** même setup avec l'entrée affinée en M5 (null si pas de bougies M5 sur cette période) */
   m5: Record<Management, { filledAt: number | null; exitAt: number | null; r: number | null }> | null;
@@ -719,7 +727,7 @@ export interface LabResult {
 // La règle de base reproduit exactement le signal actuel du moteur (règles 3.7 : toutes les étapes obligatoires,
 // déjà exigées par collectCandidate). Les variantes ajoutent des filtres par-dessus.
 const marketRule = (c: Candidate) => !(c.entryType === 'marché' && !c.ltf);
-const base = (c: Candidate) => marketRule(c);
+const base = (c: Candidate) => marketRule(c) && c.missing.length === 0;
 
 /** Liste FIGÉE à l'avance : on ne l'ajuste pas après avoir vu les résultats. */
 export const LAB_VARIANTS: { id: string; label: string; filter: (c: Candidate) => boolean; mode: Management; m5?: boolean }[] = [
@@ -740,6 +748,64 @@ export const LAB_VARIANTS: { id: string; label: string; filter: (c: Candidate) =
 
 /** Variantes dont la 2e moitié est toujours révélée : la référence et les hypothèses déclarées à l'avance. */
 const ALWAYS_REVEALED = ['base', 'm5'];
+
+/**
+ * Ventilation par condition manquante (mesure seule, aucune règle changée). Liste et critère FIGÉS avant de voir
+ * les résultats : on n'envisagera d'assouplir une condition que si la variante reste ≥ +0,2 R net par trade sur
+ * CHACUNE des deux moitiés, avec au moins 30 trades par moitié. Les deux moitiés sont toujours affichées.
+ */
+export const BREAKDOWN_CRITERION = { minAvgR: 0.2, minTradesPerHalf: 30 };
+const only = (c: Candidate, key: string) => c.missing.length === 1 && c.missing[0] === key;
+export const BREAKDOWN_VARIANTS: { id: string; label: string; filter: (c: Candidate) => boolean }[] = [
+  { id: 'protocole', label: 'Protocole complet (référence)', filter: c => c.missing.length === 0 },
+  { id: 'sans_kz', label: 'Protocole + setups à qui il manque SEULEMENT la kill zone', filter: c => c.missing.length === 0 || only(c, 'session') },
+  { id: 'sans_rr', label: 'Protocole + setups à qui il manque SEULEMENT le R:R 2,5 (R:R entre 2 et 2,5)', filter: c => c.missing.length === 0 || only(c, 'rr') },
+  { id: 'sans_pd', label: 'Protocole + setups à qui il manque SEULEMENT le premium/discount', filter: c => c.missing.length === 0 || only(c, 'pd') },
+  { id: 'sans_htf', label: 'Protocole + setups à qui il manque SEULEMENT le contexte HTF', filter: c => c.missing.length === 0 || only(c, 'htf') },
+  { id: 'kz_seul', label: 'Setups à qui il manque seulement la kill zone (seuls, sans le protocole)', filter: c => only(c, 'session') },
+  { id: 'tout_test', label: 'Protocole + tout le mode entraînement (TEST)', filter: () => true },
+];
+
+export interface BreakdownRow {
+  id: string;
+  label: string;
+  exec: 'M15' | 'M5';
+  firstHalf: LabStats;
+  secondHalf: LabStats;
+  tradesPerDay: number;
+  passes: boolean;
+}
+
+export function runBreakdown(cands: Candidate[], from: number, to: number): { criterion: string; splitAt: number; rows: BreakdownRow[] } {
+  const splitAt = from + (to - from) / 2;
+  const tradingDays = Math.max(1, ((to - from) / 86_400_000) * (5 / 7));
+  const rows: BreakdownRow[] = [];
+  for (const exec of ['M15', 'M5'] as const) {
+    if (exec === 'M5' && !cands.some(c => c.m5)) continue;
+    for (const v of BREAKDOWN_VARIANTS) {
+      let busy = 0;
+      const a: number[] = [];
+      const b: number[] = [];
+      for (const c of cands) {
+        if (c.t < busy || !marketRule(c) || !v.filter(c)) continue;
+        if (exec === 'M5' && !c.m5) continue;
+        const r = exec === 'M5' ? c.m5!.partiel : c.res.partiel;
+        busy = r.exitAt ?? (r.filledAt === null ? c.t + EXPIRY : Number.MAX_SAFE_INTEGER);
+        if (r.r === null) continue;
+        (c.t < splitAt ? a : b).push(r.r);
+      }
+      const firstHalf = labStats(a);
+      const secondHalf = labStats(b);
+      const ok = (h: LabStats) => h.trades >= BREAKDOWN_CRITERION.minTradesPerHalf && (h.avgR ?? -1) >= BREAKDOWN_CRITERION.minAvgR;
+      rows.push({ id: v.id, label: v.label, exec, firstHalf, secondHalf, tradesPerDay: Number(((a.length + b.length) / tradingDays).toFixed(2)), passes: ok(firstHalf) && ok(secondHalf) });
+    }
+  }
+  return {
+    criterion: `Critère fixé avant le test : au moins ${BREAKDOWN_CRITERION.minTradesPerHalf} trades et ≥ +${BREAKDOWN_CRITERION.minAvgR} R net par trade sur CHACUNE des deux moitiés.`,
+    splitAt,
+    rows,
+  };
+}
 
 export function labStats(rs: number[]): LabStats {
   const n = rs.length;

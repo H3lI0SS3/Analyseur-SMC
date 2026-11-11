@@ -108,6 +108,7 @@ export function BacktestCard({ pair, settings }: Props) {
             <Variant title="Protocole + entraînement (TEST)" v={res.soupleForward} />
           </div>
           {res.lab && <LabTable lab={res.lab} />}
+          {res.breakdown && <BreakdownTable b={res.breakdown} />}
           <details className="text-[11px] text-mute">
             <summary className="cursor-pointer">Hypothèses du test</summary>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
@@ -167,6 +168,49 @@ function LabTable({ lab }: { lab: NonNullable<NonNullable<BacktestJob['result']>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Ventilation par condition manquante : mesure seule, les deux moitiés sont toujours affichées. */
+function BreakdownTable({ b }: { b: NonNullable<NonNullable<BacktestJob['result']>['breakdown']> }) {
+  const fmtR = (s: LabStats) => (s.avgR !== null ? `${s.avgR >= 0 ? '+' : ''}${s.avgR.toFixed(2)} R` : '—');
+  const cls = (s: LabStats) => (s.avgR !== null ? (s.avgR > 0 ? 'text-up' : s.avgR < 0 ? 'text-down' : '') : 'text-mute');
+  return (
+    <div className="space-y-2 pt-1">
+      <div className="label">Ventilation par condition manquante</div>
+      <p className="text-[11px] leading-snug text-mute">{b.criterion} Coupure entre les moitiés : {localDateTime(b.splitAt)}.</p>
+      {(['M5', 'M15'] as const).map(exec =>
+        b.rows.some(r => r.exec === exec) ? (
+          <div key={exec} className="overflow-hidden rounded-lg border border-line">
+            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 bg-card2 px-2 py-1.5 text-[10px] uppercase tracking-wide text-mute">
+              <span>Exécution {exec}</span>
+              <span className="text-right">/ jour</span>
+              <span className="text-right">1re moitié</span>
+              <span className="text-right">2e moitié</span>
+            </div>
+            {b.rows
+              .filter(r => r.exec === exec)
+              .map(r => (
+                <div key={r.id} className={cx('grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 border-t border-line px-2 py-1.5 text-[11px]', r.passes && 'bg-up/5')}>
+                  <span className="leading-tight">
+                    {r.label}
+                    {r.passes && <span className="ml-1 text-[10px] font-semibold text-up">✓ critère</span>}
+                  </span>
+                  <span className="num text-right">{r.tradesPerDay}</span>
+                  <span className={cx('num text-right', cls(r.firstHalf))}>
+                    {fmtR(r.firstHalf)}
+                    <span className="block text-[9px] text-mute">{r.firstHalf.trades} tr.</span>
+                  </span>
+                  <span className={cx('num text-right', cls(r.secondHalf))}>
+                    {fmtR(r.secondHalf)}
+                    <span className="block text-[9px] text-mute">{r.secondHalf.trades} tr.</span>
+                  </span>
+                </div>
+              ))}
+          </div>
+        ) : null
+      )}
     </div>
   );
 }

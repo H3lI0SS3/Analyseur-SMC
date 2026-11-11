@@ -1,5 +1,9 @@
 # Journal des versions
 
+## Backtest : ventilation par condition manquante (mesure seule)
+- Le backtest mesure, en M15 et en M5, le protocole seul puis le protocole + les setups auxquels il manque UNE seule condition (kill zone, R:R 2,5, premium/discount, contexte HTF), les setups « sans kill zone » seuls, et tout le mode TEST.
+- Critère fixé avant de voir les résultats : on n'envisage d'assouplir une condition que si la variante garde au moins 30 trades et ≥ +0,2 R net par trade sur chacune des deux moitiés. Aucune règle n'est changée.
+
 ## Journal automatique FxPro
 - Le journal lit tes positions sur ton compte cTrader (lecture seule : deals et ordres) : entrée et sortie réelles, lots, résultat net (frais et swap compris). Les mêmes sur tous tes appareils, sans saisie.
 - Chaque position est rapprochée du signal de l’app qui l’a proposée (protocole ou TEST, même actif et même sens pendant sa validité). Le R est le résultat net réel divisé par le risque réel (ton entrée → le stop du plan) ; les écarts avec le plan sont signalés.

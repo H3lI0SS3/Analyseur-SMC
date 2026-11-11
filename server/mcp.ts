@@ -314,6 +314,20 @@ function buildServer() {
             deuxieme_moitie: v.outOfSample ?? 'masquée (non retenue sur la 1re moitié)',
           })),
         },
+        ventilation_par_condition_manquante: r.breakdown
+          ? {
+              critere: r.breakdown.criterion,
+              coupure_entre_les_deux_moities: maDateTime(r.breakdown.splitAt),
+              lignes: r.breakdown.rows.map(b => ({
+                variante: b.label,
+                execution: b.exec,
+                trades_par_jour_de_bourse: b.tradesPerDay,
+                premiere_moitie: b.firstHalf,
+                deuxieme_moitie: b.secondHalf,
+                passe_le_critere: b.passes,
+              })),
+            }
+          : null,
         hypotheses: r.assumptions,
         export_compact: { from: r.from, to: r.to, generatedAt: Date.now(), rulesVersion: r.rulesVersion, rows: exportTrades(finishedTrades(actif) ?? []) },
         // tous les signaux depuis le gel, y compris les ordres limite jamais exécutés (équivalent d'un suivi en direct)

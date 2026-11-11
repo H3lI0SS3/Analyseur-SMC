@@ -95,6 +95,15 @@ const setup = (p: Partial<Setup>): Setup => ({
   const revealed = res.lab.variants.filter(v => v.outOfSample !== null).map(v => v.id);
   ok('Labo : 2e moitié révélée seulement pour la référence et au plus 3 variantes', revealed.includes('base') && revealed.length <= 4, revealed.join(', '));
   ok('Labo : 11 variantes évaluées', res.lab.variants.length === 11);
+  // ventilation par condition manquante (mesure seule)
+  const bd = res.breakdown!;
+  const proto = bd.rows.find(r => r.id === 'protocole' && r.exec === 'M15')!;
+  const pSum = sum(proto.firstHalf, proto.secondHalf);
+  ok('Ventilation : la référence « protocole » = la référence du labo', pSum.trades === bAll.trades && Math.abs(pSum.totalR - bAll.totalR) < 0.05, `${pSum.trades}/${pSum.totalR} vs ${bAll.trades}/${bAll.totalR}`);
+  const all = bd.rows.find(r => r.id === 'tout_test' && r.exec === 'M15')!;
+  ok('Ventilation : 7 variantes en M15, deux moitiés toujours affichées', bd.rows.filter(r => r.exec === 'M15').length === 7 && bd.rows.every(r => !!r.firstHalf && !!r.secondHalf));
+  ok('Ventilation : « tout le mode TEST » au moins aussi fréquent que le protocole seul', all.tradesPerDay >= proto.tradesPerDay, `${all.tradesPerDay} ≥ ${proto.tradesPerDay}`);
+  ok('Ventilation : critère fixé (≥ +0,2 R et 30 trades par moitié)', /0\.2 R/.test(bd.criterion) && /30 trades/.test(bd.criterion));
   // le découpage en tranches ne doit pas changer le résultat
   const run = new BacktestRun('EUR/USD', h1.slice(-5000), m15.slice(-5000), 5, { spread: 0.0001, commissionPerLot: 7, contract: 100_000 });
   while (!run.done) run.step(137);
