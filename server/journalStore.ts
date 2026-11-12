@@ -27,6 +27,8 @@ export interface StoreData {
   v: 1;
   signals: SignalRec[];
   annotations: Record<string, Annotation>;
+  /** alertes de risque déjà envoyées (clé → heure), pour ne pas les répéter */
+  riskAlerts?: Record<string, number>;
 }
 
 const FILE_NAME = 'ora-journal.json';
@@ -84,6 +86,17 @@ export class JournalStore {
     return cur;
   }
 
+  /** Marque une alerte de risque comme envoyée ; false si elle l'était déjà. */
+  async markRiskAlert(key: string, now = Date.now()): Promise<boolean> {
+    const d = await this.get();
+    d.riskAlerts ??= {};
+    if (d.riskAlerts[key]) return false;
+    d.riskAlerts[key] = now;
+    for (const [k, t] of Object.entries(d.riskAlerts)) if (now - t > 7 * 86_400_000) delete d.riskAlerts[k];
+    this.scheduleSave();
+    return true;
+  }
+
   /** Écrit tout de suite (tests, ou avant arrêt). */
   async flush() {
     if (this.saveTimer) clearTimeout(this.saveTimer);
@@ -128,7 +141,7 @@ export class JournalStore {
     const res = await this.fetchImpl(`https://api.telegram.org/file/bot${cfg.token}/${file.file_path}`, { signal: AbortSignal.timeout(10_000) });
     const json: any = await res.json();
     if (json?.v !== 1 || !Array.isArray(json.signals)) return empty();
-    return { v: 1, signals: json.signals, annotations: json.annotations ?? {} };
+    return { v: 1, signals: json.signals, annotations: json.annotations ?? {}, riskAlerts: json.riskAlerts ?? {} };
   }
 
   private async save() {

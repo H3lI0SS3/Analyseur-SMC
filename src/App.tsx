@@ -9,7 +9,7 @@ import { BacktestCard } from './components/BacktestCard';
 import { AlertsCard } from './components/AlertsCard';
 import { TradingViewChart } from './components/TradingViewChart';
 import type { AnalysisResponse, JournalEntry, Quote, RiskSettings, Status } from './types';
-import { deskCheck } from './lib/desk';
+import { deskCheck, deskCheckFx } from './lib/desk';
 import { api, CONTRACT, costsFor, riskForGrade, cx, fmt, getAccessCode, load, loadArray, lotScale, lotSize, save, sessionNow, setAccessCode, setUnauthorizedHandler, todayLossPct, readJson, TEST_RISK_PCT } from './lib/utils';
 import { isTracked, strategyStats, trackJournal } from './lib/tracker';
 
@@ -84,7 +84,15 @@ export default function App() {
 
   const pairs = status?.pairs || FALLBACK_PAIRS;
   const meta = pairs.find(p => p.id === pair) || pairs[0];
-  const lossToday = todayLossPct(journal);
+  // compte réel (journal FxPro) : solde, politique de risque et règles du desk calculés sur tes vraies positions
+  const fx = useFxJournal();
+  const fxOk = !!fx.data?.available;
+  const eff = {
+    ...settings,
+    capital: fxOk && fx.data!.balance ? fx.data!.balance : settings.capital,
+    riskPct: fxOk ? Math.min(settings.riskPct, fx.data!.policy.protocolRiskPct) : settings.riskPct,
+  };
+  const lossToday = fxOk ? fx.data!.desk.lossTodayPct : todayLossPct(journal);
   const blocked = lossToday >= settings.dailyLossPct;
 
   /** Ajoute le trade au suivi ; renvoie un message d'erreur si on refuse (analyse périmée, doublon). */
@@ -94,7 +102,7 @@ export default function App() {
     if (Date.now() - a.generatedAt > 10 * 60_000) return 'Analyse de plus de 10 minutes : relance l’analyse avant de prendre le trade.';
     const dup = journal.some(j => isTracked(j) && j.pair === a.pair && j.direction === p.direction && Math.abs(j.entry - p.entry) < 1e-9);
     if (dup) return 'Ce trade est déjà suivi dans le journal.';
-    const desk = deskCheck(journal, a.pair, p.direction);
+    const desk = fxOk ? deskCheckFx(fx.data!.desk, a.pair, p.direction, settings.dailyLossPct) : deskCheck(journal, a.pair, p.direction);
     if (desk) return desk;
     const costs = costsFor(a.pair, settings);
     setJournal([
@@ -107,8 +115,8 @@ export default function App() {
         sl: p.sl,
         tp: p.tp2 ?? p.tp1,
         rrPlanned: p.rr2 ?? p.rr1,
-        riskPct: test ? TEST_RISK_PCT : riskForGrade(settings.riskPct, a.engine.grade),
-        lots: lotSize(a.pair, settings.capital, test ? TEST_RISK_PCT : riskForGrade(settings.riskPct, a.engine.grade), p.entry, p.sl, costs.commissionPerLot, lotScale(settings.broker)),
+        riskPct: test ? TEST_RISK_PCT : riskForGrade(eff.riskPct, a.engine.grade),
+        lots: lotSize(a.pair, eff.capital, test ? TEST_RISK_PCT : riskForGrade(eff.riskPct, a.engine.grade), p.entry, p.sl, costs.commissionPerLot, lotScale(settings.broker)),
         result: p.entryType === 'limite' ? 'attente' : 'en_cours',
         rMultiple: null,
         note: '',
@@ -155,7 +163,6 @@ export default function App() {
     };
   }, [openCount, reloadKey]);
   // statistiques : celles du journal FxPro automatique (positions réelles, tous appareils) dès qu'il est disponible
-  const fx = useFxJournal();
   const localStats = strategyStats(journal, undefined, status?.rulesVersion);
   const stats = fx.data?.available ? fx.data.stats : localStats;
   const [session, setSession] = useState(() => sessionNow());
@@ -281,7 +288,7 @@ export default function App() {
           <div className="flex-1">
             <div className="flex justify-between text-[11px]">
               <span className={blocked ? 'font-semibold text-down' : 'text-mute'}>
-                {blocked ? 'Limite de perte du jour atteinte : stop pour aujourd’hui.' : 'Perte du jour'}
+                {blocked ? 'Limite de perte du jour atteinte : stop pour aujourd’hui.' : fxOk ? 'Perte du jour (compte FxPro, positions ouvertes comprises)' : 'Perte du jour'}
               </span>
               <span className="num">
                 {lossToday.toFixed(1)} / {settings.dailyLossPct} %
@@ -304,7 +311,7 @@ export default function App() {
             <AnalysisPanel
               pair={pair}
               status={status}
-              settings={settings}
+              settings={eff}
               analysis={analyses[pair] || null}
               setAnalysis={a => setAnalyses(prev => ({ ...prev, [pair]: a }))}
               onAddJournal={addToJournal}

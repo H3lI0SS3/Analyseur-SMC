@@ -52,6 +52,8 @@ function fakeServer(opts: { expiredToken?: boolean; symbols?: { symbolId: number
             const all = [NOW - 2 * 86_400_000, NOW - 10 * 86_400_000, NOW - 40 * 86_400_000].map((t, i) => ({ dealId: i + 1, positionId: i + 1, symbolId: 1, executionTimestamp: t }));
             return reply(PT.DEAL_LIST_RES, { deal: all.filter(d => d.executionTimestamp >= fromTimestamp && d.executionTimestamp < toTimestamp), hasMore: false });
           }
+          case PT.TRADER_REQ:
+            return reply(PT.TRADER_RES, { trader: { ctidTraderAccountId: msg.payload.ctidTraderAccountId, balance: 1_018_453, moneyDigits: 2 } });
           case PT.ORDER_LIST_REQ:
             return reply(PT.ORDER_LIST_RES, { order: [] });
           case PT.GET_TRENDBARS_REQ: {
@@ -182,7 +184,8 @@ const cfg = { clientId: 'id', clientSecret: 'secret', accessToken: 'tok', refres
   const d13 = await c13.deals(NOW - 30 * 86_400_000, NOW);
   ok('Deals sur 30 jours : tranches ≤ 1 semaine, deals de la période seulement', d13.length === 2 && s13.sent.filter(m => m.payloadType === PT.DEAL_LIST_REQ).every(m => m.payload.toTimestamp - m.payload.fromTimestamp <= 7 * 86_400_000), String(d13.length));
   ok('Symbole du broker → actif de l’app', c13.pairOfSymbol(1) === 'EUR/USD' && c13.pairOfSymbol(41) === 'XAU/USD' && c13.pairOfSymbol(5) === null);
-  ok('Aucun message de trading envoyé', s13.sent.every(m => [PT.APP_AUTH_REQ, PT.ACCOUNTS_BY_TOKEN_REQ, PT.ACCOUNT_AUTH_REQ, PT.SYMBOLS_LIST_REQ, PT.DEAL_LIST_REQ, PT.HEARTBEAT].includes(m.payloadType)));
+  ok('Solde du compte lu (10 184,53 $)', (await c13.balance()).balance === 10184.53);
+  ok('Aucun message de trading envoyé', s13.sent.every(m => [PT.APP_AUTH_REQ, PT.ACCOUNTS_BY_TOKEN_REQ, PT.ACCOUNT_AUTH_REQ, PT.SYMBOLS_LIST_REQ, PT.DEAL_LIST_REQ, PT.TRADER_REQ, PT.HEARTBEAT].includes(m.payloadType)));
 
   const c6 = new CTraderClient(cfg, () => { const w: any = { send() {}, close() {}, onopen: null, onmessage: null, onclose: null, onerror: null }; setTimeout(() => w.onerror?.(), 1); return w; }, { heartbeatMs: 60_000 });
   const e6 = await c6.trendbars('XAU/USD', 'M5', 10, NOW).catch(e => e);

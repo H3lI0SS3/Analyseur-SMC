@@ -1,5 +1,13 @@
 # Journal des versions
 
+## Audit — lot 1 : chiffres justes et risque maîtrisé
+- Journal FxPro : le stop retenu pour le R est le stop d'origine, du côté de la perte et à moins de 5 % de l'entrée ; un stop déplacé en gain (cas du 10/11, +1,04 R faux) ou aberrant (« 1 ») est ignoré et signalé. Stop saisi vérifié par le serveur.
+- Solde réel lu sur cTrader (lecture seule) : les lots proposés l'utilisent à la place du capital saisi.
+- Risque conseillé : 0,5 % par trade du protocole tant que l'app n'a pas 30 trades réels clos, puis 1 % ; TEST 0,25 %.
+- Chaque trade du journal montre le lot pris, le lot conseillé, le risque réel en % ; au-delà de 2 fois le lot conseillé : « position trop grosse ».
+- Perte du jour et règles du desk (trades par jour, pertes d'affilée, un trade par actif, exposition dollar) calculées sur le compte FxPro réel, positions ouvertes comprises.
+- Surveillance : alerte Telegram (une seule fois) si une position ouverte est trop grosse ou si la perte du jour atteint 3 %.
+
 ## Règles 3.12 (gel le 12/11/2026 à 12:00 UTC) — décidées sur la ventilation du backtest
 - Or : le premium/discount de l’impulsion devient facultatif (bonus). C’est la seule variante qui passe le critère fixé à l’avance (≥ +0,2 R net par trade et ≥ 30 trades sur chacune des deux moitiés, exécution M5 : +0,38 R puis +0,55 R). EUR/USD : inchangé (+0,39 R puis +0,15 R, sous le critère).
 - Mode TEST recentré : kill zone et contexte HTF obligatoires ; il ne peut manquer que le premium/discount et/ou un R:R entre 2 et 2,5. Le signal TEST passe par la même exécution M5 que le protocole (CHoCH M5 dans la zone) : l’alerte 🧪 et le bouton ne viennent qu’avec l’ordre M5.

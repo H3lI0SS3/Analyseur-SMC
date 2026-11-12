@@ -22,8 +22,8 @@ export function SettingsView({ settings, setSettings, status }: Props) {
     <div className="space-y-3">
       <section className="card space-y-4 p-4">
         <div className="label">Gestion du risque</div>
-        <Field label="Capital du compte ($)" value={settings.capital} step={10} min={10} onChange={v => set({ capital: v })} />
-        <Field label="Risque par trade (%)" value={settings.riskPct} step={0.25} min={0.1} max={2} onChange={v => set({ riskPct: Math.min(2, v) })} hint="Recommandé : 0,5 à 1 %. Plafonné à 2 %." />
+        <Field label="Capital du compte ($)" value={settings.capital} step={10} min={10} onChange={v => set({ capital: v })} hint="Remplacé automatiquement par le solde réel quand cTrader est connecté." />
+        <Field label="Risque par trade (%)" value={settings.riskPct} step={0.25} min={0.1} max={2} onChange={v => set({ riskPct: Math.min(2, v) })} hint="Recommandé : 0,5 à 1 %. Plafonné à 2 %. Avec cTrader : 0,5 % au maximum tant que l’app n’a pas 30 trades réels." />
         <Field label="Perte max par jour (%)" value={settings.dailyLossPct} step={0.5} min={0.5} max={10} onChange={v => set({ dailyLossPct: v })} hint="Compte les pertes du jour + le risque des trades encore ouverts. Au-delà, plus de nouveau trade au journal." />
       </section>
 

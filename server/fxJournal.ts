@@ -12,6 +12,23 @@ export const HISTORY_DAYS = 120;
 const MIN_TRADES = 30;
 const MATCH_BEFORE = 15 * 60_000;
 const MATCH_AFTER = 30 * 60_000;
+/** Un stop à plus de 5 % du prix d'entrée est une erreur de saisie (or et EUR/USD). */
+export const MAX_STOP_DISTANCE = 0.05;
+/** Risque prévu par trade : protocole (avant / après 30 trades réels de l'app) et TEST. */
+export const RISK_POLICY = { rampTrades: 30, rampRiskPct: 0.5, fullRiskPct: 1, testRiskPct: 0.25, oversizeFactor: 2 };
+/** Règles du desk (mêmes valeurs que l'app). */
+export const DESK = { maxTradesPerDay: 2, maxLossesInARow: 2 };
+
+/**
+ * Stop valable pour calculer le risque : du côté de la perte (sous l'entrée pour un achat, au-dessus pour une vente)
+ * et à moins de 5 % du prix. Un stop déplacé en gain (break-even, suivi) ne mesure pas le risque pris à l'entrée.
+ */
+export function validStop(entry: number, stop: number | null | undefined, long: boolean): number | null {
+  if (stop === null || stop === undefined || !Number.isFinite(stop) || stop <= 0 || !entry) return null;
+  if (long ? stop >= entry : stop <= entry) return null;
+  if (Math.abs(entry - stop) / entry > MAX_STOP_DISTANCE) return null;
+  return stop;
+}
 
 export interface FxTrade {
   positionId: string;
@@ -28,6 +45,15 @@ export interface FxTrade {
   fees: number | null;
   stop: number | null;
   stopSource: 'plan' | 'ordre' | 'saisi' | null;
+  /** stop trouvé mais refusé (mauvais côté ou aberrant) : à signaler à l'utilisateur */
+  stopRejected: number | null;
+  /** lot conseillé par l'app pour ce signal (selon le solde et la politique de risque) ; null sans signal */
+  recommendedLots: number | null;
+  /** risque réel en % du solde, et risque prévu */
+  riskPct: number | null;
+  plannedRiskPct: number | null;
+  /** taille au-delà de 2 fois le lot conseillé (ou du risque prévu) */
+  oversize: boolean;
   /** risque réel en $ : |entrée réelle − stop| × taille */
   riskUsd: number | null;
   /** R net réel = résultat net / risque réel */
@@ -178,11 +204,18 @@ export function buildTrades(deals: any[], orders: any[], pairOf: (symbolId: numb
       if (rel !== null && rel > 0) return long ? entry - rel / 100_000 : entry + rel / 100_000;
       return null;
     };
-    const orderStop =
-      stopOf(openOrder) ?? orders.filter(o => String(o.positionId) === positionId).map(stopOf).find((v): v is number => v !== null) ?? null;
-    const annStop = num(ann.sl);
-    const stop = annStop ?? signal?.sl ?? orderStop ?? null;
-    const stopSource: FxTrade['stopSource'] = annStop !== null ? 'saisi' : signal ? 'plan' : orderStop !== null ? 'ordre' : null;
+    // stop d'origine : celui de l'ordre d'ouverture, sinon le PLUS ANCIEN des ordres de la position ; jamais un stop
+    // déplacé en gain ensuite (le 10/11 : stop 1.11905 sous l'entrée d'une vente, R faussé à +1,04)
+    const posOrders = orders
+      .filter(o => String(o.positionId) === positionId && o !== openOrder)
+      .sort((a, b) => Number(a.utcLastUpdateTimestamp ?? a.tradeData?.openTimestamp ?? 0) - Number(b.utcLastUpdateTimestamp ?? b.tradeData?.openTimestamp ?? 0));
+    const rawOrderStop = stopOf(openOrder) ?? posOrders.map(stopOf).find((v): v is number => v !== null) ?? null;
+    const orderStop = validStop(entry, rawOrderStop, long);
+    const annStop = validStop(entry, num(ann.sl), long);
+    const planStop = validStop(entry, signal?.sl, long);
+    const stop = annStop ?? planStop ?? orderStop ?? null;
+    const stopSource: FxTrade['stopSource'] = annStop !== null ? 'saisi' : planStop !== null ? 'plan' : orderStop !== null ? 'ordre' : null;
+    const stopRejected = stop === null ? (num(ann.sl) ?? rawOrderStop ?? null) : null;
     const riskUsd = stop !== null && units ? Math.abs(entry - stop) * units : null;
     const r = isClosed && net !== null && riskUsd ? Number((net / riskUsd).toFixed(2)) : null;
     const kind: TradeKind = ann.kind ?? signal?.kind ?? 'hors';
@@ -205,6 +238,11 @@ export function buildTrades(deals: any[], orders: any[], pairOf: (symbolId: numb
       fees: isClosed && fees !== null ? Number(fees.toFixed(2)) : null,
       stop,
       stopSource,
+      stopRejected,
+      recommendedLots: null,
+      riskPct: null,
+      plannedRiskPct: null,
+      oversize: false,
       riskUsd: riskUsd === null ? null : Number(riskUsd.toFixed(2)),
       r,
       kind,
@@ -215,6 +253,76 @@ export function buildTrades(deals: any[], orders: any[], pairOf: (symbolId: numb
     });
   }
   return out.sort((a, b) => b.openedAt - a.openedAt);
+}
+
+/** Politique de risque : 0,5 % par trade du protocole tant que l'app n'a pas 30 trades réels clos, puis 1 %. */
+export function riskPolicy(appClosed: number) {
+  const protocolRiskPct = appClosed < RISK_POLICY.rampTrades ? RISK_POLICY.rampRiskPct : RISK_POLICY.fullRiskPct;
+  return { protocolRiskPct, testRiskPct: RISK_POLICY.testRiskPct, rampTrades: RISK_POLICY.rampTrades, appTradesClosed: appClosed };
+}
+
+/** Ajoute à chaque trade : lot conseillé, risque réel et prévu en %, dépassement de taille (écart signalé). */
+export function applyRisk(trades: FxTrade[], balance: number | null, policy: ReturnType<typeof riskPolicy>): FxTrade[] {
+  return trades.map(t => {
+    const planned = t.signal ? (t.signal.kind === 'test' ? policy.testRiskPct : policy.protocolRiskPct) : null;
+    const contract = CONTRACT[t.pair] ?? 100_000;
+    const dist = t.signal ? Math.abs(t.signal.entry - t.signal.sl) : 0;
+    const recommendedLots = planned !== null && balance && dist ? Math.floor(((balance * planned) / 100 / (dist * contract)) * 100) / 100 : null;
+    const riskPct = t.riskUsd !== null && balance ? Number(((t.riskUsd / balance) * 100).toFixed(2)) : null;
+    const oversize =
+      recommendedLots !== null && recommendedLots > 0
+        ? t.lots > RISK_POLICY.oversizeFactor * recommendedLots + 1e-9
+        : riskPct !== null && riskPct > RISK_POLICY.oversizeFactor * policy.protocolRiskPct;
+    const gaps = [...t.gaps];
+    if (oversize)
+      gaps.push(
+        recommendedLots !== null
+          ? `taille ${t.lots} lot au lieu de ${recommendedLots} lot conseillé${riskPct !== null ? ` (risque réel ${riskPct} % au lieu de ${planned} %)` : ''}`
+          : `risque réel ${riskPct} % (plus de ${RISK_POLICY.oversizeFactor} fois les ${policy.protocolRiskPct} % prévus)`
+      );
+    return { ...t, recommendedLots, riskPct, plannedRiskPct: planned, oversize, gaps };
+  });
+}
+
+export interface DeskStatus {
+  balance: number | null;
+  /** perte du jour en % du solde : perte nette réalisée aujourd'hui + risque des positions ouvertes */
+  lossTodayPct: number;
+  realizedTodayUsd: number;
+  openRiskUsd: number;
+  tradesToday: number;
+  lossStreakToday: number;
+  open: { pair: string; direction: 'acheter' | 'vendre'; lots: number; stop: number | null }[];
+  maxTradesPerDay: number;
+  maxLossesInARow: number;
+}
+
+/** Règles du desk calculées sur le compte réel (journée = heure du Maroc, GMT). */
+export function deskStatus(trades: FxTrade[], balance: number | null, now = Date.now()): DeskStatus {
+  const d = new Date(now);
+  const dayStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const closedToday = trades.filter(t => t.closedAt !== null && t.closedAt >= dayStart).sort((a, b) => (b.closedAt as number) - (a.closedAt as number));
+  const open = trades.filter(t => t.closedAt === null);
+  const realizedTodayUsd = closedToday.reduce((s, t) => s + (t.net ?? 0), 0);
+  // une position ouverte sans stop connu compte pour le risque prévu maximal (prudence)
+  const openRiskUsd = open.reduce((s, t) => s + (t.riskUsd ?? (balance ? (balance * RISK_POLICY.fullRiskPct) / 100 : 0)), 0);
+  let lossStreakToday = 0;
+  for (const t of closedToday) {
+    if ((t.net ?? 0) < 0) lossStreakToday++;
+    else break;
+  }
+  const lossUsd = Math.max(0, -realizedTodayUsd) + openRiskUsd;
+  return {
+    balance,
+    lossTodayPct: balance ? Number(((lossUsd / balance) * 100).toFixed(2)) : 0,
+    realizedTodayUsd: Number(realizedTodayUsd.toFixed(2)),
+    openRiskUsd: Number(openRiskUsd.toFixed(2)),
+    tradesToday: trades.filter(t => t.openedAt >= dayStart).length,
+    lossStreakToday,
+    open: open.map(t => ({ pair: t.pair, direction: t.direction, lots: t.lots, stop: t.stop })),
+    maxTradesPerDay: DESK.maxTradesPerDay,
+    maxLossesInARow: DESK.maxLossesInARow,
+  };
 }
 
 export interface FxJournal {
@@ -229,6 +337,11 @@ export interface FxJournal {
   protocole: FxStats;
   test: FxStats;
   hors: FxStats;
+  /** solde réel du compte (null si illisible) */
+  balance: number | null;
+  /** risque par trade conseillé (0,5 % jusqu'à 30 trades réels de l'app, puis 1 % ; TEST 0,25 %) */
+  policy: ReturnType<typeof riskPolicy>;
+  desk: DeskStatus;
   updatedAt: number;
 }
 
@@ -247,7 +360,10 @@ export async function getFxJournal(
 ): Promise<FxJournal> {
   if (cache && now - cache.at < 60_000) return cache.value;
   const data = await store.get();
-  const base = (trades: FxTrade[], error: string | null): FxJournal => {
+  const base = (raw: FxTrade[], error: string | null, balance: number | null = null): FxJournal => {
+    const appClosed = raw.filter(t => t.kind !== 'hors' && t.closedAt !== null).length;
+    const policy = riskPolicy(appClosed);
+    const trades = applyRisk(raw, balance, policy);
     const app = trades.filter(t => t.kind !== 'hors');
     return {
       available: !!client && !error,
@@ -260,6 +376,9 @@ export async function getFxJournal(
       protocole: fxStats(trades.filter(t => t.kind === 'protocole')),
       test: fxStats(trades.filter(t => t.kind === 'test')),
       hors: fxStats(trades.filter(t => t.kind === 'hors')),
+      balance,
+      policy,
+      desk: deskStatus(trades, balance, now),
       updatedAt: now,
     };
   };
@@ -273,7 +392,14 @@ export async function getFxJournal(
       return [];
     });
     if (ordersError) console.warn('[journal] ordres cTrader indisponibles (stops non lus) :', ordersError);
-    const value = base(buildTrades(deals, orders, id => client.pairOfSymbol(id), data, decimals), null);
+    const balance = await client
+      .balance()
+      .then(b => b.balance)
+      .catch(e => {
+        console.warn('[journal] solde cTrader illisible :', e?.message || e);
+        return null;
+      });
+    const value = base(buildTrades(deals, orders, id => client.pairOfSymbol(id), data, decimals), null, balance);
     cache = { at: now, value };
     return value;
   } catch (e: any) {

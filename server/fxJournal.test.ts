@@ -1,5 +1,6 @@
 // Journal automatique cTrader + sauvegarde Telegram (aucun réseau). npx tsx server/fxJournal.test.ts
-import { buildTrades, fxStats, matchSignal } from './fxJournal';
+import { applyRisk, buildTrades, deskStatus, fxStats, matchSignal, riskPolicy, validStop } from './fxJournal';
+import { checkRisk } from './riskWatch';
 import { JournalStore, type StoreData, type SignalRec } from './journalStore';
 
 let failed = 0;
@@ -64,6 +65,36 @@ ok('Sans stop : trade compté comme clos (et gagnant), R manquant signalé', noS
 const rel = buildTrades(deals.slice(0, 2), [{ orderId: 11, relativeStopLoss: 348 }], pairOf, { v: 1, signals: [], annotations: {} }, decimals)[0];
 ok('Stop relatif de l’ordre (34,8 pips) → stop 1.12532, R +1,96', rel.stopSource === 'ordre' && Math.abs((rel.stop ?? 0) - 1.12532) < 1e-9 && rel.r === 1.96, `${rel.stop} ${rel.r}`);
 
+// ---------- Lot 1 de l'audit (12/11) ----------
+// stop déplacé en gain après l'entrée (cas réel du 10/11 : 1.11905 sous l'entrée d'une vente) → ignoré, pas de faux R
+const moved = buildTrades(deals.slice(0, 2), [{ orderId: 11 }, { orderId: 99, positionId: 155532150, stopLoss: 1.11905, utcLastUpdateTimestamp: T(15, 0) }], pairOf, { v: 1, signals: [], annotations: {} }, decimals)[0];
+ok('Stop déplacé en gain ignoré : pas de R, stop signalé comme refusé', moved.stop === null && moved.r === null && moved.stopRejected === 1.11905, `${moved.stop} ${moved.r} ${moved.stopRejected}`);
+// le stop d'origine prime sur un stop modifié plus tard
+const orig = buildTrades(deals.slice(0, 2), [{ orderId: 99, positionId: 155532150, stopLoss: 1.122, utcLastUpdateTimestamp: T(15, 0) }, { orderId: 98, positionId: 155532150, stopLoss: 1.12532, utcLastUpdateTimestamp: T(10, 19) }], pairOf, { v: 1, signals: [], annotations: {} }, decimals)[0];
+ok('Stop d’origine (le plus ancien ordre) retenu', orig.stop === 1.12532 && orig.stopSource === 'ordre', `${orig.stop}`);
+ok('Stop valide : vente → au-dessus, achat → en dessous, ≤ 5 %', validStop(1.12184, 1.12532, false) === 1.12532 && validStop(1.12184, 1.11905, false) === null && validStop(4000, 3990, true) === 3990 && validStop(4000, 4010, true) === null);
+ok('Stop aberrant refusé (« 1 » saisi sur EUR/USD)', validStop(1.11639, 1, false) === null && validStop(1.11639, 1.2, false) === null);
+const typed1 = buildTrades(deals.slice(0, 2), [], pairOf, { v: 1, signals: [], annotations: { '155532150': { sl: 1 } } }, decimals)[0];
+ok('Stop saisi aberrant ignoré dans le calcul', typed1.stop === null && typed1.r === null && typed1.stopRejected === 1);
+
+// lot conseillé, risque réel, dépassement de taille
+const pol = riskPolicy(0);
+ok('Politique : 0,5 % tant que moins de 30 trades réels, puis 1 %', pol.protocolRiskPct === 0.5 && riskPolicy(30).protocolRiskPct === 1 && pol.testRiskPct === 0.25);
+const risked = applyRisk(trades, 10_000, pol);
+const re = risked.find(t => t.positionId === '155532150')!;
+ok('Signal TEST : lot conseillé 0,16 (0,25 % de 10 000 $, stop 15,6 pips)', re.recommendedLots === 0.16 && re.plannedRiskPct === 0.25, `${re.recommendedLots}`);
+ok('1 lot au lieu de 0,16 : risque réel 3,48 %, position trop grosse, écart signalé', re.oversize && re.riskPct === 3.48 && re.gaps.some(g => /0\.16 lot conseillé/.test(g)), re.gaps.join(' | '));
+const rg = risked.find(t => t.positionId === '777')!;
+ok('Sans signal : dépassement jugé sur le risque réel (0,1 lot or, stop 10 $ = 1 % : pas trop gros)', rg.recommendedLots === null && rg.riskPct === 1 && !rg.oversize, `${rg.riskPct}`);
+
+// règles du desk sur le compte réel
+const dNow = T(18, 0);
+const desk = deskStatus(risked, 10_000, dNow);
+ok('Desk : 2 positions ouvertes aujourd’hui, gain réalisé, risque ouvert 100 $ (or)', desk.tradesToday === 2 && desk.realizedTodayUsd === 681.17 && desk.openRiskUsd === 100 && desk.lossTodayPct === 1 && desk.open.length === 1 && desk.open[0].pair === 'XAU/USD', JSON.stringify(desk));
+const losing = risked.map(t => (t.positionId === '155532150' ? { ...t, net: -400 } : t));
+const d2 = deskStatus(losing, 10_000, dNow);
+ok('Desk : perte réalisée 400 $ + risque ouvert 100 $ = 5 % du compte, 1 perte d’affilée', d2.lossTodayPct === 5 && d2.lossStreakToday === 1, JSON.stringify(d2));
+
 // sauvegarde Telegram (fichier épinglé)
 (async () => {
   const calls: { method: string; body: any }[] = [];
@@ -94,6 +125,13 @@ ok('Stop relatif de l’ordre (34,8 pips) → stop 1.12532, R +1,96', rel.stopSo
   const st2 = new JournalStore(env, fake as any, 0);
   const back = await st2.get();
   ok('Relu par un nouveau serveur (autre appareil / redémarrage)', back.signals.length === 1 && back.annotations['155532150']?.note === 'ok' && back.annotations['155532150']?.sl === 1.12532);
+  // alertes de risque : position trop grosse et perte du jour, une seule fois chacune
+  const msgs: string[] = [];
+  const jr: any = { available: true, trades: applyRisk(trades.map(t => (t.positionId === '155532150' ? { ...t, closedAt: null } : t)), 10_000, pol), desk: d2 };
+  const s1 = await checkRisk(jr, st, async h => { msgs.push(h); return { ok: true }; }, dNow);
+  const s2 = await checkRisk(jr, st, async h => { msgs.push(h); return { ok: true }; }, dNow + 300_000);
+  ok('Alerte Telegram : position trop grosse + limite de perte du jour, une seule fois', s1.length === 2 && s2.length === 0 && msgs.length === 2 && /trop grosse/.test(msgs[0]) && /0\.16 lot conseillé/.test(msgs[0]) && /limite de perte/.test(msgs[1]), msgs.join(' || ').slice(0, 200));
+
   const mem = new JournalStore({}, fake as any, 0);
   ok('Sans Telegram : mémoire seule, pas d’erreur', !mem.persistent && (await mem.addSignal(sigTest)) && (await mem.get()).signals.length === 1);
 

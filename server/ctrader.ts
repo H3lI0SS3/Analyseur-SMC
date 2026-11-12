@@ -22,6 +22,8 @@ export const PT = {
   SYMBOLS_LIST_RES: 2115,
   GET_TRENDBARS_REQ: 2137,
   GET_TRENDBARS_RES: 2138,
+  TRADER_REQ: 2121,
+  TRADER_RES: 2122,
   DEAL_LIST_REQ: 2133,
   DEAL_LIST_RES: 2134,
   ERROR_RES: 2142,
@@ -134,6 +136,7 @@ export class CTraderClient {
   private idle: ReturnType<typeof setTimeout> | null = null;
   private accountId: number | null = null;
   private histQueue: Promise<void> = Promise.resolve();
+  private balanceCache: { balance: number; at: number } | null = null;
   private lastHist = 0;
   private chunkMs = new Map<CtTf, number>();
   /** dernière erreur par série (« XAU/USD H1 » → message) : une série qui marche n'efface plus l'erreur d'une autre */
@@ -205,6 +208,19 @@ export class CTraderClient {
   pairOfSymbol(symbolId: number): string | null {
     for (const [pair, id] of this.symbolIds) if (id === Number(symbolId)) return pair;
     return null;
+  }
+
+  /** Solde du compte (lecture seule, ProtoOATraderReq). Cache 60 s. */
+  async balance(): Promise<{ balance: number; at: number }> {
+    if (this.balanceCache && Date.now() - this.balanceCache.at < 60_000) return this.balanceCache;
+    await this.connect();
+    const r = await this.request(PT.TRADER_REQ, { ctidTraderAccountId: this.accountId }, PT.TRADER_RES);
+    const t = r?.trader ?? {};
+    const md = Number(t.moneyDigits ?? 2);
+    const balance = Number(t.balance ?? NaN) / 10 ** md;
+    if (!Number.isFinite(balance)) throw new CTraderError('NO_BALANCE', 'Solde du compte illisible.');
+    this.balanceCache = { balance: Number(balance.toFixed(2)), at: Date.now() };
+    return this.balanceCache;
   }
 
   /** Deals (exécutions) du compte entre deux dates, tranches d'une semaine, du plus ancien au plus récent. Lecture seule. */

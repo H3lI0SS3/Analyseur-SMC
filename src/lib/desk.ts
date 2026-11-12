@@ -41,3 +41,24 @@ export function splitOrders(totalLots: number): { lot1: number; lot2: number } |
   const c1 = Math.floor(cents / 2);
   return { lot1: c1 / 100, lot2: (cents - c1) / 100 };
 }
+
+/** Mêmes règles, calculées sur le compte réel (journal FxPro) : c'est la version utilisée quand cTrader est connecté. */
+export interface FxDesk {
+  balance: number | null;
+  lossTodayPct: number;
+  tradesToday: number;
+  lossStreakToday: number;
+  open: { pair: string; direction: 'acheter' | 'vendre'; lots: number; stop: number | null }[];
+  maxTradesPerDay: number;
+  maxLossesInARow: number;
+}
+export function deskCheckFx(desk: FxDesk, pair: string, direction: Exclude<Signal, 'attendre'>, dailyLossPct: number): string | null {
+  if (desk.lossTodayPct >= dailyLossPct) return `Règle du desk : perte du jour ${desk.lossTodayPct} % (limite ${dailyLossPct} %), positions ouvertes comprises. Stop pour aujourd’hui.`;
+  if (desk.tradesToday >= desk.maxTradesPerDay) return `Règle du desk : ${desk.maxTradesPerDay} trades maximum par jour sur ton compte (déjà ${desk.tradesToday} aujourd’hui). Reprends demain.`;
+  if (desk.lossStreakToday >= desk.maxLossesInARow) return `Règle du desk : ${desk.lossStreakToday} pertes d’affilée aujourd’hui sur ton compte. Stop pour la journée.`;
+  if (desk.open.some(o => o.pair === pair)) return `Règle du desk : une position est déjà ouverte sur ${pair} dans cTrader. Un seul trade à la fois par actif.`;
+  const side = usdSide(pair, direction);
+  const same = desk.open.find(o => usdSide(o.pair, o.direction) === side && side !== 'neutral');
+  if (same) return `Règle du desk : ${same.direction === 'acheter' ? 'achat' : 'vente'} ${same.pair} déjà ouvert dans cTrader, même exposition au dollar. Attends qu’il soit clôturé.`;
+  return null;
+}

@@ -13,7 +13,8 @@ import { getWatcher } from './server/watch';
 import { sendTelegram, telegramChats, telegramConfig } from './server/telegram';
 import { ctraderStatus, getCTrader } from './server/ctrader';
 import { getJournalStore } from './server/journalStore';
-import { getFxJournal, invalidateFxJournal } from './server/fxJournal';
+import { checkRisk } from './server/riskWatch';
+import { getFxJournal, invalidateFxJournal, validStop } from './server/fxJournal';
 
 dotenv.config();
 
@@ -96,7 +97,13 @@ app.all('/api/watch/tick', async (req, res) => {
   if (!watchAuthorized(req, res)) return;
   try {
     const r = await watcher.tick();
-    res.json({ ok: true, ...r, alertsSent: watcher.alerts.filter(a => a.at === r.at).map(a => ({ kind: a.kind, pair: a.pair, telegram: a.telegram })) });
+    // garde-fous du compte réel (taille de position, perte du jour) : jamais bloquant pour la surveillance
+    const riskAlerts = getCTrader()
+      ? await getFxJournal(getCTrader(), getJournalStore(), decimalsByPair)
+          .then(j => checkRisk(j, getJournalStore(), html => sendTelegram(html)))
+          .catch(() => [] as string[])
+      : [];
+    res.json({ ok: true, ...r, riskAlerts, alertsSent: watcher.alerts.filter(a => a.at === r.at).map(a => ({ kind: a.kind, pair: a.pair, telegram: a.telegram })) });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err?.message || 'Erreur de surveillance.' });
   }
@@ -133,7 +140,18 @@ app.get('/api/journal', async (req, res) => {
 app.post('/api/journal/annotate', async (req, res) => {
   const { positionId, kind, note, sl } = req.body ?? {};
   if (!positionId || (kind !== undefined && !['protocole', 'test', 'hors'].includes(kind))) return res.status(400).json({ error: 'Requête invalide.' });
-  const a = await getJournalStore().annotate(String(positionId), { kind, note: typeof note === 'string' ? note : undefined, sl: sl === undefined ? undefined : sl === null || sl === '' ? null : Number(sl) });
+  // stop saisi : du côté de la perte et à moins de 5 % de l'entrée réelle, sinon refusé (ex. « 1 » sur EUR/USD)
+  if (sl !== undefined && sl !== null && sl !== '') {
+    const j = await getFxJournal(getCTrader(), getJournalStore(), decimalsByPair);
+    const t = j.trades.find(x => x.positionId === String(positionId));
+    const v = Number(String(sl).replace(',', '.'));
+    if (!t) return res.status(404).json({ error: 'Position introuvable dans le journal.' });
+    if (validStop(t.entry, v, t.direction === 'acheter') === null)
+      return res.status(400).json({
+        error: `Stop refusé : pour ${t.direction === 'acheter' ? 'un achat' : 'une vente'} entré à ${t.entry}, le stop doit être ${t.direction === 'acheter' ? 'SOUS' : 'AU-DESSUS de'} l’entrée et à moins de 5 % du prix.`,
+      });
+  }
+  const a = await getJournalStore().annotate(String(positionId), { kind, note: typeof note === 'string' ? note : undefined, sl: sl === undefined ? undefined : sl === null || sl === '' ? null : Number(String(sl).replace(',', '.')) });
   invalidateFxJournal();
   res.json({ ok: true, annotation: a });
 });

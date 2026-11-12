@@ -31,6 +31,11 @@ interface FxTradeView {
   fees: number | null;
   stop: number | null;
   stopSource: 'plan' | 'ordre' | 'saisi' | null;
+  stopRejected?: number | null;
+  recommendedLots?: number | null;
+  riskPct?: number | null;
+  plannedRiskPct?: number | null;
+  oversize?: boolean;
   riskUsd: number | null;
   r: number | null;
   kind: 'protocole' | 'test' | 'hors';
@@ -39,7 +44,21 @@ interface FxTradeView {
   gaps: string[];
   note: string;
 }
+export interface FxDeskView {
+  balance: number | null;
+  lossTodayPct: number;
+  realizedTodayUsd: number;
+  openRiskUsd: number;
+  tradesToday: number;
+  lossStreakToday: number;
+  open: { pair: string; direction: 'acheter' | 'vendre'; lots: number; stop: number | null }[];
+  maxTradesPerDay: number;
+  maxLossesInARow: number;
+}
 export interface FxJournalView {
+  balance: number | null;
+  policy: { protocolRiskPct: number; testRiskPct: number; rampTrades: number; appTradesClosed: number };
+  desk: FxDeskView;
   available: boolean;
   error: string | null;
   persistent: boolean;
@@ -99,7 +118,11 @@ export function FxJournalCard({ data, reload }: { data: FxJournalView | null; re
     setErr(null);
     try {
       const res = await api('/api/journal/annotate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positionId, ...body }) });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const j = await readJson(res).catch(() => null);
+        setErr(j?.error || 'Enregistrement impossible. Réessaie.');
+        return;
+      }
       await reload(true);
     } catch {
       setErr('Enregistrement impossible (connexion ?). Réessaie.');
@@ -129,7 +152,15 @@ export function FxJournalCard({ data, reload }: { data: FxJournalView | null; re
         <>
           <p className="text-[11px] leading-snug text-mute">
             Positions lues sur ton compte {data.account?.broker ?? 'cTrader'}
-            {data.account?.login ? ` n° ${data.account.login}` : ''} (lecture seule), les mêmes sur tous tes appareils. R = résultat net réel / risque réel (ton entrée → le stop du plan).
+            {data.account?.login ? ` n° ${data.account.login}` : ''} (lecture seule), les mêmes sur tous tes appareils. R = résultat net réel / risque réel (ton entrée → le stop d’origine).
+          </p>
+          <p className="mt-2 rounded-lg bg-card2 px-2 py-1.5 text-[12px] leading-snug">
+            {data.balance !== null ? <>Solde : <b className="num">{data.balance.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} $</b> · </> : null}
+            Risque conseillé : <b>{data.policy.protocolRiskPct} %</b> par trade du protocole, {data.policy.testRiskPct} % en TEST
+            {data.policy.appTradesClosed < data.policy.rampTrades
+              ? ` (prudence jusqu’à ${data.policy.rampTrades} trades réels de l’app : ${data.policy.appTradesClosed}/${data.policy.rampTrades})`
+              : ''}
+            . Les lots proposés par l’app utilisent ce solde et ce risque.
           </p>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center">
             <div className="rounded-lg bg-card2 py-2">
@@ -213,7 +244,16 @@ function TradeRow({ t, onAnnotate }: { key?: string; t: FxTradeView; onAnnotate:
           {t.stopSource && <span className="text-[10px] text-mute"> ({t.stopSource === 'plan' ? 'plan' : t.stopSource === 'ordre' ? 'ordre' : 'saisi'})</span>}
         </div>
       </div>
-      {t.riskUsd !== null && <div className="mt-1 text-[10px] text-mute">Risque réel : {t.riskUsd.toFixed(0)} $</div>}
+      {(t.riskUsd !== null || t.recommendedLots != null) && (
+        <div className={cx('mt-1 text-[11px]', t.oversize ? 'font-semibold text-down' : 'text-mute')}>
+          {t.riskUsd !== null ? `Risque réel : ${t.riskUsd.toFixed(0)} $${t.riskPct != null ? ` (${t.riskPct} % du compte)` : ''}` : 'Risque réel inconnu'}
+          {t.recommendedLots != null ? ` · lot conseillé ${t.recommendedLots} (risque prévu ${t.plannedRiskPct} %)` : ''}
+          {t.oversize ? ' · position trop grosse' : ''}
+        </div>
+      )}
+      {t.stopRejected != null && t.stop === null && (
+        <div className="mt-1 text-[11px] text-warn">Stop {t.stopRejected} ignoré : du mauvais côté de l’entrée (stop déplacé en gain) ou aberrant. Saisis le stop d’origine.</div>
+      )}
       {t.closedAt && t.r === null && <div className="mt-1 text-[10px] font-semibold text-warn">R inconnu : saisis le stop prévu ci-dessous.</div>}
       {t.gaps.map(g => (
         <div key={g} className="mt-1 text-[10px] text-warn">
@@ -232,7 +272,7 @@ function TradeRow({ t, onAnnotate }: { key?: string; t: FxTradeView; onAnnotate:
         ))}
         <span className="ml-1 text-[10px] text-mute">{t.kindSource === 'signal' ? 'reconnu automatiquement' : t.kindSource === 'saisi' ? 'choisi par toi' : 'aucun signal de l’app trouvé'}</span>
       </div>
-      {t.stopSource !== 'plan' && t.closedAt && (
+      {t.stopSource !== 'plan' && (t.closedAt || t.stop === null) && (
         <div className="mt-2 flex items-center gap-1 text-[11px]">
           <span className="text-mute">Stop prévu (pour le R)</span>
           <input
@@ -241,7 +281,7 @@ function TradeRow({ t, onAnnotate }: { key?: string; t: FxTradeView; onAnnotate:
             onBlur={() => sl !== (t.stopSource === 'saisi' && t.stop !== null ? String(t.stop) : '') && onAnnotate({ sl: sl === '' ? null : Number(sl) })}
             inputMode="decimal"
             className="w-24 rounded-md border border-line bg-white px-1.5 py-0.5 num"
-            placeholder="ex. 1.12532"
+            placeholder={t.pair === 'XAU/USD' ? 'ex. 3955.40' : 'ex. 1.12532'}
           />
         </div>
       )}
