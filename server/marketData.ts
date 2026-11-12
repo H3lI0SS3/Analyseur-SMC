@@ -500,7 +500,36 @@ export async function getHistory(pairId: string, onProgress?: (msg: string) => v
   const hit = historyCache.get(pairId);
   if (hit && Date.now() - hit.fetchedAt < 6 * 3_600_000) return hit;
   const key = process.env.TWELVE_DATA_API_KEY;
-  let res: History;
+  let res: History | null = null;
+  // 1. cTrader (même flux que le direct, gratuit, rapide) : 2 ans de M15, le H1 de préchauffage et le M5
+  const ct = getCTrader();
+  if (ct) {
+    try {
+      const now = Date.now();
+      onProgress?.('historique cTrader : M15…');
+      const m15 = await ct.trendbars(pairId, 'M15', 52_000, now);
+      const needH1 = Math.ceil((m15[m15.length - 1].t - m15[0].t) / HOUR) + 4 * 30 * 24;
+      onProgress?.(`${m15.length} bougies M15 (cTrader), H1…`);
+      const h1 = await ct.trendbars(pairId, 'H1', Math.min(needH1, 20_000), now);
+      onProgress?.(`${h1.length} bougies H1 (cTrader), M5…`);
+      let m5: Candle[] | null = null;
+      try {
+        const r5 = await ct.trendbars(pairId, 'M5', Math.ceil(m15.length * 3.05), now);
+        m5 = r5.length > 1000 ? r5 : null;
+      } catch (e: any) {
+        console.warn(`[Backtest ${pairId}] M5 cTrader indisponible : ${e?.message || e}`);
+      }
+      // historique trop court côté broker (moins d'un an) : on préfère Twelve Data
+      if (m15.length >= 25_000) res = { h1, m15, m5, source: CTRADER_SOURCE, futuresProxy: false, fetchedAt: Date.now(), limitedBySource: m15.length < 50_000 };
+      else console.warn(`[Backtest ${pairId}] historique cTrader court (${m15.length} M15) : Twelve Data à la place`);
+    } catch (e: any) {
+      console.warn(`[Backtest ${pairId}] historique cTrader indisponible : ${e?.message || e}`);
+    }
+  }
+  if (res) {
+    historyCache.set(pairId, res);
+    return res;
+  }
   if (key) {
     const m15 = await fetchTwelveDeep(pair, 'M15', key, 52_000, n => onProgress?.(`${n} bougies M15 téléchargées`));
     // H1 : couvrir la période M15 + 4 mois de préchauffage (structure D1/H4)

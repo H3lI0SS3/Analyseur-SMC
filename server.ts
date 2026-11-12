@@ -14,7 +14,7 @@ import { sendTelegram, telegramChats, telegramConfig } from './server/telegram';
 import { ctraderStatus, getCTrader } from './server/ctrader';
 import { getJournalStore } from './server/journalStore';
 import { checkRisk } from './server/riskWatch';
-import { getFxJournal, invalidateFxJournal, validStop } from './server/fxJournal';
+import { CONTRACT, getFxJournal, invalidateFxJournal, validStop } from './server/fxJournal';
 
 dotenv.config();
 
@@ -79,7 +79,25 @@ app.get('/api/candles', async (req, res) => {
 });
 
 // ---------- Surveillance automatique (tâche programmée toutes les 5 min) + alertes Telegram ----------
-const watcher = getWatcher(opts => runAnalysis(opts));
+/** Commission aller-retour par lot sur FxPro cTrader (même hypothèse que le backtest). */
+const COMMISSION_PER_LOT = 7;
+const watcher = getWatcher(opts => runAnalysis(opts), {
+  // déduplication persistante : la même alerte ne repart pas après un redémarrage ou sur une autre instance
+  dedup: (key, now) => (getJournalStore().persistent ? getJournalStore().markRiskAlert(`alert|${key}`, now) : Promise.resolve(true)),
+  // volume conseillé dans l'alerte : solde réel × risque prévu (0,5 % jusqu'à 30 trades réels, puis 1 % ; TEST 0,25 %)
+  sizing: async (pair, entry, sl, kind) => {
+    const ct = getCTrader();
+    if (!ct) return null;
+    const j = await getFxJournal(ct, getJournalStore(), decimalsByPair);
+    if (!j.balance) return null;
+    const pct = kind === 'test' ? j.policy.testRiskPct : j.policy.protocolRiskPct;
+    const contract = CONTRACT[pair] ?? 100_000;
+    const lossPerLot = Math.abs(entry - sl) * contract + COMMISSION_PER_LOT;
+    const lots = Math.floor(((j.balance * pct) / 100 / lossPerLot) * 100) / 100;
+    if (lots <= 0) return null;
+    return { lots, riskUsd: lots * lossPerLot, riskPct: pct };
+  },
+});
 /** Vérifie WATCH_SECRET (paramètre ?key= ou en-tête X-Watch-Key), en temps constant. */
 function watchAuthorized(req: express.Request, res: express.Response): boolean {
   const secret = (process.env.WATCH_SECRET || '').trim();

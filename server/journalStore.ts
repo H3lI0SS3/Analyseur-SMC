@@ -32,6 +32,7 @@ export interface StoreData {
 }
 
 const FILE_NAME = 'ora-journal.json';
+const CAPTION = 'Sauvegarde du journal ORA Trader (mise à jour automatique) — ne pas désépingler ni supprimer.';
 const MAX_SIGNALS = 1500;
 const empty = (): StoreData => ({ v: 1, signals: [], annotations: {} });
 
@@ -45,7 +46,7 @@ export class JournalStore {
   constructor(
     private env: Record<string, string | undefined> = process.env,
     private fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike,
-    private saveDelayMs = 3_000
+    private saveDelayMs = 20_000
   ) {}
 
   get persistent() {
@@ -144,15 +145,43 @@ export class JournalStore {
     return { v: 1, signals: json.signals, annotations: json.annotations ?? {}, riskAlerts: json.riskAlerts ?? {} };
   }
 
+  /** Fusion avec le fichier relu (autre instance, autre appareil) : rien n'est perdu, nos annotations récentes priment. */
+  static merge(mine: StoreData, theirs: StoreData): StoreData {
+    const ids = new Set(mine.signals.map(x => x.id));
+    const signals = [...theirs.signals.filter(x => !ids.has(x.id)), ...mine.signals].sort((a, b) => a.at - b.at).slice(-MAX_SIGNALS);
+    const annotations = { ...theirs.annotations };
+    for (const [k, v] of Object.entries(mine.annotations)) annotations[k] = { ...(annotations[k] ?? {}), ...v };
+    return { v: 1, signals, annotations, riskAlerts: { ...(theirs.riskAlerts ?? {}), ...(mine.riskAlerts ?? {}) } };
+  }
+
   private async save() {
     const cfg = telegramConfig(this.env);
     if (!cfg || !this.data) return;
     try {
+      // relire le fichier épinglé juste avant d'écrire : une autre instance a pu sauvegarder entre-temps
+      const latest = await this.load().catch(() => null);
+      if (latest) this.data = JournalStore.merge(this.data, latest);
+      const doc = new Blob([JSON.stringify(this.data)], { type: 'application/json' });
+      // 1) remplacer le fichier dans le message déjà épinglé : aucun nouveau message « épinglé » dans la conversation
+      if (this.pinnedId) {
+        const form = new FormData();
+        form.append('chat_id', cfg.chatId);
+        form.append('message_id', String(this.pinnedId));
+        form.append('media', JSON.stringify({ type: 'document', media: 'attach://file', caption: CAPTION }));
+        form.append('file', doc, FILE_NAME);
+        const res = await this.fetchImpl(this.api('editMessageMedia'), { method: 'POST', body: form, signal: AbortSignal.timeout(15_000) });
+        const json = await res.json().catch(() => ({}));
+        if (json?.ok) {
+          this.lastError = null;
+          return;
+        }
+      }
+      // 2) sinon (première sauvegarde, message supprimé) : nouveau fichier épinglé sans notification
       const form = new FormData();
       form.append('chat_id', cfg.chatId);
       form.append('disable_notification', 'true');
-      form.append('caption', 'Sauvegarde du journal ORA Trader (mise à jour automatique) — ne pas désépingler ni supprimer.');
-      form.append('document', new Blob([JSON.stringify(this.data)], { type: 'application/json' }), FILE_NAME);
+      form.append('caption', CAPTION);
+      form.append('document', doc, FILE_NAME);
       const res = await this.fetchImpl(this.api('sendDocument'), { method: 'POST', body: form, signal: AbortSignal.timeout(15_000) });
       const json = await res.json().catch(() => ({}));
       if (!json?.ok) throw new Error(json?.description || `erreur ${res.status}`);

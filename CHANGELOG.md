@@ -1,5 +1,12 @@
 # Journal des versions
 
+## Audit — lot 3 : robustesse et backtest
+- Alertes : déduplication persistante (fichier Telegram) — la même alerte ne repart plus après un redémarrage ou sur une autre instance.
+- Alertes « ordre prêt » et TEST : volume conseillé (solde réel × risque prévu), perte si stop, chemin cTrader « Ordre en attente → Limit, PAS au marché ».
+- Sauvegarde Telegram : le fichier épinglé est remplacé dans le même message (plus de messages « épinglé » à chaque sauvegarde), relu et fusionné avant chaque écriture, sauvegardes regroupées (20 s).
+- Backtest : historique lu sur cTrader (même flux que le direct ; Twelve Data en secours) ; exécution M5 rejouée exactement comme en direct (surveillance après la bougie du CHoCH et dans la kill zone, ordre déjà servi = manqué, R:R revérifié après l'affinage M5).
+- Surveillance : le secret peut passer par l'en-tête X-Watch-Key (Réglages et README).
+
 ## Backtest : gestion de sortie de Mehdi (mesure)
 - Nouvelle comparaison des gestions, sur le protocole + TEST en exécution M5 : la gestion actuelle (50 % à TP1, stop au point d'entrée, reste à TP2) contre la gestion de Mehdi (toute la position vise TP2, stop initial gardé, puis remonté sur TP1 quand le prix a fait la moitié ou les 3/4 du chemin TP1 → TP2).
 

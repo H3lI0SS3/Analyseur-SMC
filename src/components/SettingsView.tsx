@@ -125,7 +125,11 @@ export function SettingsView({ settings, setSettings, status }: Props) {
         </ul>
         <p className="text-[11px] leading-relaxed text-mute">
           Adresse à appeler toutes les 5 minutes (cron-job.org, gratuit) :
-          <span className="num block break-all text-ink">{typeof window !== 'undefined' ? window.location.origin : ''}/api/watch/tick?key=TON_WATCH_SECRET</span>
+          <span className="num block break-all text-ink">{typeof window !== 'undefined' ? window.location.origin : ''}/api/watch/tick</span>
+          <span className="mt-1 block">
+            Plus sûr : dans cron-job.org (onglet « Avancé » → « En-têtes »), ajoute l’en-tête <span className="num text-ink">X-Watch-Key</span> avec ton WATCH_SECRET,
+            au lieu de mettre <span className="num">?key=…</span> dans l’adresse (l’adresse apparaît dans les journaux d’appels).
+          </span>
           La surveillance ne travaille que pendant les kill zones et n’envoie que deux types d’alertes : « setup en préparation » et « ordre prêt ». Aucun ordre n’est passé.
         </p>
       </section>

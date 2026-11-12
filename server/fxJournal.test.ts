@@ -104,9 +104,9 @@ ok('Desk : perte réalisée 400 $ + risque ouvert 100 $ = 5 % du compte, 1 perte
     if (url.includes('/file/bot')) return { ok: true, status: 200, json: async () => JSON.parse(saved ?? '{}') };
     let body: any = null;
     if (init?.body instanceof FormData) {
-      const f = init.body.get('document') as Blob;
+      const f = (init.body.get('document') ?? init.body.get('file')) as Blob;
       saved = await f.text();
-      body = { file_name: (init.body.get('document') as any).name };
+      body = { file_name: ((init.body.get('document') ?? init.body.get('file')) as any).name };
     } else if (init?.body) body = JSON.parse(init.body);
     calls.push({ method, body });
     const result =
@@ -122,9 +122,17 @@ ok('Desk : perte réalisée 400 $ + risque ouvert 100 $ = 5 % du compte, 1 perte
   await st.annotate('155532150', { kind: 'test', note: 'ok', sl: 1.12532 });
   await st.flush();
   ok('Fichier JSON envoyé puis épinglé sans notification', calls.some(c => c.method === 'sendDocument') && calls.some(c => c.method === 'pinChatMessage' && c.body.disable_notification === true));
+  await st.annotate('155532150', { note: 'ok2' });
+  await st.flush();
+  ok('2e sauvegarde : fichier remplacé dans le message épinglé (pas de nouveau message)', calls.filter(c => c.method === 'sendDocument').length === 1 && calls.some(c => c.method === 'editMessageMedia'), calls.map(c => c.method).join(','));
+  const m = JournalStore.merge(
+    { v: 1, signals: [sigTest], annotations: { a: { note: 'moi' } }, riskAlerts: { x: 1 } },
+    { v: 1, signals: [{ ...sigTest, id: 'autre', at: sigTest.at - 1 }], annotations: { a: { kind: 'test' }, b: { note: 'eux' } }, riskAlerts: { y: 2 } }
+  );
+  ok('Fusion avant écriture : signaux, annotations et alertes des deux côtés gardés', m.signals.length === 2 && m.annotations.a.note === 'moi' && m.annotations.a.kind === 'test' && m.annotations.b.note === 'eux' && !!m.riskAlerts?.x && !!m.riskAlerts?.y);
   const st2 = new JournalStore(env, fake as any, 0);
   const back = await st2.get();
-  ok('Relu par un nouveau serveur (autre appareil / redémarrage)', back.signals.length === 1 && back.annotations['155532150']?.note === 'ok' && back.annotations['155532150']?.sl === 1.12532);
+  ok('Relu par un nouveau serveur (autre appareil / redémarrage)', back.signals.length === 1 && back.annotations['155532150']?.note === 'ok2' && back.annotations['155532150']?.sl === 1.12532);
   // alertes de risque : position trop grosse et perte du jour, une seule fois chacune
   const msgs: string[] = [];
   const jr: any = { available: true, trades: applyRisk(trades.map(t => (t.positionId === '155532150' ? { ...t, closedAt: null } : t)), 10_000, pol), desk: d2 };

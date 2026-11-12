@@ -93,5 +93,5 @@ L'app n'implémente aucun message de trading : elle ne peut pas passer d'ordre, 
 ### 3. Vérification toutes les 5 minutes
 L'hébergement AI Studio se met en veille sans visiteur : une tâche externe réveille l'app.
 1. Crée un compte gratuit sur https://cron-job.org.
-2. Nouvelle tâche : adresse `https://TON-APP/api/watch/tick?key=TON_WATCH_SECRET`, toutes les **5 minutes**, délai d'attente maximal.
+2. Nouvelle tâche : adresse `https://TON-APP/api/watch/tick`, toutes les **5 minutes**, délai d'attente maximal. Dans « Avancé » → « En-têtes », ajoute `X-Watch-Key: TON_WATCH_SECRET` (plus sûr que `?key=` dans l'adresse, qui apparaît dans les journaux d'appels ; `?key=` reste accepté).
 3. La surveillance ne travaille que pendant les kill zones (Londres 02–05 h, New York 07–10 h, heure de New York), sur l'or uniquement (EUR/USD en pause). Elle envoie « setup en préparation » quand le scénario M15 est valide, puis « ordre prêt » quand le CHoCH M5 confirme. Les alertes apparaissent aussi en haut de l'onglet Analyse, avec « Ajouter au journal ».

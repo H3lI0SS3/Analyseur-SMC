@@ -67,7 +67,7 @@ const resp = (over: any) => ({ pair: 'XAU/USD', generatedAt: KZ, final: { signal
 
   next = resp({ final: { signal: 'vendre', plan, notes: [] }, execution: { stage: 'ordre', zone, message: 'CHoCH M5 à 13:10 : ordre Sell Limit à 4051.54.' } });
   const t3 = await w.tick(KZ + 900_000);
-  ok('CHoCH M5 : alerte « ordre prêt » avec entrée, stop, TP et validité', t3.checked[0].alert === 'ordre' && /ordre prêt/.test(messages[1]) && /Sell Limit : 4051\.54/.test(messages[1]) && /Stop : 4060\.20/.test(messages[1]) && /TP2 : 3990\.00/.test(messages[1]) && /Valable jusqu&#39;à|Valable jusqu'à/.test(messages[1]), messages[1]?.slice(0, 120));
+  ok('CHoCH M5 : alerte « ordre prêt » avec entrée, stop, TP et validité', t3.checked[0].alert === 'ordre' && /ordre prêt/.test(messages[1]) && /SELL LIMIT : 4051\.54/.test(messages[1]) && /Stop : 4060\.20/.test(messages[1]) && /TP2 : 3990\.00/.test(messages[1]) && /Valable jusqu&#39;à|Valable jusqu'à/.test(messages[1]), messages[1]?.slice(0, 120));
   ok('Le message rappelle que rien n’est passé automatiquement', /Rien n'est passé automatiquement/.test(messages[1]));
   await w.tick(KZ + 1_200_000);
   ok('Même ordre 5 min plus tard : pas de doublon', messages.length === 2);
@@ -82,7 +82,7 @@ const resp = (over: any) => ({ pair: 'XAU/USD', generatedAt: KZ, final: { signal
   const tsetup = { direction: 'acheter', entryType: 'limite', entry: 4100.5, sl: 4094.2, tp1: 4115, tp2: 4120, rr1: 2.1, rr2: 2.9, zoneId: 'M15-FVG-1', validUntil: KZ + 7_200_000 };
   next = resp({ engine: { setup: null, training: { setup: tsetup, missing: ['Zone en discount de l’impulsion (< 50 %)'] } } });
   const t6 = await w.tick(KZ + 1_800_000);
-  ok('Signal d’entraînement : alerte « TEST » avec entrée, stop, conditions manquantes et risque 0,25 %', t6.checked[0].alert === 'test' && /TEST entraînement/.test(messages[2]) && /Buy Limit : 4100\.50/.test(messages[2]) && /discount/.test(messages[2]) && /0,25 %/.test(messages[2]), messages[2]?.slice(0, 160));
+  ok('Signal d’entraînement : alerte « TEST » avec entrée, stop, conditions manquantes et risque 0,25 %', t6.checked[0].alert === 'test' && /TEST entraînement/.test(messages[2]) && /BUY LIMIT : 4100\.50/.test(messages[2]) && /discount/.test(messages[2]) && /0,25 %/.test(messages[2]), messages[2]?.slice(0, 160));
   await w.tick(KZ + 2_100_000);
   ok('Même signal TEST 5 min plus tard : pas de doublon', messages.length === 3);
   providers.length = 0;
@@ -91,6 +91,22 @@ const resp = (over: any) => ({ pair: 'XAU/USD', generatedAt: KZ, final: { signal
   offKz = true;
   const offRun = await w.tick(Date.UTC(2026, 11, 2, 17, 0));
   ok('Hors kill zone avec cTrader : analyse rapide sans IA (signaux TEST possibles)', offRun.skipped === null && providers.join(',') === 'none');
+
+  // déduplication persistante (fichier Telegram) et volume conseillé dans l'alerte
+  const seen = new Set<string>();
+  const m2: string[] = [];
+  const mk = () =>
+    new Watcher(
+      async () => resp({ final: { signal: 'vendre', plan, notes: [] }, execution: { stage: 'ordre', zone, message: 'CHoCH M5.' } }),
+      async html => { m2.push(html); return { ok: true }; },
+      () => false,
+      ['XAU/USD'],
+      { dedup: async k => (seen.has(k) ? false : (seen.add(k), true)), sizing: async () => ({ lots: 0.06, riskUsd: 52.3, riskPct: 0.5 }) }
+    );
+  await mk().tick(KZ);
+  await mk().tick(KZ + 300_000); // nouveau serveur (redémarrage) : mémoire vide, mais la clé est déjà dans le fichier
+  ok('Redémarrage : la même alerte ne repart pas (déduplication persistante)', m2.length === 1);
+  ok('Alerte : volume conseillé, perte si stop et chemin cTrader « Limit, PAS au marché »', /Volume : 0\.06 lot/.test(m2[0]) && /52 \$/.test(m2[0]) && /Ordre en attente → Limit/.test(m2[0]) && /PAS au marché/.test(m2[0]), m2[0]?.slice(0, 200));
 
   // une erreur d'analyse ne casse pas la surveillance
   const w2 = new Watcher(async () => { throw new Error('Twelve Data indisponible'); }, async () => ({ ok: true }));

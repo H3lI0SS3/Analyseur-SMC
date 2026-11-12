@@ -43,7 +43,13 @@ export class Watcher {
     private notify: NotifyFn = sendTelegram,
     /** hors kill zone, on cherche quand même les signaux d'entraînement si la source est gratuite (cTrader) */
     private offKillzone: () => boolean = () => !!getCTrader(),
-    private onlyPairs?: string[]
+    private onlyPairs?: string[],
+    private extras: {
+      /** déduplication persistante (survit aux redémarrages et aux instances multiples) : false = déjà envoyée */
+      dedup?: (key: string, now: number) => Promise<boolean>;
+      /** taille conseillée pour l'ordre (solde réel × risque prévu) */
+      sizing?: (pair: string, entry: number, sl: number, kind: 'ordre' | 'test') => Promise<{ lots: number; riskUsd: number; riskPct: number } | null>;
+    } = {}
   ) {}
 
   /** Paires surveillées : toutes celles qui ne sont pas en pause. */
@@ -65,7 +71,7 @@ export class Watcher {
         // 1er passage rapide sans IA ; si un setup apparaît, analyse complète comme dans l'app (avec Gemini)
         let a = await this.analyze({ pair, provider: 'none' });
         if (a?.final?.signal !== 'attendre' || a?.execution) a = await this.analyze({ pair, provider: 'auto' });
-        const alert = this.alertFor(a, now);
+        const alert = await this.alertFor(a, now);
         if (alert) {
           alert.telegram = await this.notify(toHtml(alert));
           this.alerts = [alert, ...this.alerts].slice(0, MAX_ALERTS);
@@ -80,7 +86,7 @@ export class Watcher {
   }
 
   /** Alerte à envoyer pour cette analyse (null si rien de nouveau). */
-  private alertFor(a: any, now: number): WatchAlert | null {
+  private async alertFor(a: any, now: number): Promise<WatchAlert | null> {
     const plan = a?.final?.plan;
     const x = a?.execution;
     for (const [k, t] of this.sent) if (now - t > DEDUP_MS) this.sent.delete(k);
@@ -98,6 +104,14 @@ export class Watcher {
     }
     if (!kind || this.sent.has(key)) return null;
     this.sent.set(key, now);
+    if (this.extras.dedup && !(await this.extras.dedup(key, now).catch(() => true))) return null;
+    const order = kind === 'ordre' ? plan : kind === 'test' ? a.engine.training.setup : null;
+    const size = order && this.extras.sizing ? await this.extras.sizing(a.pair, order.entry, order.sl, kind as 'ordre' | 'test').catch(() => null) : null;
+    const sizeLine = size
+      ? `Volume : ${size.lots.toFixed(2)} lot (perte si stop ≈ ${Math.round(size.riskUsd)} $, ${size.riskPct} % du compte)`
+      : '';
+    const howTo = (dir: string, limit: boolean) =>
+      limit ? `Sur cTrader : Nouvel ordre → Ordre en attente → Limit → ${dir}. PAS au marché.` : `Sur cTrader : ordre au marché ${dir}.`;
     const dec = PAIRS[a.pair]?.decimals ?? 2;
     const f = (v: number | null | undefined) => (v === null || v === undefined ? '—' : Number(v).toFixed(dec));
     const dir = (plan ?? a.engine?.training?.setup)?.direction === 'acheter' ? 'ACHAT' : 'VENTE';
@@ -107,12 +121,14 @@ export class Watcher {
       const until = a.engine?.setup?.validUntil;
       title = `${plan.direction === 'acheter' ? '🟢' : '🔴'} ORA Trader — ${dir} ${a.pair} : ordre prêt`;
       lines = [
-        `Ordre ${plan.direction === 'acheter' ? 'Buy' : 'Sell'} ${plan.entryType === 'limite' ? 'Limit' : 'au marché'} : ${f(plan.entry)}`,
+        `Ordre ${plan.direction === 'acheter' ? 'BUY' : 'SELL'} ${plan.entryType === 'limite' ? 'LIMIT' : 'au marché'} : ${f(plan.entry)}`,
+        sizeLine,
         `Stop : ${f(plan.sl)}`,
         `TP1 : ${f(plan.tp1)} (1:${plan.rr1 ?? '—'})${plan.tp2 !== null && plan.tp2 !== undefined ? `  ·  TP2 : ${f(plan.tp2)} (1:${plan.rr2 ?? '—'})` : ''}`,
         until ? `Valable jusqu'à ${maTime(until)} (heure du Maroc)` : '',
         x?.message ? `\n${x.message}` : '',
-        `\nOuvre l'app pour la taille de lot et le ticket, vérifie le prix sur FxPro, puis décide. Rien n'est passé automatiquement.`,
+        `\n${howTo(plan.direction === 'acheter' ? 'Buy' : 'Sell', plan.entryType === 'limite')}`,
+        `Stop et TP dans le ticket d'ordre. Rien n'est passé automatiquement.`,
       ];
     } else if (kind === 'test') {
       const t = a.engine.training;
@@ -120,12 +136,14 @@ export class Watcher {
       const tdir = p.direction === 'acheter' ? 'ACHAT' : 'VENTE';
       title = `🧪 TEST entraînement — ${tdir} ${a.pair} (démo uniquement)`;
       lines = [
-        `Ordre ${p.direction === 'acheter' ? 'Buy' : 'Sell'} ${p.entryType === 'limite' ? 'Limit' : 'au marché'} : ${f(p.entry)}`,
+        `Ordre ${p.direction === 'acheter' ? 'BUY' : 'SELL'} ${p.entryType === 'limite' ? 'LIMIT' : 'au marché'} : ${f(p.entry)}`,
+        sizeLine,
         `Stop : ${f(p.sl)}`,
         `TP1 : ${f(p.tp1)} (1:${p.rr1 ?? '—'})${p.tp2 !== null && p.tp2 !== undefined ? `  ·  TP2 : ${f(p.tp2)} (1:${p.rr2 ?? '—'})` : ''}`,
         p.validUntil ? `Valable jusqu'à ${maTime(p.validUntil)} (heure du Maroc)` : '',
         `\nPas un signal du protocole. Il manque : ${t.missing.join(', ') || '—'}.`,
-        `Risque conseillé : 0,25 %. Rien n'est passé automatiquement.`,
+        `${howTo(p.direction === 'acheter' ? 'Buy' : 'Sell', p.entryType === 'limite')}`,
+        size ? `Rien n'est passé automatiquement.` : `Risque conseillé : 0,25 %. Rien n'est passé automatiquement.`,
       ];
     } else {
       title = `🟡 ORA Trader — setup ${dir.toLowerCase()} ${a.pair} en préparation`;
@@ -143,7 +161,7 @@ export function toHtml(al: WatchAlert): string {
 
 // ---------- Instance partagée ----------
 let shared: Watcher | null = null;
-export function getWatcher(analyze: AnalyzeFn): Watcher {
-  if (!shared) shared = new Watcher(analyze);
+export function getWatcher(analyze: AnalyzeFn, extras: ConstructorParameters<typeof Watcher>[4] = {}): Watcher {
+  if (!shared) shared = new Watcher(analyze, sendTelegram, () => !!getCTrader(), undefined, extras);
   return shared;
 }

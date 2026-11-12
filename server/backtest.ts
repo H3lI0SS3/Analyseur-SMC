@@ -5,8 +5,8 @@
 //  - « souple »  : protocole + signaux du mode entraînement (TEST, compte démo), pour mesurer leur fréquence et leur résultat.
 
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
-import { analyze, MIN_CONFLUENCES, PD_OPTIONAL_PAIRS, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
-import { HOUR, marketClosed, maDateTime, nyParts } from './time';
+import { analyze, MIN_CONFLUENCES, MIN_RR, TRAINING_MIN_RR, PD_OPTIONAL_PAIRS, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
+import { HOUR, marketClosed, maDateTime, nyParts, nyToUtc } from './time';
 import type { OraBacktest } from './oraBacktest';
 
 export interface BacktestCosts {
@@ -495,6 +495,38 @@ export class BacktestRun {
 
   private candidates: Candidate[] = [];
 
+  /**
+   * Exécution M5 rejouée comme en direct (execution.ts) : surveillance à partir de la clôture de la bougie M15 du
+   * CHoCH et pas avant le début de la kill zone ; un ordre déjà servi ou au R:R insuffisant avant « maintenant » = pas
+   * de trade ; l'ordre n'est servi qu'à partir de « maintenant » (le moment où l'app le donne).
+   */
+  private refineLikeLive(s: Setup, zone: { top: number; bottom: number }, now: number, eng: EngineResult, missing: string[]) {
+    if (!this.m5 || !this.m5.length || !eng.trigger) return null;
+    const p = nyParts(now);
+    const h0 = p.h >= 2 && p.h < 5 ? 2 : p.h >= 7 && p.h < 10 ? 7 : null;
+    const kz = h0 === null ? 0 : nyToUtc(p.y, p.m, p.d, h0);
+    const from = Math.max(eng.trigger.mss.t + 15 * 60_000, kz);
+    // seules les bougies M5 clôturées à « maintenant » sont connues pour décider
+    const known = this.m5.slice(0, firstAtOrAfter(this.m5, now - 5 * 60_000 + 1));
+    let ref = refineM5(s, zone, from, known, this.costs.spread);
+    if (ref.kind === 'en attente') ref = refineM5(s, zone, from, this.m5, this.costs.spread); // la suite se joue après « maintenant »
+    if (ref.kind !== 'entrée') return null;
+    const long = s.direction === 'acheter';
+    // déjà servi entre le CHoCH M5 et maintenant : « manqué » en direct
+    for (let i = ref.idx; i < this.m5.length && this.m5[i].t < now; i++) {
+      const c = this.m5[i];
+      if (long ? c.l <= ref.setup.entry - this.costs.spread : c.h >= ref.setup.entry) return null;
+      if (long ? c.h >= s.tp1 : c.l <= s.tp1 - this.costs.spread) return null;
+    }
+    // R:R net de l'ordre M5, comme en direct (TEST : R:R ≥ 2 accepté)
+    const risk = Math.abs(ref.setup.entry - ref.setup.sl);
+    const rr = (tp: number) => (Math.abs(tp - ref.setup.entry) - this.commUnit) / (risk + this.commUnit);
+    const best = s.tp2 !== null ? rr(s.tp2) : rr(s.tp1);
+    if (best < (missing.includes('rr') ? TRAINING_MIN_RR : MIN_RR)) return null;
+    const start = Math.max(ref.from, now);
+    return { setup: ref.setup, market: ref.market, from: start, idx: firstAtOrAfter(this.m5, start), late: ref.from < now };
+  }
+
   /** Enregistre chaque setup qui passe les conditions obligatoires, avec son résultat pour chaque gestion. */
   private collectCandidate(eng: EngineResult, now: number, k: number) {
     // protocole complet, ou setup du mode entraînement (déclencheur complet, contexte assoupli) pour la ventilation
@@ -514,15 +546,15 @@ export class BacktestRun {
     }
     let m5res: Candidate['m5'] = null;
     const zone = eng.zones.find(z => z.id === s.zoneId);
+    const live = zone ? this.refineLikeLive(s, zone, now, eng, missing) : null;
     if (this.m5 && this.m5.length && zone && now >= this.m5[0].t && now < this.m5[this.m5.length - 1].t) {
-      const ref = refineM5(s, zone, now, this.m5, this.costs.spread);
       m5res = {} as NonNullable<Candidate['m5']>;
       for (const mode of ['partiel', 'tp1', 'final', 'suivi50', 'suivi75'] as Management[]) {
-        if (ref.kind !== 'entrée') {
+        if (!live) {
           m5res[mode] = { filledAt: null, exitAt: null, r: null };
           continue;
         }
-        const sim = simulate(ref.setup, ref.from, this.m5, ref.idx, this.costs.spread, mode);
+        const sim = simulate(live.setup, live.from, this.m5, live.idx, this.costs.spread, mode);
         m5res[mode] = {
           filledAt: sim.filledAt,
           exitAt: sim.exitAt,
@@ -532,9 +564,8 @@ export class BacktestRun {
     }
     let m5mkt: Candidate['m5mkt'] = null;
     if (this.m5 && this.m5.length && zone && now >= this.m5[0].t && now < this.m5[this.m5.length - 1].t) {
-      const ref = refineM5(s, zone, now, this.m5, this.costs.spread);
-      if (ref.kind === 'entrée') {
-        const sim = simulate(ref.market, ref.from, this.m5, ref.idx, this.costs.spread, 'partiel');
+      if (live && !live.late) {
+        const sim = simulate(live.market, live.from, this.m5, live.idx, this.costs.spread, 'partiel');
         m5mkt = { filledAt: sim.filledAt, exitAt: sim.exitAt, r: sim.outcome === 'expiré' || sim.outcome === 'en cours' ? null : (sim.pnl - this.commUnit) / (sim.risk + this.commUnit) };
       } else m5mkt = { filledAt: null, exitAt: null, r: null };
     }
