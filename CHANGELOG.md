@@ -1,5 +1,8 @@
 # Journal des versions
 
+## Backtest : gestion de sortie de Mehdi (mesure)
+- Nouvelle comparaison des gestions, sur le protocole + TEST en exécution M5 : la gestion actuelle (50 % à TP1, stop au point d'entrée, reste à TP2) contre la gestion de Mehdi (toute la position vise TP2, stop initial gardé, puis remonté sur TP1 quand le prix a fait la moitié ou les 3/4 du chemin TP1 → TP2).
+
 ## Audit — lot 1 : chiffres justes et risque maîtrisé
 - Journal FxPro : le stop retenu pour le R est le stop d'origine, du côté de la perte et à moins de 5 % de l'entrée ; un stop déplacé en gain (cas du 10/11, +1,04 R faux) ou aberrant (« 1 ») est ignoré et signalé. Stop saisi vérifié par le serveur.
 - Solde réel lu sur cTrader (lecture seule) : les lots proposés l'utilisent à la place du capital saisi.

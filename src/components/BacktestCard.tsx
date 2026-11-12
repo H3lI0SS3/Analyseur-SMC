@@ -109,6 +109,7 @@ export function BacktestCard({ pair, settings }: Props) {
           </div>
           {res.lab && <LabTable lab={res.lab} />}
           {res.breakdown && <BreakdownTable b={res.breakdown} />}
+          {res.management && <ManagementTable m={res.management} />}
           <details className="text-[11px] text-mute">
             <summary className="cursor-pointer">Hypothèses du test</summary>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
@@ -211,6 +212,33 @@ function BreakdownTable({ b }: { b: NonNullable<NonNullable<BacktestJob['result'
           </div>
         ) : null
       )}
+    </div>
+  );
+}
+
+/** Gestion de sortie : actuelle (50 % à TP1) contre stop remonté sur TP1 à l'approche de TP2. */
+function ManagementTable({ m }: { m: NonNullable<NonNullable<BacktestJob['result']>['management']> }) {
+  const fmtR = (s: LabStats) => (s.avgR !== null ? `${s.avgR >= 0 ? '+' : ''}${s.avgR.toFixed(2)} R` : '—');
+  const cls = (s: LabStats) => (s.avgR !== null ? (s.avgR > 0 ? 'text-up' : s.avgR < 0 ? 'text-down' : '') : 'text-mute');
+  return (
+    <div className="space-y-2 pt-1">
+      <div className="label">Gestion de sortie</div>
+      <p className="text-[11px] leading-snug text-mute">{m.scope}. Coupure entre les moitiés : {localDateTime(m.splitAt)}.</p>
+      <div className="overflow-hidden rounded-lg border border-line">
+        {m.rows.map(r => (
+          <div key={r.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 border-t border-line px-2 py-1.5 text-[11px] first:border-t-0">
+            <span className="leading-tight">{r.label}</span>
+            <span className={cx('num text-right', cls(r.firstHalf))}>
+              {fmtR(r.firstHalf)}
+              <span className="block text-[9px] text-mute">{r.firstHalf.trades} tr. · {r.firstHalf.winRate ?? '—'} %</span>
+            </span>
+            <span className={cx('num text-right', cls(r.secondHalf))}>
+              {fmtR(r.secondHalf)}
+              <span className="block text-[9px] text-mute">{r.secondHalf.trades} tr. · {r.secondHalf.winRate ?? '—'} %</span>
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

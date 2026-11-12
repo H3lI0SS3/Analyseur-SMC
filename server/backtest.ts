@@ -100,6 +100,8 @@ export interface BacktestResult {
   lab: LabResult;
   /** ventilation par condition manquante (mesure seule) */
   breakdown?: ReturnType<typeof runBreakdown>;
+  /** gestion de sortie : actuelle contre stop remonté sur TP1 (mesure) */
+  management?: ReturnType<typeof runManagement>;
   /** moteur ORA corrigé rejoué sur les mêmes bougies (si les M5 sont disponibles) */
   ora?: OraBacktest | null;
 }
@@ -113,7 +115,12 @@ const MAX_HOLD = 5 * 24 * HOUR; // un trade ouvert est clôturé après 5 jours
  *  - 'tp1'     : tout à TP1 ;
  *  - 'final'   : tout à l'objectif le plus lointain (TP2 sinon TP1), sans point mort.
  */
-export type Management = 'partiel' | 'tp1' | 'final';
+export type Management = 'partiel' | 'tp1' | 'final' | 'suivi50' | 'suivi75';
+/**
+ * Gestion de Mehdi (mesure) : toute la position vise TP2, stop initial conservé ; quand le prix a fait 50 % (suivi50)
+ * ou 75 % (suivi75) du chemin TP1 → TP2, le stop est remonté sur TP1 (gain sécurisé).
+ */
+export const TRAIL_MODES: Record<string, number> = { suivi50: 0.5, suivi75: 0.75 };
 
 export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: number, spread: number, mode: Management = 'partiel') {
   const long = setup.direction === 'acheter';
@@ -141,6 +148,34 @@ export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: nu
     }
   }
   if (filledAt === null) return { filledAt: null, exitAt: null, pnl: 0, outcome: 'expiré' as const, risk };
+
+  // 2bis. gestion « stop remonté sur TP1 à l'approche de TP2 » (toute la position)
+  if (mode in TRAIL_MODES && setup.tp2 !== null) {
+    const f = TRAIL_MODES[mode];
+    const trigger = setup.tp1 + f * (setup.tp2 - setup.tp1);
+    let moved = false;
+    for (let i = filledIdx; i < m15.length; i++) {
+      const c = m15[i];
+      if (c.t - filledAt > MAX_HOLD) {
+        return { filledAt, exitAt: c.t, pnl: long ? c.o - entry : entry - c.o - spread, outcome: 'clôturé (durée max)' as const, risk };
+      }
+      const slHit = long ? c.l <= sl : c.h >= sl - spread;
+      if (slHit) {
+        const exit = long ? Math.min(sl, c.o) : Math.max(sl, c.o + spread);
+        const pnl = long ? exit - entry : entry - exit;
+        return { filledAt, exitAt: c.t, pnl, outcome: moved ? ('gagné' as const) : ('perdu' as const), risk };
+      }
+      if (long ? c.h >= setup.tp2 : c.l <= setup.tp2 - spread) {
+        return { filledAt, exitAt: c.t, pnl: Math.abs(setup.tp2 - entry), outcome: 'gagné' as const, risk };
+      }
+      // le stop n'est remonté qu'à partir de la bougie suivante (prudent)
+      if (!moved && (long ? c.h >= trigger : c.l <= trigger - spread)) {
+        sl = setup.tp1;
+        moved = true;
+      }
+    }
+    return { filledAt, exitAt: null, pnl: 0, outcome: 'en cours' as const, risk };
+  }
 
   // 2. gestion : SL ; à TP1 on encaisse 50 % et le stop passe au point d'entrée ; reste à TP2
   let remaining = 1;
@@ -469,7 +504,7 @@ export class BacktestRun {
     const missing = full ? [] : eng.nearMiss!.missingKeys;
     const ok = (key: string) => !!eng.checklist.find(c => c.key === key)?.ok;
     const res = {} as Candidate['res'];
-    for (const mode of ['partiel', 'tp1', 'final'] as Management[]) {
+    for (const mode of ['partiel', 'tp1', 'final', 'suivi50', 'suivi75'] as Management[]) {
       const sim = simulate(s, now, this.m15, k + 1, this.costs.spread, mode);
       res[mode] = {
         filledAt: sim.filledAt,
@@ -482,7 +517,7 @@ export class BacktestRun {
     if (this.m5 && this.m5.length && zone && now >= this.m5[0].t && now < this.m5[this.m5.length - 1].t) {
       const ref = refineM5(s, zone, now, this.m5, this.costs.spread);
       m5res = {} as NonNullable<Candidate['m5']>;
-      for (const mode of ['partiel', 'tp1', 'final'] as Management[]) {
+      for (const mode of ['partiel', 'tp1', 'final', 'suivi50', 'suivi75'] as Management[]) {
         if (ref.kind !== 'entrée') {
           m5res[mode] = { filledAt: null, exitAt: null, r: null };
           continue;
@@ -561,6 +596,7 @@ export class BacktestRun {
         .slice(0, 20),
       lab: runLab(this.candidates, this.startT, m15[m15.length - 1].t),
       breakdown: runBreakdown(this.candidates, this.startT, m15[m15.length - 1].t),
+      management: runManagement(this.candidates, this.startT, m15[m15.length - 1].t),
     };
   }
 }
@@ -832,6 +868,38 @@ export function runBreakdown(cands: Candidate[], from: number, to: number): { cr
     splitAt,
     rows,
   };
+}
+
+/** Comparaison des gestions de sortie (mesure) : celle du backtest (50 % à TP1 + point mort) contre la gestion de Mehdi. */
+export const MANAGEMENT_ROWS: { id: Management; label: string }[] = [
+  { id: 'partiel', label: '50 % à TP1, stop au point d’entrée, reste à TP2 (gestion actuelle du backtest)' },
+  { id: 'suivi50', label: 'Toute la position à TP2, stop remonté sur TP1 à mi-chemin TP1 → TP2' },
+  { id: 'suivi75', label: 'Toute la position à TP2, stop remonté sur TP1 aux 3/4 du chemin TP1 → TP2' },
+];
+export interface ManagementRow {
+  id: Management;
+  label: string;
+  firstHalf: LabStats;
+  secondHalf: LabStats;
+}
+export function runManagement(cands: Candidate[], from: number, to: number): { splitAt: number; scope: string; rows: ManagementRow[] } | null {
+  if (!cands.some(c => c.m5)) return null;
+  const splitAt = from + (to - from) / 2;
+  const rows = MANAGEMENT_ROWS.map(m => {
+    let busy = 0;
+    const a: number[] = [];
+    const b: number[] = [];
+    for (const c of cands) {
+      // protocole + TEST 3.12, exécution M5 (comme en direct)
+      if (c.t < busy || !marketRule(c) || !c.missing.every(k => k === 'pd' || k === 'rr') || !c.m5) continue;
+      const r = c.m5[m.id];
+      busy = r.exitAt ?? (r.filledAt === null ? c.t + EXPIRY : Number.MAX_SAFE_INTEGER);
+      if (r.r === null) continue;
+      (c.t < splitAt ? a : b).push(r.r);
+    }
+    return { id: m.id, label: m.label, firstHalf: labStats(a), secondHalf: labStats(b) };
+  });
+  return { splitAt, scope: 'Protocole + TEST 3.12, exécution M5, frais compris', rows };
 }
 
 export function labStats(rs: number[]): LabStats {

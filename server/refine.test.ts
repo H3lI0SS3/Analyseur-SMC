@@ -1,6 +1,6 @@
 // Entrée affinée M5 : règle figée du labo (CHoCH M5 dans la zone M15).
 import assert from 'node:assert/strict';
-import { refineM5 } from './backtest';
+import { refineM5, simulate } from './backtest';
 import type { Setup } from './smc';
 
 const T0 = Date.UTC(2026, 10, 4, 13, 0); // mercredi, marché ouvert
@@ -91,3 +91,21 @@ const zone = { bottom: 100, top: 102 };
 }
 
 console.log('refine : 6 cas OK');
+
+// ---------- Gestion de Mehdi : stop remonté sur TP1 à l'approche de TP2 (mesure du backtest) ----------
+{
+  const T0 = Date.UTC(2026, 10, 12, 13, 0);
+  const st: any = { direction: 'vendre', entryType: 'limite', entry: 100, sl: 101, tp1: 98, tp2: 96, rr1: 2, rr2: 4 };
+  const k = (i: number, o: number, h: number, l: number, c: number) => ({ t: T0 + i * 900_000, o, h, l, c });
+  // remplissage à 100, descente jusqu'à 96,9 (plus de la moitié du chemin TP1 → TP2), puis remontée jusqu'au stop initial
+  const path = [k(0, 99.5, 100.2, 99.4, 99.8), k(1, 99.8, 99.9, 96.9, 97.2), k(2, 97.2, 98.4, 97.1, 98.3), k(3, 98.3, 101.5, 98.2, 101.2)];
+  const s50 = simulate(st, T0, path as any, 0, 0, 'suivi50');
+  const s75 = simulate(st, T0, path as any, 0, 0, 'suivi75');
+  const sp = simulate(st, T0, path as any, 0, 0, 'partiel');
+  assert.equal(s50.pnl, 2, 'suivi50 : stop remonté sur TP1 (97 atteint), sortie à 98 = +2 R');
+  assert.equal(s75.pnl, -1, 'suivi75 : 96,5 pas atteint, stop initial touché = −1 R');
+  assert.equal(sp.pnl, 1, 'partiel : 50 % à TP1 (+1), reste au point mort (0) = +1 R');
+  const direct = [k(0, 99.5, 100.2, 99.4, 99.8), k(1, 99.8, 99.9, 95.8, 96.1)];
+  assert.equal(simulate(st, T0, direct as any, 0, 0, 'suivi75').pnl, 4, 'TP2 atteint : toute la position = +4 R');
+  console.log('OK  gestion « stop remonté sur TP1 » : 4 scénarios');
+}

@@ -151,6 +151,7 @@ export interface BacktestJob {
       rule: string;
       variants: { id: string; label: string; inSample: LabStats; outOfSample: LabStats | null }[];
     };
+    management?: { splitAt: number; scope: string; rows: { id: string; label: string; firstHalf: LabStats; secondHalf: LabStats }[] } | null;
     breakdown?: {
       criterion: string;
       splitAt: number;

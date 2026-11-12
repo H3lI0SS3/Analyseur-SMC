@@ -334,6 +334,13 @@ function buildServer() {
               })),
             }
           : null,
+        gestion_de_sortie: r.management
+          ? {
+              perimetre: r.management.scope,
+              coupure_entre_les_deux_moities: maDateTime(r.management.splitAt),
+              lignes: r.management.rows.map(m => ({ gestion: m.label, premiere_moitie: m.firstHalf, deuxieme_moitie: m.secondHalf })),
+            }
+          : null,
         hypotheses: r.assumptions,
         export_compact: { from: r.from, to: r.to, generatedAt: Date.now(), rulesVersion: r.rulesVersion, rows: exportTrades(finishedTrades(actif) ?? []) },
         // tous les signaux depuis le gel, y compris les ordres limite jamais exécutés (équivalent d'un suivi en direct)
