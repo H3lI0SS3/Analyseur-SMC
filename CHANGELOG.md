@@ -1,5 +1,13 @@
 # Journal des versions
 
+## Audit — lot 2 : l'écran du quotidien
+- L'analyse se lance toute seule à l'ouverture et au changement d'actif ; le verdict est en haut de l'écran (testé en taille iPhone : à 246 px au lieu de 1 600 px).
+- Carte « Ordre à passer sur cTrader » : SELL/BUY LIMIT en très gros, « PAS au marché », un seul volume total, perte si stop en $ et en %, niveaux à copier, chemin cTrader pas à pas, expiration, gestion « stop remonté sur TP1 à l'approche de TP2 » ; règle du desk en rouge si le compte ne permet pas le trade. Même carte pour les ordres TEST.
+- Sous « Attendre » : surveillance active, dernier contrôle, kill zones du jour en heure du Maroc.
+- Détails (structure, zones, checklist, volume profile, IA) repliés ; TradingView replié par défaut et placé après le verdict.
+- Journal : seul le journal FxPro est affiché ; l'ancien journal de l'appareil est archivé (replié, export conservé). Boutons « Je prends ce trade » / « Ajouter au journal » retirés (le journal FxPro enregistre tout seul).
+- Erreurs visibles (journal FxPro, surveillance) ; mentions MT5 / Exness remplacées par cTrader ; textes de 12 px minimum, boutons agrandis ; recalage sur le prix du broker masqué quand les données viennent de cTrader.
+
 ## Audit — lot 3 : robustesse et backtest
 - Alertes : déduplication persistante (fichier Telegram) — la même alerte ne repart plus après un redémarrage ou sur une autre instance.
 - Alertes « ordre prêt » et TEST : volume conseillé (solde réel × risque prévu), perte si stop, chemin cTrader « Ordre en attente → Limit, PAS au marché ».

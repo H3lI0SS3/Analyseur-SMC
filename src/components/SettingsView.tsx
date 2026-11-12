@@ -36,10 +36,10 @@ export function SettingsView({ settings, setSettings, status }: Props) {
             settings.broker === 'mt5' && settings.commissionPerLot === 7 && settings.spreadEurPips === 0.2 && settings.spreadGold === 0.2 ? 'border-gold bg-gold/10 text-gold' : 'border-line text-ink'
           )}
         >
-          Préréglage FxPro (MT5 Raw+) : commission 7 $/lot, spreads 0,2
+          Préréglage FxPro cTrader : commission 7 $/lot, spreads 0,2
         </button>
         <div className="grid grid-cols-3 gap-2">
-          {([['mt5', 'MT5 (lots)'], ['cent', 'Compte cent'], ['etoro', 'eToro']] as const).map(([k, l]) => (
+          {([['mt5', 'cTrader / lots'], ['cent', 'Compte cent'], ['etoro', 'eToro']] as const).map(([k, l]) => (
             <button
               key={k}
               onClick={() => set(k === 'mt5' ? { broker: k } : { broker: k, commissionPerLot: 0 })}
@@ -50,8 +50,8 @@ export function SettingsView({ settings, setSettings, status }: Props) {
           ))}
         </div>
         {settings.broker === 'cent' && (
-          <p className="text-[11px] leading-snug text-mute">
-            Compte cent (ex. Exness Standard Cent) : saisis ton capital en dollars (5 000 USC = 50 $). Les tailles sont données en lots cent (1 lot cent = 1/100 de lot standard). Vérifie dans la « Spécification » du symbole que c’est bien le cas chez ton broker.
+          <p className="text-xs leading-snug text-mute">
+            Compte cent : saisis ton capital en dollars (5 000 USC = 50 $). Les tailles sont données en lots cent (1 lot cent = 1/100 de lot standard). Vérifie dans la « Spécification » du symbole que c’est bien le cas chez ton broker.
           </p>
         )}
         {settings.broker === 'etoro' && (
@@ -80,7 +80,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
             </button>
           ))}
         </div>
-        <p className="text-[11px] leading-relaxed text-mute">
+        <p className="text-xs leading-relaxed text-mute">
           L’IA relit les calculs du moteur, peut rejeter un plan ou affiner les niveaux, mais ne peut jamais forcer un trade ni inventer un prix.
         </p>
         <ul className="space-y-1 text-xs">
@@ -104,15 +104,15 @@ export function SettingsView({ settings, setSettings, status }: Props) {
           <KeyRow name="TWELVE_DATA_API_KEY" ok={status?.dataSource === 'Twelve Data' || (!!status?.ctrader?.configured && status?.dataSource !== 'Yahoo Finance')} desc="Cotations spot EUR/USD et XAU/USD (gratuit sur twelvedata.com) ; en secours si cTrader est configuré" optional />
         </ul>
         {status?.ctrader?.configured && (status.ctrader as any).lastError && (
-          <p className="text-[11px] text-warn">cTrader : {(status.ctrader as any).lastError} — l’app bascule sur Twelve Data en attendant.</p>
+          <p className="text-xs text-warn">cTrader : {(status.ctrader as any).lastError} — l’app bascule sur Twelve Data en attendant.</p>
         )}
         {status?.ctrader?.configured && (status.ctrader as any).readOnly === false && (
-          <p className="text-[11px] text-warn">Ton jeton cTrader a le droit de trading. L’app ne l’utilise qu’en lecture, mais un jeton « accounts » (lecture seule) est plus sûr.</p>
+          <p className="text-xs text-warn">Ton jeton cTrader a le droit de trading. L’app ne l’utilise qu’en lecture, mais un jeton « accounts » (lecture seule) est plus sûr.</p>
         )}
         {status?.ctrader?.configured && (status.ctrader as any).tokenRefreshed && (
-          <p className="text-[11px] text-warn">Le jeton cTrader a expiré et a été renouvelé pour cette session : génère-en un nouveau et mets à jour CTRADER_ACCESS_TOKEN et CTRADER_REFRESH_TOKEN.</p>
+          <p className="text-xs text-warn">Le jeton cTrader a expiré et a été renouvelé pour cette session : génère-en un nouveau et mets à jour CTRADER_ACCESS_TOKEN et CTRADER_REFRESH_TOKEN.</p>
         )}
-        <p className="text-[11px] leading-relaxed text-mute">
+        <p className="text-xs leading-relaxed text-mute">
           Sans clé Twelve Data, l’app utilise Yahoo Finance (gratuit) : l’or y est coté via les futures COMEX, avec quelques dollars d’écart possible avec ton broker.
           Les clés se règlent dans AI Studio, panneau « Secrets ». Elles restent côté serveur et ne sont jamais envoyées au navigateur.
         </p>
@@ -123,7 +123,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
           <KeyRow name="WATCH_SECRET" ok={!!status?.watchConfigured} desc="Clé de la vérification toutes les 5 min (16 caractères minimum)" optional />
           <KeyRow name="TELEGRAM_BOT_TOKEN · TELEGRAM_CHAT_ID" ok={!!status?.telegram} desc="Bot Telegram qui t’envoie les setups et les ordres prêts" optional />
         </ul>
-        <p className="text-[11px] leading-relaxed text-mute">
+        <p className="text-xs leading-relaxed text-mute">
           Adresse à appeler toutes les 5 minutes (cron-job.org, gratuit) :
           <span className="num block break-all text-ink">{typeof window !== 'undefined' ? window.location.origin : ''}/api/watch/tick</span>
           <span className="mt-1 block">
@@ -139,7 +139,7 @@ export function SettingsView({ settings, setSettings, status }: Props) {
           <KeyRow name="MCP_TOKEN" ok={!!status?.mcpEnabled} desc="Secret d’accès au connecteur (16 caractères minimum)" optional />
           <KeyRow name="APP_ACCESS_CODE" ok={!!status?.accessRequired} desc="Code pour ouvrir l’app et protéger tes crédits IA (recommandé)" optional />
         </ul>
-        <p className="text-[11px] leading-relaxed text-mute">
+        <p className="text-xs leading-relaxed text-mute">
           Une fois l’app publiée, ajoute dans Claude un connecteur personnalisé avec l’adresse
           <span className="num text-ink"> {typeof window !== 'undefined' ? window.location.origin : ''}/mcp</span>.
           Claude pourra alors lire les cotations, les bougies et lancer l’analyse. Aucun ordre ne peut être passé.
@@ -178,8 +178,8 @@ function Field({ label, value, onChange, step, min, max, hint, allowZero }: { la
         }}
         className={cx('num mt-1 w-full rounded-lg border bg-card2 px-3 py-2.5 text-base text-ink focus:outline-none', bad ? 'border-down' : 'border-line focus:border-gold')}
       />
-      {bad && <span className="mt-1 block text-[11px] text-down">Valeur non valide{max !== undefined ? ` (max ${max})` : ''} : non enregistrée.</span>}
-      {hint && <span className="mt-1 block text-[11px] text-mute">{hint}</span>}
+      {bad && <span className="mt-1 block text-xs text-down">Valeur non valide{max !== undefined ? ` (max ${max})` : ''} : non enregistrée.</span>}
+      {hint && <span className="mt-1 block text-xs text-mute">{hint}</span>}
     </label>
   );
 }
@@ -188,10 +188,10 @@ function KeyRow({ name, ok, desc, optional }: { name: string; ok: boolean; desc:
   return (
     <li className="flex items-center justify-between gap-2 rounded-md bg-card2 px-2.5 py-1.5">
       <span className="min-w-0">
-        <span className="num text-[11px]">{name}</span>
-        <span className="block text-[10px] text-mute">{desc}</span>
+        <span className="num text-xs">{name}</span>
+        <span className="block text-xs text-mute">{desc}</span>
       </span>
-      <span className={cx('shrink-0 text-[11px] font-semibold', ok ? 'text-up' : optional ? 'text-mute' : 'text-down')}>
+      <span className={cx('shrink-0 text-xs font-semibold', ok ? 'text-up' : optional ? 'text-mute' : 'text-down')}>
         {ok ? 'configurée' : optional ? 'facultative' : 'absente'}
       </span>
     </li>

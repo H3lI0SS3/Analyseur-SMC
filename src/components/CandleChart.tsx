@@ -105,7 +105,7 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
           {analysis && analysis.pair === pair && (
             <button
               onClick={() => setOverlays(o => !o)}
-              className={cx('rounded-md border px-2 py-1 text-[11px]', overlays ? 'border-gold text-gold' : 'border-line text-mute')}
+              className={cx('rounded-md border px-2 py-1 text-xs', overlays ? 'border-gold text-gold' : 'border-line text-mute')}
             >
               Zones
             </button>
@@ -232,7 +232,7 @@ export function CandleChart({ pair, decimals, analysis, reload }: Props) {
           </svg>
         )}
       </div>
-      <div className="mt-1 text-[10px] text-mute">
+      <div className="mt-1 text-xs text-mute">
         {meta.source ? `Source : ${meta.source}` : ''}
         {meta.fetchedAt ? ` · mis à jour ${localDateTime(meta.fetchedAt)}` : ''}
         {' · heure du Maroc'}

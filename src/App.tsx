@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS: RiskSettings = {
   riskPct: 1,
   dailyLossPct: 3,
   aiProvider: 'auto',
-  // préréglage FxPro MT5 Raw+ (compte démo du trader)
+  // préréglage FxPro cTrader (compte démo du trader)
   spreadEurPips: 0.2,
   spreadGold: 0.2,
   commissionPerLot: 7,
@@ -40,7 +40,7 @@ export default function App() {
   const [pair, setPair] = useState<string>(() => load('sa_ui', { pair: 'XAU/USD' }).pair);
   const [settings, setSettings] = useState<RiskSettings>(() => {
     const s = load('sa_settings', DEFAULT_SETTINGS);
-    // broker par défaut : MT5 (FxPro)
+    // broker par défaut : cTrader FxPro (identifiant interne « mt5 » gardé pour les réglages enregistrés)
     const migrated = s.broker ? s : { ...s, broker: 'mt5' as const };
     return { ...migrated, riskPct: Math.min(2, migrated.riskPct) }; // risque plafonné à 2 % par trade
   });
@@ -221,7 +221,7 @@ export default function App() {
             </span>
             ORA Trader
           </h1>
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 text-[11px]">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 text-xs">
             {/* Indicateur de session (mis à jour chaque minute) */}
             <span
               className={cx(
@@ -253,7 +253,7 @@ export default function App() {
                 <div className="flex items-center justify-between">
                   <span className={cx('text-xs font-semibold', active ? 'text-gold' : 'text-mute')}>{p.label}</span>
                   {q?.changePct !== undefined && q?.changePct !== null && (
-                    <span className={cx('num text-[11px]', q.changePct >= 0 ? 'text-up' : 'text-down')}>
+                    <span className={cx('num text-xs', q.changePct >= 0 ? 'text-up' : 'text-down')}>
                       {q.changePct >= 0 ? '+' : ''}
                       {q.changePct.toFixed(2)} %
                     </span>
@@ -262,8 +262,8 @@ export default function App() {
                 <div className="num mt-0.5 text-lg font-semibold">
                   {q?.error ? <span className="text-sm text-down">indisponible</span> : fmt(q?.price, p.decimals)}
                 </div>
-                {q?.stale && <div className="text-[10px] text-warn">marché fermé / en retard</div>}
-                {q?.futuresProxy && !q?.stale && <div className="text-[10px] text-warn">prix futures (≠ broker)</div>}
+                {q?.stale && <div className="text-xs text-warn">marché fermé / en retard</div>}
+                {q?.futuresProxy && !q?.stale && <div className="text-xs text-warn">prix futures (≠ broker)</div>}
               </button>
             );
           })}
@@ -274,10 +274,10 @@ export default function App() {
         {/* Données indisponibles : on affiche la vraie raison (quota, source en panne…) */}
         {(() => {
           const err = Object.values(quotes).find((q: any) => q?.error) as { error?: string } | undefined;
-          if (err?.error) return <div className="card border-down/50 px-3 py-2 text-[11px] leading-snug text-down">{err.error}</div>;
+          if (err?.error) return <div className="card border-down/50 px-3 py-2 text-xs leading-snug text-down">{err.error}</div>;
           const backup = Object.values(quotes).some((q: any) => typeof q?.source === 'string' && q.source.includes('secours'));
           return backup ? (
-            <div className="card border-warn/50 px-3 py-2 text-[11px] leading-snug text-warn">
+            <div className="card border-warn/50 px-3 py-2 text-xs leading-snug text-warn">
               Twelve Data épuisé : données de secours Yahoo Finance (sans prix en direct). Recale toujours avec le prix de ton broker avant d’entrer.
             </div>
           ) : null;
@@ -286,7 +286,7 @@ export default function App() {
         <div className={cx('card flex items-center gap-3 px-3 py-2', blocked && 'border-down/60')}>
           <ShieldAlert className={cx('h-4 w-4 shrink-0', blocked ? 'text-down' : 'text-gold')} />
           <div className="flex-1">
-            <div className="flex justify-between text-[11px]">
+            <div className="flex justify-between text-xs">
               <span className={blocked ? 'font-semibold text-down' : 'text-mute'}>
                 {blocked ? 'Limite de perte du jour atteinte : stop pour aujourd’hui.' : fxOk ? 'Perte du jour (compte FxPro, positions ouvertes comprises)' : 'Perte du jour'}
               </span>
@@ -305,9 +305,7 @@ export default function App() {
 
         {tab === 'analyse' && (
           <>
-            <AlertsCard onAdd={addToJournal} />
-            <TradingViewChart pair={pair} />
-            <CandleChart reload={reloadKey} pair={pair} decimals={meta.decimals} analysis={analyses[pair] || null} />
+            {/* d'abord la réponse (verdict + ordre), ensuite le contexte */}
             <AnalysisPanel
               pair={pair}
               status={status}
@@ -317,13 +315,27 @@ export default function App() {
               onAddJournal={addToJournal}
               dailyBlocked={blocked}
               stats={stats}
+              desk={fxOk ? fx.data!.desk : null}
+              dailyLossPct={settings.dailyLossPct}
             />
+            <AlertsCard />
+            <TradingViewChart pair={pair} />
+            <CandleChart reload={reloadKey} pair={pair} decimals={meta.decimals} analysis={analyses[pair] || null} />
           </>
         )}
         {tab === 'journal' && (
           <>
             <FxJournalCard data={fx.data} reload={fx.reload} />
-            <JournalView journal={journal} setJournal={setJournal} rulesVersion={status?.rulesVersion} />
+            {fx.error && !fx.data && <p className="card border-warn/50 px-4 py-3 text-sm text-warn">{fx.error}</p>}
+            {journal.length > 0 && (
+              <details className="card px-4 py-3">
+                <summary className="cursor-pointer text-sm font-semibold text-mute">Ancien journal de cet appareil (archivé, {journal.length} entrées)</summary>
+                <p className="mt-2 text-xs text-mute">Remplacé par le journal FxPro automatique. Gardé ici en lecture et pour l’export CSV / la sauvegarde.</p>
+                <div className="mt-3">
+                  <JournalView journal={journal} setJournal={setJournal} rulesVersion={status?.rulesVersion} />
+                </div>
+              </details>
+            )}
             <BacktestCard pair={pair} settings={settings} />
           </>
         )}
@@ -340,7 +352,7 @@ export default function App() {
               ['reglages', 'Réglages', Settings2],
             ] as const
           ).map(([key, label, Icon]) => (
-            <button key={key} onClick={() => setTab(key)} className={cx('flex flex-col items-center gap-0.5 py-2.5 text-[11px]', tab === key ? 'text-gold' : 'text-mute')}>
+            <button key={key} onClick={() => setTab(key)} className={cx('flex flex-col items-center gap-0.5 py-2.5 text-xs', tab === key ? 'text-gold' : 'text-mute')}>
               <Icon className="h-5 w-5" />
               {label}
             </button>

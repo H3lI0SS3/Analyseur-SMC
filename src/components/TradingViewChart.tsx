@@ -15,10 +15,11 @@ type Interval = (typeof INTERVALS)[number]['id'];
 
 export function TradingViewChart({ pair }: { pair: string }) {
   const box = useRef<HTMLDivElement>(null);
-  const [interval, setIv] = useState<Interval>(() => load<{ iv?: Interval }>('sa_tv', {}).iv ?? '15');
-  const [open, setOpen] = useState<boolean>(() => load<{ open?: boolean }>('sa_tv', {}).open ?? true);
+  // replié par défaut : le verdict et l'ordre passent avant le graphique (clé v2 = nouveau défaut pour tout le monde)
+  const [interval, setIv] = useState<Interval>(() => load<{ iv?: Interval }>('sa_tv2', {}).iv ?? '15');
+  const [open, setOpen] = useState<boolean>(() => load<{ open?: boolean }>('sa_tv2', {}).open ?? false);
   const [full, setFull] = useState(false);
-  useEffect(() => save('sa_tv', { iv: interval, open }), [interval, open]);
+  useEffect(() => save('sa_tv2', { iv: interval, open }), [interval, open]);
 
   // Échap ferme le plein écran ; le défilement de la page est bloqué pendant ce temps
   useEffect(() => {
@@ -74,7 +75,7 @@ export function TradingViewChart({ pair }: { pair: string }) {
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
         <button onClick={() => !full && setOpen(o => !o)} className="flex items-center gap-1.5 text-left" aria-expanded={open}>
           <span className="label">TradingView</span>
-          <span className="hidden text-[11px] text-mute sm:inline">{TV_SYMBOLS[pair]}</span>
+          <span className="hidden text-xs text-mute sm:inline">{TV_SYMBOLS[pair]}</span>
           {!full && (open ? <ChevronUp className="h-3.5 w-3.5 text-mute" /> : <ChevronDown className="h-3.5 w-3.5 text-mute" />)}
         </button>
         {open && (

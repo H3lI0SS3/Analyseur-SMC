@@ -95,22 +95,22 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
         <div className="label flex items-center gap-1.5">
           <Radar className="h-3.5 w-3.5 text-gold" /> Suivi de ta stratégie
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-mute">
+        <p className="mt-1 text-xs leading-snug text-mute">
           Chaque trade pris avec « Je prends ce trade » est suivi tout seul sur les vraies bougies M15 : exécution de l’ordre, TP1 (50 % encaissés, stop au point d’entrée), TP2 ou stop.
           Résultats en R, spread et commission compris. Le suivi tourne quand l’app est ouverte et rattrape jusqu’à 7 jours d’absence.
         </p>
-        <div className="num mt-2 grid grid-cols-3 gap-1 text-center text-[11px]">
+        <div className="num mt-2 grid grid-cols-3 gap-1 text-center text-xs">
           <div><div className="text-mute">Suivis clos</div><div className="text-sm font-semibold">{st.closed}</div></div>
           <div><div className="text-mute">Moyenne</div><div className={cx('text-sm font-semibold', (st.avgR ?? 0) > 0 ? 'text-up' : (st.avgR ?? 0) < 0 ? 'text-down' : '')}>{st.avgR === null ? '—' : `${st.avgR >= 0 ? '+' : ''}${st.avgR} R`}</div></div>
           <div><div className="text-mute">Viabilité</div><div className="text-sm font-semibold">{st.viability === null ? `${st.closed}/${st.minTrades}` : `${st.viability} %`}</div></div>
         </div>
         {withP.closed + withoutP.closed > 0 && (
-          <p className="mt-2 text-[11px] leading-snug text-mute">
+          <p className="mt-2 text-xs leading-snug text-mute">
             Bougies japonaises — avec figure : {withP.closed} trades{withP.avgR !== null ? `, ${withP.avgR >= 0 ? '+' : ''}${withP.avgR} R en moyenne` : ''} · sans figure : {withoutP.closed} trades{withoutP.avgR !== null ? `, ${withoutP.avgR >= 0 ? '+' : ''}${withoutP.avgR} R en moyenne` : ''}.
           </p>
         )}
         {journal.some(j => j.test) && (
-          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] leading-snug">
+          <div className="mt-2 grid grid-cols-2 gap-2 text-xs leading-snug">
             {[
               { t: 'Protocole complet', v: pro },
               { t: 'Entraînement (TEST)', v: tst },
@@ -127,7 +127,7 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
         )}
       </section>
       {expectancy !== null && (
-        <p className="px-1 text-[11px] text-mute">
+        <p className="px-1 text-xs text-mute">
           Espérance : <span className={cx('num', expectancy >= 0 ? 'text-up' : 'text-down')}>{expectancy >= 0 ? '+' : ''}{expectancy.toFixed(2)} R</span> par trade.
           {closed.length < 30 && ' Moins de 30 trades : chiffre encore peu fiable.'}
         </p>
@@ -141,31 +141,31 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
           <div className="flex items-center gap-1">
             <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importJson(f); e.target.value = ''; }} />
             {journal.length > 0 && (
-              <button onClick={exportCsv} className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-mute">
+              <button onClick={exportCsv} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-mute">
                 <Download className="h-3.5 w-3.5" /> CSV
               </button>
             )}
             {journal.length > 0 && (
-              <button onClick={exportJson} className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-mute">
+              <button onClick={exportJson} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-mute">
                 <Download className="h-3.5 w-3.5" /> Sauvegarder
               </button>
             )}
-            <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-mute">
+            <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-mute">
               <Upload className="h-3.5 w-3.5" /> Restaurer
             </button>
             {journal.some(j => !tracked(j)) &&
               (confirmReset ? (
-                <span className="flex items-center gap-2 text-[11px]">
+                <span className="flex items-center gap-2 text-xs">
                   <button onClick={() => { setJournal(journal.filter(tracked)); setConfirmReset(false); }} className="font-semibold text-down">Effacer</button>
                   <button onClick={() => setConfirmReset(false)} className="text-mute">Annuler</button>
                 </span>
               ) : (
-                <button onClick={() => setConfirmReset(true)} className="rounded-md px-2 py-1 text-[11px] text-mute" title="Efface les trades notés à la main ; les trades suivis restent">Vider</button>
+                <button onClick={() => setConfirmReset(true)} className="rounded-md px-2 py-1 text-xs text-mute" title="Efface les trades notés à la main ; les trades suivis restent">Vider</button>
               ))}
           </div>
         </div>
-        {msg && <p className="mb-2 text-[11px] text-gold">{msg}</p>}
-        <p className="mb-2 text-[10px] leading-snug text-mute">
+        {msg && <p className="mb-2 text-xs text-gold">{msg}</p>}
+        <p className="mb-2 text-xs leading-snug text-mute">
           Les trades suivis ne peuvent pas être supprimés (sinon la viabilité serait faussée). Le journal est stocké dans ce navigateur : fais une sauvegarde de temps en temps.
         </p>
 
@@ -182,11 +182,11 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
                 <div>
                   <div className="text-sm font-semibold">
                     <span className={j.direction === 'acheter' ? 'text-up' : 'text-down'}>{j.direction === 'acheter' ? 'Achat' : 'Vente'}</span> {j.pair}
-                    {j.test && <span className="ml-1.5 rounded bg-gold px-1 py-0.5 align-middle text-[9px] font-bold text-white">TEST</span>}
+                    {j.test && <span className="ml-1.5 rounded bg-gold px-1 py-0.5 align-middle text-xs font-bold text-white">TEST</span>}
                   </div>
-                  <div className="text-[11px] text-mute">{localDateTime(j.createdAt)}</div>
+                  <div className="text-xs text-mute">{localDateTime(j.createdAt)}</div>
                   <TrackBadge j={j} />
-                  {j.pattern && <div className="text-[10px] text-mute">Bougies japonaises : {j.pattern}</div>}
+                  {j.pattern && <div className="text-xs text-mute">Bougies japonaises : {j.pattern}</div>}
                 </div>
                 <div className="flex items-center gap-2">
                   {j.rMultiple !== null && (
@@ -202,12 +202,12 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
                   )}
                 </div>
               </div>
-              <div className="num mt-2 grid grid-cols-3 gap-1 text-[11px]">
+              <div className="num mt-2 grid grid-cols-3 gap-1 text-xs">
                 <span>E {j.entry}</span>
                 <span className="text-down">SL {j.sl}</span>
                 <span className="text-up">{j.tp1 !== undefined && j.tp2 ? `TP1 ${j.tp1} · TP2 ${j.tp2}` : `TP ${j.tp}`}</span>
               </div>
-              <div className="mt-1 text-[11px] text-mute">
+              <div className="mt-1 text-xs text-mute">
                 R:R prévu 1:{j.rrPlanned.toFixed(1)} · risque {j.riskPct} %{j.lots ? ` · ${j.lots.toFixed(2)} lot` : ''}
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -215,13 +215,13 @@ export function JournalView({ journal, setJournal, rulesVersion }: Props) {
                   <button
                     key={r.key}
                     onClick={() => setResult(j, r.key)}
-                    className={cx('rounded-md border px-2.5 py-1 text-[11px] font-semibold', j.result === r.key ? r.cls + ' bg-white/5' : 'border-line text-mute')}
+                    className={cx('rounded-md border px-2.5 py-1 text-xs font-semibold', j.result === r.key ? r.cls + ' bg-white/5' : 'border-line text-mute')}
                   >
                     {r.label}
                   </button>
                 ))}
                 {(j.result === 'gagne' || j.result === 'perdu') && (
-                  <label className="flex items-center gap-1 text-[11px] text-mute">
+                  <label className="flex items-center gap-1 text-xs text-mute">
                     R réel
                     <input
                       type="number"
@@ -260,13 +260,13 @@ function TrackBadge({ j }: { j: JournalEntry }) {
     : j.auto
     ? `Clôturé automatiquement${j.exitAt ? ` le ${localDateTime(j.exitAt)}` : ''}`
     : 'Résultat saisi à la main';
-  return <div className={cx('mt-0.5 text-[10px]', isTracked(j) ? 'text-gold' : 'text-mute')}>{label}</div>;
+  return <div className={cx('mt-0.5 text-xs', isTracked(j) ? 'text-gold' : 'text-mute')}>{label}</div>;
 }
 
 function Stat({ label, value, cls }: { label: string; value: string; cls?: string }) {
   return (
     <div className="card px-3 py-2.5 text-center">
-      <div className="text-[10px] uppercase tracking-wide text-mute">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-mute">{label}</div>
       <div className={cx('num mt-0.5 text-lg font-bold', cls)}>{value}</div>
     </div>
   );

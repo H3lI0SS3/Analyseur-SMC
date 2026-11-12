@@ -197,6 +197,22 @@ function nyClock(t: number): { h: number; m: number; wd: number } {
   return { h: Number(get('hour')) % 24, m: Number(get('minute')), wd };
 }
 
+/** Kill zones du jour en heure du Maroc (Londres 02–05 h et New York 07–10 h, heure de New York ; suit l'heure d'été de New York). */
+export function killzonesMaroc(t = Date.now()): string {
+  const { h, m } = nyClock(t);
+  // décalage New York → UTC en heures entières (−5 l'hiver, −4 l'été)
+  const utcH = new Date(t).getUTCHours() + new Date(t).getUTCMinutes() / 60;
+  let off = Math.round(h + m / 60 - utcH);
+  if (off > 12) off -= 24;
+  if (off < -12) off += 24;
+  const at = (nyHour: number) => {
+    const d = new Date(t);
+    d.setUTCHours(nyHour - off, 0, 0, 0);
+    return localTime(d.getTime());
+  };
+  return `Londres ${at(2)}–${at(5)} · New York ${at(7)}–${at(10)} (heure du Maroc)`;
+}
+
 /** Session en cours pour l'en-tête (mêmes kill zones que le moteur : Londres 02–05 h, New York 07–10 h, heure de New York). */
 export function sessionNow(t = Date.now()): { label: string; killzone: boolean; closed: boolean } {
   const { h, m, wd } = nyClock(t);

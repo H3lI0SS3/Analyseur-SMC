@@ -31,7 +31,7 @@ export function evaluate(j: JournalEntry, candles: Candle[], now: number): Parti
   if (!risk) return null;
   // historique incomplet (app fermée trop longtemps : le serveur ne garde qu'environ 7 jours de M15)
   if (candles.length && candles[0].t > j.createdAt + 15 * M15 && now - j.createdAt > 6 * 24 * 3_600_000) {
-    return { auto: false, note: (j.note ? j.note + ' · ' : '') + 'Suivi interrompu (app fermée trop longtemps) : saisis le résultat depuis MT5.' };
+    return { auto: false, note: (j.note ? j.note + ' · ' : '') + 'Suivi interrompu (app fermée trop longtemps) : saisis le résultat depuis cTrader.' };
   }
   const commR = (j.commissionPerLot ?? 0) / Math.max(1e-9, risk * (j.contract ?? 1)); // commission en fraction de R
   const toR = (pnl: number) => Number(((pnl / risk - commR) / (1 + commR)).toFixed(2));

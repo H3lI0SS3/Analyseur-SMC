@@ -81,12 +81,15 @@ const sign = (v: number) => (v >= 0 ? '+' : '');
 
 export function useFxJournal(refreshKey = 0) {
   const [data, setData] = useState<FxJournalView | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const load = async (refresh = false) => {
     try {
       const res = await api(`/api/journal${refresh ? '?refresh=1' : ''}`);
-      if (res.ok) setData((await readJson(res)) as FxJournalView);
+      if (!res.ok) throw new Error(`erreur ${res.status}`);
+      setData((await readJson(res)) as FxJournalView);
+      setError(null);
     } catch {
-      /* hors ligne */
+      setError('Journal FxPro injoignable pour l’instant (connexion ou serveur) : nouvel essai automatique dans 5 min, ou touche « Actualiser ».');
     }
   };
   useEffect(() => {
@@ -94,12 +97,12 @@ export function useFxJournal(refreshKey = 0) {
     const id = window.setInterval(() => document.visibilityState === 'visible' && load(), 5 * 60_000);
     return () => window.clearInterval(id);
   }, [refreshKey]);
-  return { data, reload: load };
+  return { data, error, reload: load };
 }
 
 function StatBox({ title, v, dashed }: { title: string; v: FxStatsView; dashed?: boolean }) {
   return (
-    <div className={cx('rounded-lg px-2 py-1.5 text-[11px] leading-snug', dashed ? 'border border-dashed border-gold/60' : 'bg-card2')}>
+    <div className={cx('rounded-lg px-2 py-1.5 text-xs leading-snug', dashed ? 'border border-dashed border-gold/60' : 'bg-card2')}>
       <div className="font-semibold">{title}</div>
       <div className="text-mute">
         {v.closed} clos{v.avgR !== null ? ` · ${sign(v.avgR)}${v.avgR} R moy.` : ''}
@@ -141,7 +144,7 @@ export function FxJournalCard({ data, reload }: { data: FxJournalView | null; re
             await reload(true);
             setBusy(false);
           }}
-          className="flex items-center gap-1 rounded-md bg-card2 px-2 py-1 text-[11px] text-mute hover:text-ink"
+          className="flex items-center gap-1 rounded-md bg-card2 px-2 py-1 text-xs text-mute hover:text-ink"
         >
           <RefreshCw className={cx('h-3 w-3', busy && 'animate-spin')} /> Actualiser
         </button>
@@ -150,7 +153,7 @@ export function FxJournalCard({ data, reload }: { data: FxJournalView | null; re
         <p className="text-[12px] text-warn">{data.error}</p>
       ) : (
         <>
-          <p className="text-[11px] leading-snug text-mute">
+          <p className="text-xs leading-snug text-mute">
             Positions lues sur ton compte {data.account?.broker ?? 'cTrader'}
             {data.account?.login ? ` n° ${data.account.login}` : ''} (lecture seule), les mêmes sur tous tes appareils. R = résultat net réel / risque réel (ton entrée → le stop d’origine).
           </p>
@@ -165,24 +168,24 @@ export function FxJournalCard({ data, reload }: { data: FxJournalView | null; re
           <div className="mt-3 grid grid-cols-3 gap-2 text-center">
             <div className="rounded-lg bg-card2 py-2">
               <div className="num text-lg font-bold">{s.closed}</div>
-              <div className="text-[10px] text-mute">trades de l’app clos</div>
+              <div className="text-xs text-mute">trades de l’app clos</div>
             </div>
             <div className="rounded-lg bg-card2 py-2">
               <div className={cx('num text-lg font-bold', s.totalR >= 0 ? 'text-up' : 'text-down')}>{sign(s.totalR)}{s.totalR} R</div>
-              <div className="text-[10px] text-mute">{s.avgR !== null ? `${sign(s.avgR)}${s.avgR} R par trade (${s.withR} avec stop)` : 'aucun R calculé'}</div>
+              <div className="text-xs text-mute">{s.avgR !== null ? `${sign(s.avgR)}${s.avgR} R par trade (${s.withR} avec stop)` : 'aucun R calculé'}</div>
             </div>
             <div className="rounded-lg bg-card2 py-2">
               <div className={cx('num text-lg font-bold', s.netUsd >= 0 ? 'text-up' : 'text-down')}>{sign(s.netUsd)}{Math.round(s.netUsd)} $</div>
-              <div className="text-[10px] text-mute">{s.winRate !== null ? `${s.winRate} % gagnants` : 'net'}</div>
+              <div className="text-xs text-mute">{s.winRate !== null ? `${s.winRate} % gagnants` : 'net'}</div>
             </div>
           </div>
-          <p className="mt-2 text-[11px] text-mute">
+          <p className="mt-2 text-xs text-mute">
             {s.viability !== null
               ? `Viabilité : ${s.viability} % (R moyen entre ${s.ciLow} et ${s.ciHigh} à 95 %).`
               : `${s.withR}/${s.minTrades} trades avec R : la viabilité s’affichera à partir de ${s.minTrades} trades de l’app (protocole + TEST).`}
           </p>
           {data.trades.some(t => t.closedAt && t.r === null) && (
-            <p className="mt-2 rounded-lg border border-warn/40 bg-warn/5 px-2 py-1.5 text-[11px] text-warn">
+            <p className="mt-2 rounded-lg border border-warn/40 bg-warn/5 px-2 py-1.5 text-xs text-warn">
               {data.trades.filter(t => t.closedAt && t.r === null).length} position(s) clôturée(s) sans stop connu : le R ne peut pas être calculé. Saisis le « stop prévu » sur chaque ligne, et choisis son type (Protocole, TEST ou Hors app).
             </p>
           )}
@@ -191,9 +194,9 @@ export function FxJournalCard({ data, reload }: { data: FxJournalView | null; re
             <StatBox title="TEST" v={data.test} dashed />
             <StatBox title="Hors app (non compté)" v={data.hors} />
           </div>
-          {!data.persistent && <p className="mt-2 text-[11px] text-warn">Telegram non configuré : les types et notes saisis seront perdus au prochain redémarrage du serveur.</p>}
-          {data.storeError && <p className="mt-2 text-[11px] text-warn">{data.storeError}</p>}
-          {err && <p className="mt-2 text-[11px] text-warn">{err}</p>}
+          {!data.persistent && <p className="mt-2 text-xs text-warn">Telegram non configuré : les types et notes saisis seront perdus au prochain redémarrage du serveur.</p>}
+          {data.storeError && <p className="mt-2 text-xs text-warn">{data.storeError}</p>}
+          {err && <p className="mt-2 text-xs text-warn">{err}</p>}
           {data.trades.length === 0 ? (
             <p className="mt-3 text-[12px] text-mute">Aucune position EUR/USD ou or sur les 120 derniers jours.</p>
           ) : (
@@ -219,17 +222,17 @@ function TradeRow({ t, onAnnotate }: { key?: string; t: FxTradeView; onAnnotate:
       <div className="flex items-start justify-between gap-2">
         <div>
           <span className={long ? 'text-up' : 'text-down'}>{long ? 'Achat' : 'Vente'}</span> {t.pair} · {t.lots} lot
-          <div className="text-[10px] text-mute">
+          <div className="text-xs text-mute">
             {localDateTime(t.openedAt)}
             {t.closedAt ? ` → ${localDateTime(t.closedAt)}` : ' · en cours'}
           </div>
         </div>
         <div className="text-right">
           {t.r !== null && <div className={cx('num text-sm font-bold', t.r >= 0 ? 'text-up' : 'text-down')}>{sign(t.r)}{t.r} R</div>}
-          {t.net !== null && <div className={cx('num text-[11px]', t.net >= 0 ? 'text-up' : 'text-down')}>{sign(t.net)}{t.net.toFixed(2)} $</div>}
+          {t.net !== null && <div className={cx('num text-xs', t.net >= 0 ? 'text-up' : 'text-down')}>{sign(t.net)}{t.net.toFixed(2)} $</div>}
         </div>
       </div>
-      <div className="mt-1.5 grid grid-cols-3 gap-2 text-[11px]">
+      <div className="mt-1.5 grid grid-cols-3 gap-2 text-xs">
         <div>
           <span className="text-mute">Entrée </span>
           <span className="num">{t.entry}</span>
@@ -241,22 +244,22 @@ function TradeRow({ t, onAnnotate }: { key?: string; t: FxTradeView; onAnnotate:
         <div>
           <span className="text-mute">Stop </span>
           <span className="num">{t.stop ?? '—'}</span>
-          {t.stopSource && <span className="text-[10px] text-mute"> ({t.stopSource === 'plan' ? 'plan' : t.stopSource === 'ordre' ? 'ordre' : 'saisi'})</span>}
+          {t.stopSource && <span className="text-xs text-mute"> ({t.stopSource === 'plan' ? 'plan' : t.stopSource === 'ordre' ? 'ordre' : 'saisi'})</span>}
         </div>
       </div>
       {(t.riskUsd !== null || t.recommendedLots != null) && (
-        <div className={cx('mt-1 text-[11px]', t.oversize ? 'font-semibold text-down' : 'text-mute')}>
+        <div className={cx('mt-1 text-xs', t.oversize ? 'font-semibold text-down' : 'text-mute')}>
           {t.riskUsd !== null ? `Risque réel : ${t.riskUsd.toFixed(0)} $${t.riskPct != null ? ` (${t.riskPct} % du compte)` : ''}` : 'Risque réel inconnu'}
           {t.recommendedLots != null ? ` · lot conseillé ${t.recommendedLots} (risque prévu ${t.plannedRiskPct} %)` : ''}
           {t.oversize ? ' · position trop grosse' : ''}
         </div>
       )}
       {t.stopRejected != null && t.stop === null && (
-        <div className="mt-1 text-[11px] text-warn">Stop {t.stopRejected} ignoré : du mauvais côté de l’entrée (stop déplacé en gain) ou aberrant. Saisis le stop d’origine.</div>
+        <div className="mt-1 text-xs text-warn">Stop {t.stopRejected} ignoré : du mauvais côté de l’entrée (stop déplacé en gain) ou aberrant. Saisis le stop d’origine.</div>
       )}
-      {t.closedAt && t.r === null && <div className="mt-1 text-[10px] font-semibold text-warn">R inconnu : saisis le stop prévu ci-dessous.</div>}
+      {t.closedAt && t.r === null && <div className="mt-1 text-xs font-semibold text-warn">R inconnu : saisis le stop prévu ci-dessous.</div>}
       {t.gaps.map(g => (
-        <div key={g} className="mt-1 text-[10px] text-warn">
+        <div key={g} className="mt-1 text-xs text-warn">
           Écart avec le plan : {g}
         </div>
       ))}
@@ -265,15 +268,15 @@ function TradeRow({ t, onAnnotate }: { key?: string; t: FxTradeView; onAnnotate:
           <button
             key={k.k}
             onClick={() => onAnnotate({ kind: k.k })}
-            className={cx('rounded-md border px-2 py-0.5 text-[11px]', t.kind === k.k ? (k.k === 'test' ? 'border-gold bg-gold text-white' : 'border-ink bg-ink text-white') : 'border-line text-mute')}
+            className={cx('rounded-md border px-3 py-2 text-sm', t.kind === k.k ? (k.k === 'test' ? 'border-gold bg-gold text-white' : 'border-ink bg-ink text-white') : 'border-line text-mute')}
           >
             {k.label}
           </button>
         ))}
-        <span className="ml-1 text-[10px] text-mute">{t.kindSource === 'signal' ? 'reconnu automatiquement' : t.kindSource === 'saisi' ? 'choisi par toi' : 'aucun signal de l’app trouvé'}</span>
+        <span className="ml-1 text-xs text-mute">{t.kindSource === 'signal' ? 'reconnu automatiquement' : t.kindSource === 'saisi' ? 'choisi par toi' : 'aucun signal de l’app trouvé'}</span>
       </div>
       {t.stopSource !== 'plan' && (t.closedAt || t.stop === null) && (
-        <div className="mt-2 flex items-center gap-1 text-[11px]">
+        <div className="mt-2 flex items-center gap-1 text-xs">
           <span className="text-mute">Stop prévu (pour le R)</span>
           <input
             value={sl}
@@ -289,7 +292,7 @@ function TradeRow({ t, onAnnotate }: { key?: string; t: FxTradeView; onAnnotate:
         value={note}
         onChange={e => setNote(e.target.value)}
         onBlur={() => note !== t.note && onAnnotate({ note })}
-        className="mt-2 w-full rounded-md border border-line bg-white px-2 py-1 text-[11px]"
+        className="mt-2 w-full rounded-md border border-line bg-white px-2 py-1 text-xs"
         placeholder="Note (émotion, erreur, leçon…)"
       />
     </li>
