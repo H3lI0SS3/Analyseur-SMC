@@ -2,7 +2,7 @@
 // La règle M5 est EXACTEMENT celle du backtest (refineM5) : ce qui a été testé est ce qui est appliqué.
 import { EXPIRY, refineM5 } from './backtest';
 import type { Candle } from './marketData';
-import { MIN_RR, nextRollover, type EngineResult, type Setup } from './smc';
+import { MIN_RR, TRAINING_MIN_RR, nextRollover, type EngineResult, type Setup } from './smc';
 import { maTime, nyParts, nyToUtc } from './time';
 
 /**
@@ -51,7 +51,7 @@ export function m5Stage(
   from: number,
   m5: Candle[],
   now: number,
-  opts: { spread: number; commUnit: number; decimals: number; newsCut?: number | null }
+  opts: { spread: number; commUnit: number; decimals: number; newsCut?: number | null; minRR?: number }
 ): M5Stage {
   const r = (x: number) => Number(x.toFixed(opts.decimals));
   const long = setup.direction === 'acheter';
@@ -115,7 +115,7 @@ export function m5Stage(
   const rr1 = rrNet(setup.tp1);
   const rr2 = setup.tp2 !== null ? rrNet(setup.tp2) : null;
   const ordered = long ? sl < entry && entry < setup.tp1 : sl > entry && entry > setup.tp1;
-  if (!ordered || (rr2 ?? rr1) < MIN_RR) {
+  if (!ordered || (rr2 ?? rr1) < (opts.minRR ?? MIN_RR)) {
     return { ...base, stage: 'annulé', message: `Exécution M5 : niveaux M5 incohérents ou R:R insuffisant (${rr2 ?? rr1}) : pas de trade.` };
   }
   return {
@@ -186,6 +186,33 @@ export function applyExecution(
       final.notes.unshift(execution.message);
     }
   }
+  // 3.12 : le signal TEST passe par la même exécution M5 (c'est dans cette exécution qu'il est positif au backtest)
+  const tr = engine.training;
+  if (tr && final.signal === 'attendre' && engine.trigger && M5_EXECUTION_PAIRS.has(pair)) {
+    const zone = engine.zones.find(z => z.id === tr.setup.zoneId);
+    const from = m5WatchStart(engine.trigger.mss.t, now);
+    if (!zone || !m5) {
+      tr.ready = false;
+      tr.stage = 'indisponible';
+      tr.message = 'Bougies M5 indisponibles : pas d’entrée TEST possible pour l’instant.';
+    } else {
+      const st = m5Stage(tr.setup, { bottom: zone.bottom, top: zone.top }, from, closedM5(m5, now), now, {
+        spread: costs.spread,
+        commUnit: costs.commissionPerLot / costs.contract,
+        decimals,
+        newsCut: engine.nextNews ? engine.nextNews.t - 30 * 60_000 : null,
+        minRR: TRAINING_MIN_RR,
+      });
+      tr.stage = st.stage;
+      tr.message = st.message;
+      tr.ready = st.stage === 'ordre' && !!st.order;
+      if (tr.ready && st.order) {
+        const o = st.order;
+        tr.setup = { ...tr.setup, entryType: 'limite', entry: o.entry, sl: o.sl, rr1: o.rr1, rr2: o.rr2, validUntil: o.validUntil };
+      }
+    }
+  } else if (tr) tr.ready = true; // actif non exécuté en M5 : le plan M15 reste l'ordre
+
   const paused = PAUSED_PAIRS[pair] ?? null;
   if (paused && final.signal !== 'attendre' && final.plan) {
     final.notes.unshift(`Setup détecté (${final.plan.direction === 'acheter' ? 'achat' : 'vente'} à ${final.plan.entry}), non proposé. ${paused}`);

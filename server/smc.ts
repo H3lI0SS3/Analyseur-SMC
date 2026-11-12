@@ -9,7 +9,7 @@ import { findCandlePatterns, type CandlePattern } from './candlePatterns';
 // ---------------- Version des règles ----------------
 // Toute modification de la logique de décision doit changer la version ET la date de gel :
 // les résultats « depuis le gel » ne valent que pour des règles qui n'ont pas bougé.
-export const RULES_VERSION = '3.11';
+export const RULES_VERSION = '3.12';
 // 3.4 : displacement, OTE, liquidité de trendline, breaker blocks, bougies japonaises (ebook) dans la décision ; 3 confluences sur 8
 export const MIN_CONFLUENCES = 3; // (règles ≤ 3.6, conservé pour le laboratoire du backtest)
 /** R:R net minimal (spread et commission compris) pour qu'un plan soit exploitable. */
@@ -21,9 +21,18 @@ export const MIN_RR = 2.5;
  * Ces signaux ne sont PAS le protocole : leurs résultats sont suivis à part (journal et backtest).
  */
 export const TRAINING_MIN_RR = 2;
+/**
+ * 3.12 : conditions qu'un signal TEST peut manquer (ventilation du backtest du 11–12/11/2026 : sans kill zone ou sans
+ * contexte HTF, l'avantage disparaît ; sans premium/discount ou avec un R:R entre 2 et 2,5, il reste positif en M5).
+ */
+export const TRAINING_ALLOWED_MISSING = ['pd', 'rr'];
+/** 3.12 : actifs où le premium/discount de l'impulsion n'est plus obligatoire (critère passé sur les deux moitiés). */
+export const PD_OPTIONAL_PAIRS = new Set(['XAU/USD']);
+/** Un setup presque complet devient un signal TEST si ce qui manque est uniquement autorisé (3.12). */
+export const trainingEligible = (missingKeys: string[]) => missingKeys.length > 0 && missingKeys.every(k => TRAINING_ALLOWED_MISSING.includes(k));
 /** Score minimal pour la classe A+ (en dessous : classe B, risque divisé par 2). */
 export const GRADE_A = 70;
-export const RULES_FROZEN_AT = Date.UTC(2026, 10, 6, 20, 0); // 06/11/2026 20:00 UTC (3.11 : or exécuté en M5 — CHoCH M5 dans la zone M15, ordre limite à mi-jambe, stop M5 —, EUR/USD en pause ; 3.10 : le timing s'applique à l'entrée (kill zone), balayage en session = bonus ; 3.9 : pas d'entrée au rollover, ordres limite expirés avant 16h45 NY, classe B au mieux les jours d'annonce à horaire inconnu ; 3.8 : R:R net minimal 1:2,5, double validation moteur + Gemini ; 3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
+export const RULES_FROZEN_AT = Date.UTC(2026, 10, 12, 12, 0); // 12/11/2026 12:00 UTC (3.12 : premium/discount facultatif sur l'or — seule variante validée par la ventilation du backtest sur les deux moitiés —, mode TEST recentré : kill zone obligatoire, il ne peut manquer que le premium/discount ou un R:R entre 2 et 2,5, exécution M5 ; 3.11 : or exécuté en M5 — CHoCH M5 dans la zone M15, ordre limite à mi-jambe, stop M5 —, EUR/USD en pause ; 3.10 : le timing s'applique à l'entrée (kill zone), balayage en session = bonus ; 3.9 : pas d'entrée au rollover, ordres limite expirés avant 16h45 NY, classe B au mieux les jours d'annonce à horaire inconnu ; 3.8 : R:R net minimal 1:2,5, double validation moteur + Gemini ; 3.7 : protocole en 4 étapes — contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session/annonces ; 3.6 : pas de trade contre une impulsion M15 ≥ 3 ATR des 2 dernières heures ; 3.5 : balayages corrigés, niveaux pris en M15, IFVG, score A+/B/C)
 
 // ---------------- Types ----------------
 export type Trend = 'haussier' | 'baissier' | 'neutre';
@@ -134,7 +143,17 @@ export interface EngineResult {
   signal: 'acheter' | 'vendre' | 'attendre';
   waitCondition: string | null;
   /** signal d'entraînement (TEST, compte démo) quand le protocole complet n'est pas rempli ; null sinon */
-  training: { setup: Setup; missing: string[]; missingKeys: string[] } | null;
+  training: {
+    setup: Setup;
+    missing: string[];
+    missingKeys: string[];
+    /** 3.12 : exécution M5 comme le protocole — true quand le CHoCH M5 a donné l'ordre (setup = ordre M5) */
+    ready?: boolean;
+    stage?: string;
+    message?: string;
+  } | null;
+  /** déclencheur M15 complet mais protocole incomplet (toutes conditions de contexte confondues) : mesure du backtest */
+  nearMiss: { setup: Setup; missing: string[]; missingKeys: string[] } | null;
   nextNews: { t: number; currency: string; title: string } | null;
   /** annonces fortes du jour sans horaire confirmé */
   tentativeNews: string[];
@@ -166,6 +185,8 @@ export interface AnalyzeOptions {
   contract?: number;
   news?: { available: boolean; events: { t: number; currency: string; title: string; tentative?: boolean }[] };
   newsCurrencies?: string[];
+  /** 3.12 : premium/discount facultatif (bonus) au lieu d'obligatoire */
+  pdOptional?: boolean;
 }
 
 // ---------------- Indicateurs ----------------
@@ -1144,7 +1165,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
       detail: trigger && trigZone
         ? `Impulsion ${r(trigger.legLow)} → ${r(trigger.legHigh)}, milieu ${r((trigger.legHigh + trigger.legLow) / 2)} : zone ${trigPremium ? (isLong ? 'en discount' : 'en premium') : (isLong ? 'au-dessus du milieu (premium)' : 'sous le milieu (discount)')}.`
         : 'Pas d’impulsion de référence.',
-      core: true,
+      core: !opts.pdOptional,
     },
     {
       key: 'rr',
@@ -1269,7 +1290,8 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     waitCondition = 'Marché fermé : analyse à revoir à la réouverture (dimanche 17h00 New York).';
   }
 
-  // ----- Mode entraînement (TEST) : déclencheur M15 complet, conditions de contexte assouplies -----
+  // ----- Setup presque complet (déclencheur M15 complet, contexte incomplet) et mode entraînement (TEST) -----
+  let nearMiss: EngineResult['nearMiss'] = null;
   let training: EngineResult['training'] = null;
   if (
     signal === 'attendre' &&
@@ -1291,7 +1313,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     }
     // validité ancrée sur la cassure (CHoCH/BOS M15) : 4 h après, comme dans le backtest — elle ne glisse pas à chaque analyse
     const until = Math.min((trigger?.mss.t ?? now) + TF_MS.M15 + 4 * HOUR, nextRollover(now));
-    if (until > now) training = { setup: { ...trigSetup, validUntil: until }, missing, missingKeys };
+    if (until > now) nearMiss = { setup: { ...trigSetup, validUntil: until }, missing, missingKeys };
+    // TEST 3.12 : kill zone et contexte HTF obligatoires ; seuls le premium/discount et un R:R entre 2 et 2,5 peuvent manquer
+    if (nearMiss && trainingEligible(nearMiss.missingKeys)) training = nearMiss;
   }
 
   return {
@@ -1313,6 +1337,7 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     signal,
     waitCondition,
     training,
+    nearMiss,
     nextNews,
     tentativeNews: tentativeToday.map(e => `${e.title} (${e.currency})`),
     newsAvailable,

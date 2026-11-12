@@ -7,7 +7,7 @@ import type { CandlePattern } from './candlePatterns';
 import { auditEngine } from './audit';
 import { getJournalStore } from './journalStore';
 import { marketClosed, maTime } from './time';
-import { analyze, RULES_VERSION, type EngineResult } from './smc';
+import { analyze, PD_OPTIONAL_PAIRS, RULES_VERSION, type EngineResult } from './smc';
 /** Délai maximal de la relecture IA (au-delà, le prix « en direct » vieillit et l'analyse paraît bloquée). */
 export const AI_TIMEOUT_MS = 35_000;
 import { availableProviders, reviewWithAi, type AiProvider, type AiReview } from './ai';
@@ -174,6 +174,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
       contract: costs.contract,
       news,
       newsCurrencies: NEWS_CURRENCIES[pair],
+      pdOptional: PD_OPTIONAL_PAIRS.has(pair),
     });
   } catch (err: any) {
     throw new AnalysisError(`Analyse impossible : ${err.message}`, 424);
@@ -318,7 +319,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
         })
         .catch(() => false);
     if (final.signal !== 'attendre' && final.plan) rec('protocole', { ...final.plan, validUntil: engine.setup?.validUntil, zoneId: engine.setup?.zoneId, zoneLabel: engine.setup?.zoneLabel } as any);
-    else if (engine.training) rec('test', engine.training.setup as any);
+    else if (engine.training?.ready) rec('test', engine.training.setup as any);
   }
 
   return {

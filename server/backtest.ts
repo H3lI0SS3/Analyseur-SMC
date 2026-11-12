@@ -5,7 +5,7 @@
 //  - « souple »  : protocole + signaux du mode entraînement (TEST, compte démo), pour mesurer leur fréquence et leur résultat.
 
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
-import { analyze, MIN_CONFLUENCES, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
+import { analyze, MIN_CONFLUENCES, PD_OPTIONAL_PAIRS, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
 import { HOUR, marketClosed, maDateTime, nyParts } from './time';
 import type { OraBacktest } from './oraBacktest';
 
@@ -194,7 +194,7 @@ function firstAtOrAfter(arr: Candle[], t: number): number {
 }
 
 export type RefineOutcome =
-  | { kind: 'entrée'; setup: Setup; from: number; idx: number }
+  | { kind: 'entrée'; setup: Setup; from: number; idx: number; market: Setup }
   | { kind: 'annulé'; reason: 'expiré' | 'objectif atteint' | 'stop M15 touché' }
   /** les bougies s'arrêtent avant la fin de la fenêtre (analyse en direct) : on attend encore */
   | { kind: 'en attente'; inZone: boolean; extreme: number | null; chochLevel: number | null; until: number };
@@ -252,7 +252,17 @@ export function refineM5(setup: Setup, zone: { top: number; bottom: number }, fr
       let sl = long ? ext - buffer : ext + buffer + spread;
       const fill = long ? entry + spread : entry;
       if (Math.abs(fill - sl) < minRisk) sl = long ? fill - minRisk : fill + minRisk;
-      return { kind: 'entrée', setup: { ...setup, entryType: 'limite', entry, sl }, from: c.t + 5 * 60_000, idx: i + 1 };
+      // mesure (labo) : même CHoCH, mais entrée AU MARCHÉ à la clôture de la bougie du CHoCH, même règle de stop
+      const mFill = long ? c.c + spread : c.c;
+      let mSl = long ? ext - buffer : ext + buffer + spread;
+      if (Math.abs(mFill - mSl) < minRisk) mSl = long ? mFill - minRisk : mFill + minRisk;
+      return {
+        kind: 'entrée',
+        setup: { ...setup, entryType: 'limite', entry, sl },
+        from: c.t + 5 * 60_000,
+        idx: i + 1,
+        market: { ...setup, entryType: 'marché', entry: c.c, sl: mSl },
+      };
     }
   }
   // plus de bougies alors que la fenêtre de 4 h n'est pas finie : en direct, le setup est encore en cours
@@ -405,6 +415,7 @@ export class BacktestRun {
           contract: this.costs.contract,
           news: { available: true, events: [] }, // calendrier historique non disponible
           strictSweep: false,
+          pdOptional: PD_OPTIONAL_PAIRS.has(this.pair),
         });
       } catch {
         continue;
@@ -453,9 +464,9 @@ export class BacktestRun {
   private collectCandidate(eng: EngineResult, now: number, k: number) {
     // protocole complet, ou setup du mode entraînement (déclencheur complet, contexte assoupli) pour la ventilation
     const full = !!eng.setup && eng.checklist.filter(c => c.core).every(c => c.ok);
-    const s = full ? eng.setup : eng.training?.setup;
+    const s = full ? eng.setup : eng.nearMiss?.setup;
     if (!s) return;
-    const missing = full ? [] : eng.training!.missingKeys;
+    const missing = full ? [] : eng.nearMiss!.missingKeys;
     const ok = (key: string) => !!eng.checklist.find(c => c.key === key)?.ok;
     const res = {} as Candidate['res'];
     for (const mode of ['partiel', 'tp1', 'final'] as Management[]) {
@@ -484,10 +495,19 @@ export class BacktestRun {
         };
       }
     }
+    let m5mkt: Candidate['m5mkt'] = null;
+    if (this.m5 && this.m5.length && zone && now >= this.m5[0].t && now < this.m5[this.m5.length - 1].t) {
+      const ref = refineM5(s, zone, now, this.m5, this.costs.spread);
+      if (ref.kind === 'entrée') {
+        const sim = simulate(ref.market, ref.from, this.m5, ref.idx, this.costs.spread, 'partiel');
+        m5mkt = { filledAt: sim.filledAt, exitAt: sim.exitAt, r: sim.outcome === 'expiré' || sim.outcome === 'en cours' ? null : (sim.pnl - this.commUnit) / (sim.risk + this.commUnit) };
+      } else m5mkt = { filledAt: null, exitAt: null, r: null };
+    }
     const [zoneTf] = s.zoneId.split('-');
     this.candidates.push({
       t: now,
       missing,
+      m5mkt,
       direction: s.direction,
       entryType: s.entryType,
       zoneTf,
@@ -697,6 +717,8 @@ interface Candidate {
   res: Record<Management, { filledAt: number | null; exitAt: number | null; r: number | null }>;
   /** même setup avec l'entrée affinée en M5 (null si pas de bougies M5 sur cette période) */
   m5: Record<Management, { filledAt: number | null; exitAt: number | null; r: number | null }> | null;
+  /** même CHoCH M5, entrée au marché à la clôture de la bougie du CHoCH (mesure) ; gestion « partiel » */
+  m5mkt: { filledAt: number | null; exitAt: number | null; r: number | null } | null;
 }
 
 export interface LabStats {
@@ -763,13 +785,16 @@ export const BREAKDOWN_VARIANTS: { id: string; label: string; filter: (c: Candid
   { id: 'sans_pd', label: 'Protocole + setups à qui il manque SEULEMENT le premium/discount', filter: c => c.missing.length === 0 || only(c, 'pd') },
   { id: 'sans_htf', label: 'Protocole + setups à qui il manque SEULEMENT le contexte HTF', filter: c => c.missing.length === 0 || only(c, 'htf') },
   { id: 'kz_seul', label: 'Setups à qui il manque seulement la kill zone (seuls, sans le protocole)', filter: c => only(c, 'session') },
-  { id: 'tout_test', label: 'Protocole + tout le mode entraînement (TEST)', filter: () => true },
+  { id: 'test_312', label: 'Protocole + mode TEST 3.12 (il ne manque que le premium/discount et/ou un R:R entre 2 et 2,5)', filter: c => c.missing.every(k => k === 'pd' || k === 'rr') },
+  { id: 'tout_test', label: 'Protocole + tous les setups presque complets (ancien mode TEST)', filter: () => true },
 ];
+/** lignes mesurées aussi avec l'entrée au marché après le CHoCH M5 */
+const MARKET_ROWS = ['protocole', 'test_312'];
 
 export interface BreakdownRow {
   id: string;
   label: string;
-  exec: 'M15' | 'M5';
+  exec: 'M15' | 'M5' | 'M5 marché';
   firstHalf: LabStats;
   secondHalf: LabStats;
   tradesPerDay: number;
@@ -780,16 +805,18 @@ export function runBreakdown(cands: Candidate[], from: number, to: number): { cr
   const splitAt = from + (to - from) / 2;
   const tradingDays = Math.max(1, ((to - from) / 86_400_000) * (5 / 7));
   const rows: BreakdownRow[] = [];
-  for (const exec of ['M15', 'M5'] as const) {
-    if (exec === 'M5' && !cands.some(c => c.m5)) continue;
+  for (const exec of ['M15', 'M5', 'M5 marché'] as const) {
+    if (exec !== 'M15' && !cands.some(c => c.m5)) continue;
     for (const v of BREAKDOWN_VARIANTS) {
+      if (exec === 'M5 marché' && !MARKET_ROWS.includes(v.id)) continue;
       let busy = 0;
       const a: number[] = [];
       const b: number[] = [];
       for (const c of cands) {
         if (c.t < busy || !marketRule(c) || !v.filter(c)) continue;
         if (exec === 'M5' && !c.m5) continue;
-        const r = exec === 'M5' ? c.m5!.partiel : c.res.partiel;
+        if (exec === 'M5 marché' && !c.m5mkt) continue;
+        const r = exec === 'M5' ? c.m5!.partiel : exec === 'M5 marché' ? c.m5mkt! : c.res.partiel;
         busy = r.exitAt ?? (r.filledAt === null ? c.t + EXPIRY : Number.MAX_SAFE_INTEGER);
         if (r.r === null) continue;
         (c.t < splitAt ? a : b).push(r.r);

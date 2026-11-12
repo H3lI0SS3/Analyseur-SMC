@@ -180,11 +180,11 @@ function BreakdownTable({ b }: { b: NonNullable<NonNullable<BacktestJob['result'
     <div className="space-y-2 pt-1">
       <div className="label">Ventilation par condition manquante</div>
       <p className="text-[11px] leading-snug text-mute">{b.criterion} Coupure entre les moitiés : {localDateTime(b.splitAt)}.</p>
-      {(['M5', 'M15'] as const).map(exec =>
+      {(['M5', 'M5 marché', 'M15'] as const).map(exec =>
         b.rows.some(r => r.exec === exec) ? (
           <div key={exec} className="overflow-hidden rounded-lg border border-line">
             <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 bg-card2 px-2 py-1.5 text-[10px] uppercase tracking-wide text-mute">
-              <span>Exécution {exec}</span>
+              <span>Exécution {exec === 'M5 marché' ? 'M5, entrée au marché après le CHoCH' : exec}</span>
               <span className="text-right">/ jour</span>
               <span className="text-right">1re moitié</span>
               <span className="text-right">2e moitié</span>

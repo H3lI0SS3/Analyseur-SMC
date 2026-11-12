@@ -92,7 +92,7 @@ export class Watcher {
     } else if (x && (x.stage === 'attente_zone' || x.stage === 'attente_choch') && plan) {
       kind = 'setup';
       key = `setup|${a.pair}|${plan.direction}|${x.zone.bottom}|${x.zone.top}`;
-    } else if (a?.final?.signal === 'attendre' && a?.engine?.training?.setup) {
+    } else if (a?.final?.signal === 'attendre' && a?.engine?.training?.setup && a.engine.training.ready !== false) {
       kind = 'test';
       key = `test|${a.pair}|${a.engine.training.setup.direction}|${a.engine.training.setup.zoneId}`;
     }

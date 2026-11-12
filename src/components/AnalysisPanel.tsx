@@ -780,8 +780,13 @@ function TrainingCard({ a, settings, shift, onAdd, dailyBlocked }: { a: Analysis
         <span className={cx('rounded px-1.5 py-0.5 text-[10px] font-bold text-white', long ? 'bg-up' : 'bg-down')}>{long ? 'ACHAT TEST' : 'VENTE TEST'}</span>
       </div>
       <p className="text-xs leading-snug text-ink/90">
-        Balayage → displacement → CHoCH M15 présents, mais ce n’est pas un signal du protocole. Il manque : {t.missing.join(', ') || '—'}.
+        Balayage → displacement → CHoCH M15 en kill zone, mais ce n’est pas un signal du protocole. Il manque : {t.missing.join(', ') || '—'}.
       </p>
+      {t.ready === false && (
+        <p className="mt-2 rounded-lg bg-card2 px-3 py-2 text-[11px] leading-snug text-ink/80">
+          {t.message} <span className="text-mute">Pas d’ordre TEST tant que le CHoCH M5 n’a pas donné l’entrée.</span>
+        </p>
+      )}
       <div className="mt-3 grid grid-cols-4 gap-2 rounded-lg bg-card2 px-3 py-2 text-[11px]">
         <div><div className="text-mute">{p.entryType === 'limite' ? (long ? 'Buy Limit' : 'Sell Limit') : 'Au marché'}</div><div className="num font-semibold">{s(p.entry)}</div></div>
         <div><div className="text-mute">Stop</div><div className="num">{s(p.sl)}</div></div>
@@ -792,11 +797,11 @@ function TrainingCard({ a, settings, shift, onAdd, dailyBlocked }: { a: Analysis
         Risque fixé à {TEST_RISK_PCT} % : {lots ? `${lots} lot` : 'lot minimum trop risqué'}{p.validUntil ? ` · valable jusqu’à ${localTime(p.validUntil)}` : ''}. Résultats suivis à part dans le journal.
       </p>
       <button
-        disabled={done || dailyBlocked}
+        disabled={done || dailyBlocked || t.ready === false}
         onClick={() => { const err = onAdd(); setMsg(err ?? 'Ajouté au journal (TEST) : place l’ordre toi-même sur ta démo FxPro.'); setDone(!err); }}
         className="mt-3 w-full rounded-lg bg-gold py-2 text-[12px] font-bold text-white disabled:cursor-not-allowed disabled:bg-card2 disabled:text-mute"
       >
-        {done ? 'Suivi dans le journal (TEST)' : dailyBlocked ? 'Perte maximale du jour atteinte' : '📌 Prendre en TEST (démo)'}
+        {done ? 'Suivi dans le journal (TEST)' : dailyBlocked ? 'Perte maximale du jour atteinte' : t.ready === false ? 'En attente du CHoCH M5' : '📌 Prendre en TEST (démo)'}
       </button>
       {msg && <p className="mt-1 text-center text-[11px] text-mute">{msg}</p>}
     </section>

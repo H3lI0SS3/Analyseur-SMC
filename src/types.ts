@@ -154,7 +154,7 @@ export interface BacktestJob {
     breakdown?: {
       criterion: string;
       splitAt: number;
-      rows: { id: string; label: string; exec: 'M15' | 'M5'; firstHalf: LabStats; secondHalf: LabStats; tradesPerDay: number; passes: boolean }[];
+      rows: { id: string; label: string; exec: 'M15' | 'M5' | 'M5 marché'; firstHalf: LabStats; secondHalf: LabStats; tradesPerDay: number; passes: boolean }[];
     };
   };
 }
@@ -196,7 +196,7 @@ export interface EngineResult {
   signal: Signal;
   waitCondition: string | null;
   /** signal d'entraînement (TEST, démo) : déclencheur M15 complet, contexte assoupli */
-  training?: { setup: Setup; missing: string[]; missingKeys?: string[] } | null;
+  training?: { setup: Setup; missing: string[]; missingKeys?: string[]; ready?: boolean; stage?: string; message?: string } | null;
   nextNews: { t: number; currency: string; title: string } | null;
   tentativeNews?: string[];
   newsAvailable: boolean;

@@ -1,5 +1,10 @@
 # Journal des versions
 
+## Règles 3.12 (gel le 12/11/2026 à 12:00 UTC) — décidées sur la ventilation du backtest
+- Or : le premium/discount de l’impulsion devient facultatif (bonus). C’est la seule variante qui passe le critère fixé à l’avance (≥ +0,2 R net par trade et ≥ 30 trades sur chacune des deux moitiés, exécution M5 : +0,38 R puis +0,55 R). EUR/USD : inchangé (+0,39 R puis +0,15 R, sous le critère).
+- Mode TEST recentré : kill zone et contexte HTF obligatoires ; il ne peut manquer que le premium/discount et/ou un R:R entre 2 et 2,5. Le signal TEST passe par la même exécution M5 que le protocole (CHoCH M5 dans la zone) : l’alerte 🧪 et le bouton ne viennent qu’avec l’ordre M5.
+- Backtest : nouvelle mesure « entrée au marché après le CHoCH M5 » (au lieu de l’ordre limite à mi-jambe) pour le protocole et le TEST 3.12 ; l’ancienne définition du TEST reste mesurée pour comparaison.
+
 ## Backtest : ventilation par condition manquante (mesure seule)
 - Le backtest mesure, en M15 et en M5, le protocole seul puis le protocole + les setups auxquels il manque UNE seule condition (kill zone, R:R 2,5, premium/discount, contexte HTF), les setups « sans kill zone » seuls, et tout le mode TEST.
 - Critère fixé avant de voir les résultats : on n'envisage d'assouplir une condition que si la variante garde au moins 30 trades et ≥ +0,2 R net par trade sur chacune des deux moitiés. Aucune règle n'est changée.

@@ -66,6 +66,15 @@ ok('Au moins une étape M5 évaluée sur le signal réel', stages.some(s => !s.i
   const r = applyExecution('XAU/USD', e, final, null, t0, costs, 2);
   ok('M5 indisponibles : Attendre', r.execution?.stage === 'indisponible' && final.signal === 'attendre');
 }
+// 3.12 : le signal TEST passe aussi par l'exécution M5
+{
+  const e: any = at(t0);
+  e.training = { setup: { ...e.setup }, missing: ['premium/discount'], missingKeys: ['pd'] };
+  const final: any = { signal: 'attendre', plan: null, notes: [] };
+  applyExecution('XAU/USD', e, final, null, t0, costs, 2);
+  ok('TEST 3.12 : sans M5, pas d’ordre TEST (en attente)', e.training.ready === false && e.training.stage === 'indisponible' && final.signal === 'attendre');
+}
+
 // 3. EUR/USD réactivé (09/11) : exécuté en M5 comme l'or, plus de pause
 {
   const e = at(t0); // moteur réel ; on le présente comme un signal EUR/USD

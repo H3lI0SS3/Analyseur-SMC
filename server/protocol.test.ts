@@ -1,7 +1,7 @@
 // Règles 3.7 — protocole en 4 étapes, sur de vraies bougies : npx tsx server/protocol.test.ts
 import oct30 from './fixtures/real-2026-10-30.json';
 import nov2 from './fixtures/real-2026-11-02-xau.json';
-import { analyze, findTrigger, type SweepCandidate, type StructureEvent } from './smc';
+import { analyze, findTrigger, trainingEligible, type SweepCandidate, type StructureEvent } from './smc';
 import { auditEngine } from './audit';
 import type { Candle, Timeframe } from './marketData';
 
@@ -13,9 +13,9 @@ const ok = (label: string, cond: boolean, info = '') => {
 const conv = (rows: any[]): Candle[] => rows.map(([d, o, h, l, c]) => ({ t: Date.parse(d.replace(' ', 'T') + ':00Z'), o, h, l, c }));
 const at = (all: Record<Timeframe, Candle[]>, now: number) =>
   Object.fromEntries((['M15', 'H1', 'H4', 'D1'] as Timeframe[]).map(tf => [tf, all[tf].filter(c => c.t <= now)])) as Record<Timeframe, Candle[]>;
-const run = (all: Record<Timeframe, Candle[]>, now: number) => {
+const run = (all: Record<Timeframe, Candle[]>, now: number, pdOptional = false) => {
   const series = at(all, now);
-  const e = analyze(series, 2, { now, spread: 0.24, commissionPerLot: 0, contract: 100, news: { available: true, events: [] }, newsCurrencies: ['USD'] });
+  const e = analyze(series, 2, { now, spread: 0.24, commissionPerLot: 0, contract: 100, news: { available: true, events: [] }, newsCurrencies: ['USD'], pdOptional });
   return { e, errs: auditEngine(e, { now, series, spread: 0.24, commissionPerLot: 0, contract: 100 }) };
 };
 
@@ -54,7 +54,22 @@ const run = (all: Record<Timeframe, Candle[]>, now: number) => {
   ok('Zone en premium de l’impulsion', ck('pd').ok, ck('pd').detail);
   ok('Ordre : balayage puis CHoCH', ck('sweep').detail.includes('05:45') && ck('choch').detail.includes('06:00'));
   ok('30/10 : aucune incohérence', errs.length === 0, errs.join(' | '));
+  // 3.12 : mode TEST — seul le R:R manque, mais il est sous 1:2 (plan 1:${e.setup?.rr2 ?? e.setup?.rr1}) → pas de signal TEST
+  ok('3.12 TEST : R:R sous 1:2 → pas de signal d’entraînement', (e.setup?.rr2 ?? e.setup?.rr1 ?? 0) < 2 && e.training === null && e.nearMiss === null, `${e.setup?.rr2 ?? e.setup?.rr1}`);
+  // 3.12 : premium/discount facultatif (or) → condition affichée en bonus, plus obligatoire
+  const eo = run(all, Date.parse('2026-10-30T06:16:00Z'), true).e;
+  const pdc = eo.checklist.find(c => c.key === 'pd')!;
+  ok('3.12 or : premium/discount devenu facultatif (bonus)', !pdc.ok && pdc.core === false && !eo.checklist.filter(c => c.core && !c.ok).some(c => c.key === 'pd'));
+  ok('3.12 EUR/USD (défaut) : premium/discount toujours obligatoire', early.e.checklist.find(c => c.key === 'pd')!.core === true);
 }
+
+// ---------- 3.12 : ce qu'un signal TEST peut manquer ----------
+ok('TEST : premium/discount seul → oui', trainingEligible(['pd']));
+ok('TEST : R:R entre 2 et 2,5 seul → oui', trainingEligible(['rr']));
+ok('TEST : premium/discount + R:R → oui', trainingEligible(['pd', 'rr']));
+ok('TEST : kill zone manquante → non', !trainingEligible(['session']) && !trainingEligible(['pd', 'session']));
+ok('TEST : contexte HTF manquant → non', !trainingEligible(['htf']));
+ok('TEST : rien ne manque (c’est le protocole) → non', !trainingEligible([]));
 
 // ---------- findTrigger : l'ordre des étapes compte ----------
 {

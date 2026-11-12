@@ -186,7 +186,13 @@ function buildServer() {
           execution_m5: a.execution ? { etape: a.execution.stage, message: a.execution.message, zone: a.execution.zone, niveau_choch: a.execution.chochLevel, ordre: a.execution.order } : null,
           actif_en_pause: a.paused,
           signal_entrainement_test: a.engine.training
-            ? { regle: 'TEST, compte démo uniquement, risque 0,25 % : pas un signal du protocole.', plan: a.engine.training.setup, conditions_manquantes: a.engine.training.missing }
+            ? {
+                regle: 'TEST 3.12, compte démo uniquement, risque 0,25 % : kill zone obligatoire, il ne manque que le premium/discount et/ou un R:R entre 2 et 2,5 ; entrée sur CHoCH M5 comme le protocole.',
+                ordre_pret: a.engine.training.ready !== false,
+                execution_m5: a.engine.training.message ?? null,
+                plan: a.engine.training.setup,
+                conditions_manquantes: a.engine.training.missing,
+              }
             : null,
           volume_profile_ticks: a.volumeProfile ?? 'indisponible (volume en ticks seulement avec cTrader)',
           score_confluence: `${e.checklist.filter(c => c.ok).length}/${e.checklist.length}`,
@@ -282,7 +288,7 @@ function buildServer() {
         duree_calcul_s: Math.round(r.durationMs / 1000),
         protocole_complet: { resume: describeBt(r.strict), trades_par_jour_de_bourse: perDay(r.strict.trades, r.from, r.to), ...r.strict },
         protocole_plus_entrainement_test: {
-          regle: 'Protocole complet + signaux du mode entraînement (TEST) : déclencheur M15 complet, contexte HTF / premium-discount / kill zone facultatifs, R:R net ≥ 1:2. Exécution M15 (sans affinage M5).',
+          regle: 'Protocole complet + signaux du mode TEST 3.12 (kill zone obligatoire ; il ne peut manquer que le premium/discount et/ou un R:R entre 2 et 2,5). Exécution M15 ici (sans affinage M5) : voir la ventilation pour l’exécution M5.',
           resume: describeBt(r.souple),
           trades_par_jour_de_bourse: perDay(r.souple.trades, r.from, r.to),
           ...r.souple,
