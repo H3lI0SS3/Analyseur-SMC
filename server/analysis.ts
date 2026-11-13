@@ -213,7 +213,8 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   // compte FxPro : un signal calculé sur un autre flux que cTrader aurait des niveaux légèrement décalés
   const mixedSource = !!getCTrader() && results.some(r => !/cTrader/.test(r.source)) && !futuresProxy;
   if (mixedSource) {
-    blockers.push('cTrader (FxPro) ne répond pas à cet instant : l’analyse a utilisé un flux de secours, dont les prix diffèrent de ceux de ton broker. Pas de signal par sécurité : relance l’analyse dans une minute.');
+    const bad = results.filter(r => !/cTrader/.test(r.source)).map(r => `${r.tf} (${r.source})`).join(', ');
+    blockers.push(`cTrader (FxPro) ne répond pas à cet instant (${bad}) : l’analyse a utilisé un flux de secours, dont les prix diffèrent de ceux de ton broker. Pas de signal par sécurité : relance l’analyse dans une minute.`);
   }
   if (fromStaleCache) blockers.push('La source de données ne répond plus : données des dernières minutes seulement, pas de signal.');
   if (!marketIsClosed && now - lastT > 20 * 60_000) {

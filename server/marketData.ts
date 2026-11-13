@@ -174,7 +174,14 @@ async function getRaw(pairId: string, tf: 'M15' | 'H1', maxAgeMs?: number): Prom
       const ct = getCTrader();
       if (ct) {
         try {
-          const candles = await ct.trendbars(pairId, tf, tf === 'M15' ? 700 : 5000);
+          // un accroc passager (limite de 5 requêtes/s, reconnexion) ne doit pas faire basculer sur un autre flux : 1 nouvel essai
+          let candles: Candle[];
+          try {
+            candles = await ct.trendbars(pairId, tf, tf === 'M15' ? 700 : 5000);
+          } catch {
+            await new Promise(r => setTimeout(r, 1200));
+            candles = await ct.trendbars(pairId, tf, tf === 'M15' ? 700 : 5000);
+          }
           if (candles.length < 60) throw new Error(`Pas assez de bougies cTrader pour ${pairId} ${tf} (${candles.length}).`);
           const res: SeriesResult = { pair: pairId, tf, candles, source: CTRADER_SOURCE, futuresProxy: false, fromStaleCache: false, fetchedAt: Date.now() };
           ct.seriesErrors.delete(`${pairId} ${tf}`);
