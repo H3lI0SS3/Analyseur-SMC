@@ -54,6 +54,21 @@ async function testCTrader() {
 /** Trades par jour de bourse (5 jours sur 7). */
 const perDay = (trades: number, from: number, to: number) => Number((trades / Math.max(1, ((to - from) / 86_400_000) * (5 / 7))).toFixed(2));
 
+/** Présentation d'un résultat du labo rapide (outil « labo » et résumé joint au backtest). */
+function fmtQuick(label: string, r: ReturnType<typeof runQuickLab>) {
+  return {
+    hypothese: label,
+    passe_le_critere: r.passes,
+    trades_par_jour_de_bourse: r.tradesPerDay,
+    toute_la_periode: r.all,
+    premiere_moitie: r.halves[0],
+    deuxieme_moitie: r.halves[1],
+    trimestres_R: r.quarters.map(q => `${q.trades} tr. / ${q.totalR} R`),
+    par_sens: r.byDirection,
+    par_session: r.bySession,
+  };
+}
+
 function buildServer() {
   const server = new McpServer({ name: 'analyseur-smc', version: '2.2.0' });
   const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
@@ -337,6 +352,15 @@ function buildServer() {
               lignes: r.management.rows.map(m => ({ gestion: m.label, premiere_moitie: m.firstHalf, deuxieme_moitie: m.secondHalf })),
             }
           : null,
+        // le labo rapide est joint ici : certains clients gardent en cache l'ancienne liste d'outils et ne voient pas « labo »
+        labo_rapide: (() => {
+          const d = labDataFor(actif);
+          if (!d) return 'indisponible sur ce serveur (backtest terminé ailleurs ou serveur redémarré)';
+          return {
+            critere: `≥ ${QUICK_CRITERION.minTradesPerHalf} trades et ≥ +${QUICK_CRITERION.minAvgR} R/trade sur chaque moitié, au moins ${QUICK_CRITERION.minPositiveQuarters} trimestres sur 4 positifs.`,
+            hypotheses: QUICK_HYPOTHESES.map(h => fmtQuick(h.label, runQuickLab(d, h.params))),
+          };
+        })(),
         hypotheses: r.assumptions,
         ...(withExport ? { export_compact: { from: r.from, to: r.to, generatedAt: Date.now(), rulesVersion: r.rulesVersion, rows: exportTrades(finishedTrades(actif) ?? []) } } : {}),
         // depuis la 3.7 les deux variantes sont identiques : une seule liste
@@ -379,17 +403,7 @@ function buildServer() {
     async ({ actif, execution, conditions_manquantes, stop_min_atr_h1, rr_min, sens, sessions, gestion }) => {
       const d = labDataFor(actif);
       if (!d) return fail(`Aucun backtest ${actif} terminé sur ce serveur (${INSTANCE_ID}). Lance l’outil backtest jusqu’au statut « terminé », puis rappelle le labo.`);
-      const fmt = (label: string, r: ReturnType<typeof runQuickLab>) => ({
-        hypothese: label,
-        passe_le_critere: r.passes,
-        trades_par_jour_de_bourse: r.tradesPerDay,
-        toute_la_periode: r.all,
-        premiere_moitie: r.halves[0],
-        deuxieme_moitie: r.halves[1],
-        trimestres_R: r.quarters.map(q => `${q.trades} tr. / ${q.totalR} R`),
-        par_sens: r.byDirection,
-        par_session: r.bySession,
-      });
+      const fmt = fmtQuick;
       const custom = [execution, conditions_manquantes, stop_min_atr_h1, rr_min, sens, sessions, gestion].some(x => x !== undefined);
       const head = {
         actif,
