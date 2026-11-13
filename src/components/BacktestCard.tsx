@@ -99,14 +99,6 @@ export function BacktestCard({ pair, settings }: Props) {
               Moins de 100 trades sur une des deux règles : échantillon encore trop petit pour trancher.
             </p>
           )}
-          <div className="label pt-1">Depuis le gel des règles ({localDateTime(res.frozenFrom)}, version {res.rulesVersion})</div>
-          <p className="text-xs leading-snug text-mute">
-            Signaux apparus après la date où les règles ont été figées : ils n’ont pas pu influencer la conception du moteur. C’est l’équivalent d’un suivi en direct ; il se remplit semaine après semaine.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <Variant title="Protocole complet" v={res.strictForward} />
-            <Variant title="Protocole + entraînement (TEST)" v={res.soupleForward} />
-          </div>
           {res.lab && <LabTable lab={res.lab} />}
           {res.breakdown && <BreakdownTable b={res.breakdown} />}
           {res.management && <ManagementTable m={res.management} />}

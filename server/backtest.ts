@@ -5,7 +5,7 @@
 //  - « souple »  : protocole + signaux du mode entraînement (TEST, compte démo), pour mesurer leur fréquence et leur résultat.
 
 import { aggregateTrading, TF_MS, type Candle, type Timeframe } from './marketData';
-import { analyze, MIN_CONFLUENCES, MIN_RR, TRAINING_MIN_RR, PD_OPTIONAL_PAIRS, RULES_FROZEN_AT, RULES_VERSION, type EngineResult, type Setup } from './smc';
+import { analyze, MIN_CONFLUENCES, MIN_RR, TRAINING_MIN_RR, PD_OPTIONAL_PAIRS, RULES_VERSION, type EngineResult, type Setup } from './smc';
 import { HOUR, marketClosed, maDateTime, nyParts, nyToUtc } from './time';
 import type { OraBacktest } from './oraBacktest';
 
@@ -89,13 +89,9 @@ export interface BacktestResult {
   stepsEvaluated: number;
   durationMs: number;
   rulesVersion: string;
-  frozenFrom: number;
   assumptions: string[];
   strict: VariantStats;
   souple: VariantStats;
-  /** uniquement les signaux postérieurs au gel des règles (équivalent d'un suivi en direct) */
-  strictForward: VariantStats;
-  soupleForward: VariantStats;
   lastTrades: BtTrade[];
   lab: LabResult;
   /** ventilation par condition manquante (mesure seule) */
@@ -217,7 +213,7 @@ export function simulate(setup: Setup, from: number, m15: Candle[], startIdx: nu
 }
 
 /** Premier indice dont l'horodatage est >= t (recherche dichotomique). */
-function firstAtOrAfter(arr: Candle[], t: number): number {
+export function firstAtOrAfter(arr: Candle[], t: number): number {
   let lo = 0;
   let hi = arr.length;
   while (lo < hi) {
@@ -500,7 +496,7 @@ export class BacktestRun {
    * CHoCH et pas avant le début de la kill zone ; un ordre déjà servi ou au R:R insuffisant avant « maintenant » = pas
    * de trade ; l'ordre n'est servi qu'à partir de « maintenant » (le moment où l'app le donne).
    */
-  private refineLikeLive(s: Setup, zone: { top: number; bottom: number }, now: number, eng: EngineResult, missing: string[]) {
+  private refineLikeLive(s: Setup, zone: { top: number; bottom: number }, now: number, eng: EngineResult): LiveOrder | null {
     if (!this.m5 || !this.m5.length || !eng.trigger) return null;
     const p = nyParts(now);
     const h0 = p.h >= 2 && p.h < 5 ? 2 : p.h >= 7 && p.h < 10 ? 7 : null;
@@ -518,13 +514,12 @@ export class BacktestRun {
       if (long ? c.l <= ref.setup.entry - this.costs.spread : c.h >= ref.setup.entry) return null;
       if (long ? c.h >= s.tp1 : c.l <= s.tp1 - this.costs.spread) return null;
     }
-    // R:R net de l'ordre M5, comme en direct (TEST : R:R ≥ 2 accepté)
+    // R:R net de l'ordre M5, comme en direct (le filtre R:R est appliqué par l'appelant : TEST ≥ 2, protocole ≥ 2,5)
     const risk = Math.abs(ref.setup.entry - ref.setup.sl);
     const rr = (tp: number) => (Math.abs(tp - ref.setup.entry) - this.commUnit) / (risk + this.commUnit);
     const best = s.tp2 !== null ? rr(s.tp2) : rr(s.tp1);
-    if (best < (missing.includes('rr') ? TRAINING_MIN_RR : MIN_RR)) return null;
     const start = Math.max(ref.from, now);
-    return { setup: ref.setup, market: ref.market, from: start, idx: firstAtOrAfter(this.m5, start), late: ref.from < now };
+    return { setup: ref.setup, market: ref.market, from: start, idx: firstAtOrAfter(this.m5, start), late: ref.from < now, rr: best };
   }
 
   /** Enregistre chaque setup qui passe les conditions obligatoires, avec son résultat pour chaque gestion. */
@@ -546,7 +541,8 @@ export class BacktestRun {
     }
     let m5res: Candidate['m5'] = null;
     const zone = eng.zones.find(z => z.id === s.zoneId);
-    const live = zone ? this.refineLikeLive(s, zone, now, eng, missing) : null;
+    const liveRaw = zone ? this.refineLikeLive(s, zone, now, eng) : null;
+    const live = liveRaw && liveRaw.rr >= (missing.includes('rr') ? TRAINING_MIN_RR : MIN_RR) ? liveRaw : null;
     if (this.m5 && this.m5.length && zone && now >= this.m5[0].t && now < this.m5[this.m5.length - 1].t) {
       m5res = {} as NonNullable<Candidate['m5']>;
       for (const mode of ['partiel', 'tp1', 'final', 'suivi50', 'suivi75'] as Management[]) {
@@ -588,7 +584,17 @@ export class BacktestRun {
       rr: s.rr2 ?? s.rr1,
       res,
       m5: m5res,
+      setup: s,
+      session: eng.session.name,
+      atrH1: eng.timeframes.H1.atr14,
+      live: liveRaw,
+      hasM5: !!m5res,
     });
+  }
+
+  /** Données nécessaires au laboratoire rapide (rejouer les setups avec d'autres réglages sans tout recalculer). */
+  labData(): LabData {
+    return { pair: this.pair, candidates: this.candidates, m15: this.m15, m5: this.m5, costs: this.costs, from: this.startT, to: this.m15[this.m15.length - 1].t };
   }
 
   /** Tous les trades simulés (pour l'historique des setups similaires). */
@@ -597,7 +603,7 @@ export class BacktestRun {
   }
 
   result(): BacktestResult {
-    const by = (v: 'strict' | 'souple', from = 0) => this.trades.filter(t => t.variant === v && t.signalAt >= from);
+    const by = (v: 'strict' | 'souple') => this.trades.filter(t => t.variant === v);
     const m15 = this.m15;
     return {
       pair: this.pair,
@@ -606,7 +612,6 @@ export class BacktestRun {
       stepsEvaluated: this.steps,
       durationMs: this.computeMs,
       rulesVersion: RULES_VERSION,
-      frozenFrom: RULES_FROZEN_AT,
       assumptions: [
         'Le moteur ne voit que les bougies clôturées à chaque instant (aucune information future).',
         'Ordre limite annulé après 4 h ou si TP1 est atteint avant l’exécution ; un seul trade à la fois.',
@@ -615,12 +620,9 @@ export class BacktestRun {
         `Coûts inclus : spread ${this.costs.spread} et commission ${this.costs.commissionPerLot} $ par lot.`,
         'Entrée affinée M5 (labo) : même setup M15, CHoCH M5 dans la zone puis ordre limite au milieu de la jambe du CHoCH, stop derrière l’extrême M5 (au moins 25 % du stop M15), gestion simulée sur les bougies M5.',
         'Annonces économiques non filtrées (pas de calendrier historique) : résultats un peu optimistes ou pessimistes selon les jours.',
-        `« Depuis le gel des règles » : seuls les signaux apparus après le ${maDateTime(RULES_FROZEN_AT)}, date à laquelle les règles du moteur (version ${RULES_VERSION}) ont été figées. Ces trades n’ont pas pu influencer la conception du moteur : c’est l’équivalent d’un suivi en direct.`,
       ],
       strict: finalize(by('strict')),
       souple: finalize(by('souple')),
-      strictForward: finalize(by('strict', RULES_FROZEN_AT)),
-      soupleForward: finalize(by('souple', RULES_FROZEN_AT)),
       lastTrades: this.trades
         .filter(t => t.r !== null)
         .sort((a, b) => b.signalAt - a.signalAt)
@@ -634,12 +636,17 @@ export class BacktestRun {
 
 /** Exécution complète en une fois (tests, scripts). */
 export async function runBacktest(pair: string, h1: Candle[], m15: Candle[], decimals: number, costs: BacktestCosts, m5: Candle[] | null = null): Promise<BacktestResult> {
+  return (await runBacktestWithLab(pair, h1, m15, decimals, costs, m5)).result;
+}
+
+/** Idem, avec les setups gardés pour le laboratoire rapide. */
+export async function runBacktestWithLab(pair: string, h1: Candle[], m15: Candle[], decimals: number, costs: BacktestCosts, m5: Candle[] | null = null): Promise<{ result: BacktestResult; lab: LabData }> {
   const run = new BacktestRun(pair, h1, m15, decimals, costs, m5);
   while (!run.done) {
     run.step(2000);
     await new Promise(r => setImmediate(r));
   }
-  return run.result();
+  return { result: run.result(), lab: run.labData() };
 }
 
 export function sessionBucket(t: number): string {
@@ -765,7 +772,7 @@ export function similarHistory(trades: BtTrade[], f: SetupFeatures, period: { fr
 }
 
 // ---------- Labo : variantes de règles, notées sur la 1re moitié, validées sur la 2e ----------
-interface Candidate {
+export interface Candidate {
   t: number;
   direction: 'acheter' | 'vendre';
   entryType: 'marché' | 'limite';
@@ -786,6 +793,35 @@ interface Candidate {
   m5: Record<Management, { filledAt: number | null; exitAt: number | null; r: number | null }> | null;
   /** même CHoCH M5, entrée au marché à la clôture de la bougie du CHoCH (mesure) ; gestion « partiel » */
   m5mkt: { filledAt: number | null; exitAt: number | null; r: number | null } | null;
+  /** plan M15 du signal (labo : rejoué avec d'autres réglages) */
+  setup: Setup;
+  /** session au moment du signal */
+  session: string;
+  /** ATR 14 H1 au moment du signal */
+  atrH1: number;
+  /** ordre M5 tel qu'en direct, AVANT le filtre de R:R (null : pas de CHoCH M5 exploitable) */
+  live: LiveOrder | null;
+  /** bougies M5 disponibles sur cette période */
+  hasM5: boolean;
+}
+
+export interface LabData {
+  pair: string;
+  candidates: Candidate[];
+  m15: Candle[];
+  m5: Candle[] | null;
+  costs: BacktestCosts;
+  from: number;
+  to: number;
+}
+
+export interface LiveOrder {
+  setup: Setup;
+  market: Setup;
+  from: number;
+  idx: number;
+  late: boolean;
+  rr: number;
 }
 
 export interface LabStats {
@@ -815,7 +851,7 @@ export interface LabResult {
 
 // La règle de base reproduit exactement le signal actuel du moteur (règles 3.7 : toutes les étapes obligatoires,
 // déjà exigées par collectCandidate). Les variantes ajoutent des filtres par-dessus.
-const marketRule = (c: Candidate) => !(c.entryType === 'marché' && !c.ltf);
+export const marketRule = (c: Candidate) => !(c.entryType === 'marché' && !c.ltf);
 const base = (c: Candidate) => marketRule(c) && c.missing.length === 0;
 
 /** Liste FIGÉE à l'avance : on ne l'ajuste pas après avoir vu les résultats. */

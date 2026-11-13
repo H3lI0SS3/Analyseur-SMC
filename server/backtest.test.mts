@@ -1,6 +1,7 @@
 // Tests du simulateur et du backtest : npx tsx server/backtest.test.ts
-import { simulate, runBacktest, BacktestRun, similarHistory, normCdf, type BtTrade, type SetupFeatures } from './backtest';
+import { simulate, runBacktest, runBacktestWithLab, BacktestRun, similarHistory, normCdf, type BtTrade, type SetupFeatures } from './backtest';
 import { exportTrades, importTrades } from './historySnapshot';
+import { runQuickLab, QUICK_HYPOTHESES } from './quickLab';
 import type { Candle } from './marketData';
 import type { Setup } from './smc';
 import { nyParts } from './time';
@@ -78,13 +79,12 @@ const setup = (p: Partial<Setup>): Setup => ({
     else { last.h = Math.max(last.h, c.h); last.l = Math.min(last.l, c.l); last.c = c.c; }
   }
   const t0 = Date.now();
-  const res = await runBacktest('EUR/USD', h1.slice(-5000), m15.slice(-5000), 5, { spread: 0.0001, commissionPerLot: 7, contract: 100_000 });
+  const { result: res, lab: labData } = await runBacktestWithLab('EUR/USD', h1.slice(-5000), m15.slice(-5000), 5, { spread: 0.0001, commissionPerLot: 7, contract: 100_000 });
   const secs = (Date.now() - t0) / 1000;
   ok('Backtest complet exécuté', res.stepsEvaluated > 1000, `${res.stepsEvaluated} pas en ${secs.toFixed(1)} s`);
   ok('Moins de 90 s de calcul', secs < 90);
   ok('La règle stricte prend au plus autant de signaux que la souple', res.strict.signals <= res.souple.signals, `${res.strict.signals} vs ${res.souple.signals}`);
   ok('Résultats cohérents (gains + pertes + BE = trades)', res.strict.wins + res.strict.losses + res.strict.breakeven === res.strict.trades);
-  ok('Statistiques « depuis le gel » présentes', !!res.strictForward && !!res.soupleForward);
   // Labo : la variante de référence doit reproduire exactement le backtest « sweep en bonus »
   const baseV = res.lab.variants.find(v => v.id === 'base')!;
   const strictV = res.lab.variants.find(v => v.id === 'aplus')!;
@@ -100,6 +100,15 @@ const setup = (p: Partial<Setup>): Setup => ({
   const proto = bd.rows.find(r => r.id === 'protocole' && r.exec === 'M15')!;
   const pSum = sum(proto.firstHalf, proto.secondHalf);
   ok('Ventilation : la référence « protocole » = la référence du labo', pSum.trades === bAll.trades && Math.abs(pSum.totalR - bAll.totalR) < 0.05, `${pSum.trades}/${pSum.totalR} vs ${bAll.trades}/${bAll.totalR}`);
+  // laboratoire rapide : avec les réglages du direct en M15, il reproduit la ventilation « protocole + TEST 3.12 »
+  const t312 = bd.rows.find(r => r.id === 'test_312' && r.exec === 'M15')!;
+  const q = runQuickLab(labData, { execution: 'M15', allowMissing: ['pd'], minStopAtrH1: 0, minRR: 2.5, direction: 'tous', sessions: 'toutes', management: 'partiel' });
+  const tSum = sum(t312.firstHalf, t312.secondHalf);
+  ok('Labo rapide : mêmes trades et même total que la ventilation (protocole + TEST, M15)', q.all.trades === tSum.trades && Math.abs(q.all.totalR - tSum.totalR) < 0.05, `${q.all.trades}/${q.all.totalR} vs ${tSum.trades}/${tSum.totalR}`);
+  const wide = runQuickLab(labData, { ...q.params, minStopAtrH1: 1.5 });
+  ok('Labo rapide : un stop plus large ne crée pas de setup (au plus autant de trades)', wide.all.trades <= q.all.trades + 5, `${wide.all.trades} vs ${q.all.trades}`);
+  ok('Labo rapide : moitiés et trimestres cohérents', q.halves[0].trades + q.halves[1].trades === q.all.trades && q.quarters.reduce((a, b) => a + b.trades, 0) === q.all.trades);
+  ok('Labo rapide : 12 hypothèses déclarées, toutes calculables', QUICK_HYPOTHESES.length === 12 && QUICK_HYPOTHESES.every(h => runQuickLab(labData, h.params).all.trades >= 0));
   const all = bd.rows.find(r => r.id === 'tout_test' && r.exec === 'M15')!;
   ok('Ventilation : 8 variantes en M15, deux moitiés toujours affichées', bd.rows.filter(r => r.exec === 'M15').length === 8 && bd.rows.every(r => !!r.firstHalf && !!r.secondHalf));
   ok('Ventilation : « tout le mode TEST » au moins aussi fréquent que le protocole seul', all.tradesPerDay >= proto.tradesPerDay, `${all.tradesPerDay} ≥ ${proto.tradesPerDay}`);

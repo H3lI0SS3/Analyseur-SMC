@@ -11,7 +11,8 @@ import { z } from 'zod';
 import { PAIRS, getSeries, getQuotes, dataSourceName, type Timeframe } from './marketData';
 import { availableProviders, CLAUDE_MODEL, GEMINI_MODEL } from './ai';
 import { runAnalysis, AnalysisError } from './analysis';
-import { advanceJobAsync, finishedTrades, getJob, startBacktest } from './backtestJobs';
+import { advanceJobAsync, finishedTrades, getJob, labDataFor, startBacktest, INSTANCE_ID } from './backtestJobs';
+import { QUICK_CRITERION, QUICK_HYPOTHESES, runQuickLab, type QuickLabParams } from './quickLab';
 import { exportTrades } from './historySnapshot';
 import { describe as describeBt } from './backtest';
 import { maDateTime } from './time';
@@ -203,8 +204,8 @@ function buildServer() {
                 statut: a.final.signal === 'attendre' ? 'en préparation, pas d’entrée' : 'exploitable',
                 zone: e.setup?.zoneLabel,
                 objectifs: { tp1: e.setup?.tp1Label, tp2: e.setup?.tp2Label },
-                taille_lot: capital ? lots(actif, capital, risk, p.entry, p.sl) : 'donner capital pour calculer',
-                risque_usd: capital ? Number(((capital * risk) / 100).toFixed(2)) : null,
+                taille_lot: a.final.signal === 'attendre' ? 'aucune : pas d’entrée tant que le plan n’est pas exploitable' : capital ? lots(actif, capital, risk, p.entry, p.sl) : 'donner capital pour calculer',
+                risque_usd: a.final.signal !== 'attendre' && capital ? Number(((capital * risk) / 100).toFixed(2)) : null,
               }
             : null,
           checklist: e.checklist.map(c => ({ condition: c.label, ok: c.ok, obligatoire: c.core, detail: c.detail })),
@@ -220,7 +221,7 @@ function buildServer() {
           range_h1: e.dealingRange,
           liquidite: e.liquidity.map(l => ({ niveau: l.label, prix: l.price, cote: l.side === 'buy' ? 'au-dessus (acheteuse)' : 'en dessous (vendeuse)', deja_pris: l.swept })),
           zones: e.zones.map(z => ({ type: z.kind, ut: z.tf, sens: z.dir === 'bull' ? 'haussier' : 'baissier', bas: z.bottom, haut: z.top, deja_teste: z.touched })),
-          plans_alternatifs: e.alternatives,
+          zones_a_surveiller_pas_des_signaux: e.alternatives,
           concepts_ict: {
             displacement_a_l_origine_de_la_zone: e.ict.displacement,
             ote: e.ict.ote,
@@ -242,16 +243,17 @@ function buildServer() {
     {
       title: 'Backtest du moteur',
       description:
-        'Rejoue le moteur sur l’historique réel en M15 (jusqu’à ~2 ans avec Twelve Data) et simule chaque plan avec coûts : trades, réussite, total en R, profit factor, pire repli. ' +
-        'Règles 3.7 : seuls les trades du protocole complet (contexte HTF, balayage → displacement → CHoCH, FVG/OB de l’impulsion en premium/discount, session) ; résultats sur toute la période ET depuis le gel des règles. ' +
+        'Rejoue le moteur sur ~2 ans d’historique réel (cTrader : H1, M15, M5) et simule chaque plan avec coûts : trades, réussite, total en R, profit factor, pire repli. ' +
+        'Protocole complet et signaux TEST, exécution M15 et M5 comme en direct ; résultats sur toute la période, coupée en deux moitiés pour vérifier la stabilité. ' +
         'Le calcul prend plusieurs minutes : chaque appel le fait avancer ; rappelle l’outil jusqu’au statut « terminé ».',
       inputSchema: {
         actif: PAIR_ENUM.describe('EUR/USD ou XAU/USD'),
         relancer: z.boolean().optional().describe('Relancer même si un résultat existe déjà'),
+        export: z.boolean().optional().describe('Inclure l’export compact de tous les trades (volumineux)'),
       },
       annotations: readOnly,
     },
-    async ({ actif, relancer }) => {
+    async ({ actif, relancer, export: withExport }) => {
       // calcul par tranches non bloquantes (le serveur continue de répondre à l'app pendant ce temps)
       let job = getJob(actif, 0);
       if (job?.status === 'en cours' && !job.phase?.startsWith('Téléchargement')) job = await advanceJobAsync(actif, 45_000);
@@ -292,12 +294,6 @@ function buildServer() {
           resume: describeBt(r.souple),
           trades_par_jour_de_bourse: perDay(r.souple.trades, r.from, r.to),
           ...r.souple,
-        },
-        depuis_gel_des_regles: {
-          date_gel: maDateTime(r.frozenFrom),
-          version_regles: r.rulesVersion,
-          protocole: describeBt(r.strictForward),
-          protocole_plus_entrainement: describeBt(r.soupleForward),
         },
         bougies_m15: r.m15Count,
         historique_limite_par_la_source: r.limitedBySource,
@@ -342,22 +338,7 @@ function buildServer() {
             }
           : null,
         hypotheses: r.assumptions,
-        export_compact: { from: r.from, to: r.to, generatedAt: Date.now(), rulesVersion: r.rulesVersion, rows: exportTrades(finishedTrades(actif) ?? []) },
-        // tous les signaux depuis le gel, y compris les ordres limite jamais exécutés (équivalent d'un suivi en direct)
-        signaux_depuis_gel: (finishedTrades(actif) ?? [])
-          .filter(t => t.variant === 'strict' && t.signalAt >= r.frozenFrom)
-          .map(t => ({
-            signal: maDateTime(t.signalAt),
-            sens: t.direction,
-            entree: t.entry,
-            sl: t.sl,
-            tp1: t.tp1,
-            tp2: t.tp2,
-            execute: t.filledAt !== null ? maDateTime(t.filledAt) : 'non (ordre expiré ou annulé)',
-            resultat: t.outcome,
-            r: t.r,
-            session: t.session,
-          })),
+        ...(withExport ? { export_compact: { from: r.from, to: r.to, generatedAt: Date.now(), rulesVersion: r.rulesVersion, rows: exportTrades(finishedTrades(actif) ?? []) } } : {}),
         // depuis la 3.7 les deux variantes sont identiques : une seule liste
         derniers_trades: r.lastTrades.filter(t => t.variant === 'strict').map(t => ({
           signal: maDateTime(t.signalAt),
@@ -372,6 +353,64 @@ function buildServer() {
           amd: t.amdPhase,
         })),
       });
+    }
+  );
+
+  server.registerTool(
+    'labo',
+    {
+      title: 'Laboratoire rapide',
+      description:
+        'Rejoue en quelques secondes les setups du dernier backtest TERMINÉ sur ce serveur avec d’autres réglages (stop minimal en ATR H1, exécution M15/M5, sessions, sens, R:R, gestion), sans relancer le moteur. ' +
+        'Sans réglage : renvoie toutes les hypothèses déclarées à l’avance. Mesure seule : ne change aucune règle de l’app. ' +
+        'Résultat par moitié et par trimestre, et critère : ≥ 30 trades et ≥ +0,2 R/trade sur chaque moitié, 3 trimestres sur 4 positifs.',
+      inputSchema: {
+        actif: PAIR_ENUM.describe('EUR/USD ou XAU/USD'),
+        execution: z.enum(['M15', 'M5', 'M5 marché']).optional(),
+        conditions_manquantes: z.array(z.enum(['pd', 'rr', 'session', 'htf'])).optional().describe('Conditions obligatoires qu’un setup peut manquer (défaut : pd ; le R:R se règle avec rr_min)'),
+        stop_min_atr_h1: z.number().min(0).max(5).optional().describe('Stop au moins égal à k × ATR H1 (0 = stop du moteur)'),
+        rr_min: z.number().min(2).max(6).optional().describe('R:R net minimal de l’ordre final pour le protocole (défaut 2,5 ; un setup TEST garde 2)'),
+        sens: z.enum(['tous', 'acheter', 'vendre']).optional(),
+        sessions: z.enum(['toutes', 'londres', 'new_york']).optional(),
+        gestion: z.enum(['partiel', 'tp1', 'final', 'suivi50', 'suivi75']).optional(),
+      },
+      annotations: readOnly,
+    },
+    async ({ actif, execution, conditions_manquantes, stop_min_atr_h1, rr_min, sens, sessions, gestion }) => {
+      const d = labDataFor(actif);
+      if (!d) return fail(`Aucun backtest ${actif} terminé sur ce serveur (${INSTANCE_ID}). Lance l’outil backtest jusqu’au statut « terminé », puis rappelle le labo.`);
+      const fmt = (label: string, r: ReturnType<typeof runQuickLab>) => ({
+        hypothese: label,
+        passe_le_critere: r.passes,
+        trades_par_jour_de_bourse: r.tradesPerDay,
+        toute_la_periode: r.all,
+        premiere_moitie: r.halves[0],
+        deuxieme_moitie: r.halves[1],
+        trimestres_R: r.quarters.map(q => `${q.trades} tr. / ${q.totalR} R`),
+        par_sens: r.byDirection,
+        par_session: r.bySession,
+      });
+      const custom = [execution, conditions_manquantes, stop_min_atr_h1, rr_min, sens, sessions, gestion].some(x => x !== undefined);
+      const head = {
+        actif,
+        serveur: INSTANCE_ID,
+        periode: `${maDateTime(d.from)} → ${maDateTime(d.to)}`,
+        setups_en_memoire: d.candidates.length,
+        critere: `≥ ${QUICK_CRITERION.minTradesPerHalf} trades et ≥ +${QUICK_CRITERION.minAvgR} R/trade sur chaque moitié, au moins ${QUICK_CRITERION.minPositiveQuarters} trimestres sur 4 positifs.`,
+      };
+      if (custom) {
+        const p: QuickLabParams = {
+          execution: execution ?? 'M5',
+          allowMissing: conditions_manquantes ?? ['pd'],
+          minStopAtrH1: stop_min_atr_h1 ?? 0,
+          minRR: rr_min ?? 2.5,
+          direction: sens ?? 'tous',
+          sessions: sessions ?? 'toutes',
+          management: gestion ?? 'partiel',
+        };
+        return text({ ...head, resultat: fmt('Réglage personnalisé', runQuickLab(d, p)), reglage: p });
+      }
+      return text({ ...head, hypotheses: QUICK_HYPOTHESES.map(h => fmt(h.label, runQuickLab(d, h.params))) });
     }
   );
 

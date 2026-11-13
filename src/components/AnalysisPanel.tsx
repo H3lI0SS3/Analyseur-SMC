@@ -338,9 +338,15 @@ function Result({ a, settings, stats, desk, dailyLossPct, dailyBlocked }: { a: A
           </div>
           {broker.offset !== 0 && (
             <p className="mt-1.5 text-xs leading-snug text-mute">
-              Niveaux recalés sur ton broker ({broker.offset > 0 ? '+' : ''}{fmt(broker.offset, dec)}). Niveaux de l’app (flux Twelve Data, utilisés par le suivi du journal) : entrée {fmt(plan.entry, dec)}, stop {fmt(plan.sl, dec)}, TP1 {fmt(plan.tp1, dec)}{plan.tp2 !== null ? `, TP2 ${fmt(plan.tp2, dec)}` : ''}.
+              Niveaux recalés sur ton broker ({broker.offset > 0 ? '+' : ''}{fmt(broker.offset, dec)}). Niveaux de l’app (flux de données de l’app) : entrée {fmt(plan.entry, dec)}, stop {fmt(plan.sl, dec)}, TP1 {fmt(plan.tp1, dec)}{plan.tp2 !== null ? `, TP2 ${fmt(plan.tp2, dec)}` : ''}.
             </p>
           )}
+          {!go && (
+            <p className="mt-3 rounded-lg bg-card2 px-3 py-2 text-xs leading-snug text-mute">
+              Niveaux indicatifs : aucune taille de position n’est calculée tant que toutes les conditions obligatoires ne sont pas remplies. N’ouvre pas de trade sur ce plan.
+            </p>
+          )}
+          {go && (
           <div className="mt-3 rounded-lg bg-card2 px-3 py-2 text-xs">
             {(settings.broker ?? 'mt5') === 'etoro' && lots !== null && lots > 0 ? (
               (() => {
@@ -394,8 +400,9 @@ function Result({ a, settings, stats, desk, dailyLossPct, dailyBlocked }: { a: A
               <p className="mt-1 text-xs text-mute">Sur eToro : saisis le montant avec ce levier, vérifie que le nombre d’unités affiché correspond, puis pose le stop loss et le take profit aux niveaux ci-dessus.</p>
             )}
           </div>
+          )}
           {e.setup && <p className="mt-2 text-xs text-mute">Zone : {e.setup.zoneLabel}</p>}
-          {e.setup?.validUntil && plan.entryType === 'limite' && (
+          {go && e.setup?.validUntil && plan.entryType === 'limite' && (
             <p className="mt-1 text-xs text-mute">Ordre limite à annuler s’il n’est pas exécuté avant {localTime(e.setup.validUntil)}.</p>
           )}
           {final.notes.map(n => (

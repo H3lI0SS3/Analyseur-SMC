@@ -7,7 +7,7 @@ import { PAIRS, getHistory } from './marketData';
 /** Identifiant de ce serveur : si deux appels n'ont pas le même, l'hébergeur a lancé plusieurs serveurs. */
 export const INSTANCE_ID = crypto.randomBytes(3).toString('hex');
 import { runOraBacktest } from './oraBacktest';
-import { BacktestRun, similarHistory, type BacktestResult, type BtTrade, type SetupFeatures, type SimilarHistory } from './backtest';
+import { BacktestRun, similarHistory, type LabData, type BacktestResult, type BtTrade, type SetupFeatures, type SimilarHistory } from './backtest';
 import { bundledSnapshot, importTrades } from './historySnapshot';
 
 export interface JobView {
@@ -25,6 +25,8 @@ interface Job extends JobView {
   run?: BacktestRun;
   meta?: { source: string; futuresProxy: boolean; limitedBySource: boolean; m15Count: number };
   trades?: BtTrade[];
+  /** setups du dernier backtest terminé, pour le laboratoire rapide */
+  lab?: LabData;
 }
 
 const jobs = new Map<string, Job>();
@@ -33,7 +35,7 @@ const bundledCache = new Map<string, BtTrade[]>();
 const MAX_AGE = 7 * 24 * 3_600_000;
 
 const view = (j: Job): JobView => {
-  const { run, meta, trades, ...v } = j;
+  const { run, meta, trades, lab, ...v } = j;
   return { ...v, instance: INSTANCE_ID };
 };
 
@@ -81,6 +83,7 @@ function advance(job: Job, budgetMs: number) {
       }
     }
     job.trades = job.run.allTrades();
+    job.lab = job.run.labData();
     job.status = 'terminé';
     job.finishedAt = Date.now();
     job.run = undefined; // libère la mémoire
@@ -104,6 +107,7 @@ export function startBacktest(pair: string, spread?: number, commissionPerLot?: 
   if (running?.trades) {
     job.trades = running.trades;
     job.result = running.result;
+    job.lab = running.lab;
   }
   jobs.set(pair, job);
   const costs = {
@@ -176,4 +180,9 @@ export function historyForSignal(pair: string, features: SetupFeatures | null): 
 export function finishedTrades(pair: string): BtTrade[] | null {
   const j = jobs.get(pair);
   return j?.status === 'terminé' && j.trades ? j.trades : null;
+}
+
+/** Setups du dernier backtest terminé sur ce serveur (null : aucun backtest fini ici). */
+export function labDataFor(pair: string): LabData | null {
+  return jobs.get(pair)?.lab ?? null;
 }

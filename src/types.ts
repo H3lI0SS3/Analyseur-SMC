@@ -140,9 +140,6 @@ export interface BacktestJob {
     assumptions: string[];
     strict: VariantStats;
     souple: VariantStats;
-    strictForward: VariantStats;
-    soupleForward: VariantStats;
-    frozenFrom: number;
     rulesVersion: string;
     limitedBySource: boolean;
     m15Count: number;
