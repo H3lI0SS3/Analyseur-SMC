@@ -53,15 +53,41 @@ export class JournalStore {
     return !!telegramConfig(this.env);
   }
 
+  /** heure du dernier échec de lecture du fichier épinglé (null = lu correctement) */
+  private loadFailedAt: number | null = null;
+
   async get(): Promise<StoreData> {
+    // la lecture a échoué (token révoqué, réseau) : on réessaie au plus toutes les 60 s et on fusionne, sans redémarrage
+    if (this.data && this.loadFailedAt && Date.now() - this.loadFailedAt > 60_000 && !this.loading) {
+      this.loading = this.load()
+        .then(d => {
+          this.data = JournalStore.merge(this.data!, d);
+          this.loadFailedAt = null;
+          this.lastError = null;
+          return this.data;
+        })
+        .catch(e => {
+          this.loadFailedAt = Date.now();
+          this.lastError = `Lecture de la sauvegarde Telegram impossible : ${String(e?.message || e).slice(0, 160)}`;
+          return this.data!;
+        })
+        .finally(() => (this.loading = null));
+      return this.loading;
+    }
     if (this.data) return this.data;
     if (!this.loading) {
       this.loading = this.load()
+        .then(d => {
+          this.loadFailedAt = null;
+          return d;
+        })
         .catch(e => {
+          this.loadFailedAt = Date.now();
           this.lastError = `Lecture de la sauvegarde Telegram impossible : ${String(e?.message || e).slice(0, 160)}`;
           return empty();
         })
-        .then(d => (this.data = d));
+        .then(d => (this.data = d))
+        .finally(() => (this.loading = null));
     }
     return this.loading;
   }
@@ -160,7 +186,15 @@ export class JournalStore {
     try {
       // relire le fichier épinglé juste avant d'écrire : une autre instance a pu sauvegarder entre-temps
       const latest = await this.load().catch(() => null);
-      if (latest) this.data = JournalStore.merge(this.data, latest);
+      if (latest) {
+        this.data = JournalStore.merge(this.data, latest);
+        this.loadFailedAt = null;
+      } else if (this.loadFailedAt) {
+        // jamais relu le fichier épinglé : écrire maintenant le remplacerait par une version incomplète → on garde tout en
+        // mémoire et on réessaiera à la prochaine sauvegarde
+        this.lastError = 'Sauvegarde Telegram en attente : le fichier épinglé n’a pas pu être relu (token du bot ou réseau).';
+        return;
+      }
       const doc = new Blob([JSON.stringify(this.data)], { type: 'application/json' });
       // 1) remplacer le fichier dans le message déjà épinglé : aucun nouveau message « épinglé » dans la conversation
       if (this.pinnedId) {

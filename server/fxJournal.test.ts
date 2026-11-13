@@ -140,6 +140,21 @@ ok('Desk : perte réalisée 400 $ + risque ouvert 100 $ = 5 % du compte, 1 perte
   const s2 = await checkRisk(jr, st, async h => { msgs.push(h); return { ok: true }; }, dNow + 300_000);
   ok('Alerte Telegram : position trop grosse + limite de perte du jour, une seule fois', s1.length === 2 && s2.length === 0 && msgs.length === 2 && /trop grosse/.test(msgs[0]) && /0\.16 lot conseillé/.test(msgs[0]) && /limite de perte/.test(msgs[1]), msgs.join(' || ').slice(0, 200));
 
+  // token révoqué : lecture impossible → aucune écriture (le fichier épinglé n'est jamais remplacé par une version vide)
+  let revoked = true;
+  const before = saved;
+  const flaky = async (url: string, init?: any) =>
+    revoked ? { ok: false, status: 401, json: async () => ({ ok: false, description: 'Unauthorized' }) } : fake(url, init);
+  const st3 = new JournalStore(env, flaky as any, 0);
+  const empty3 = await st3.get();
+  await st3.addSignal({ ...sigTest, id: 'pendant-panne', at: sigTest.at + 1 });
+  await st3.flush();
+  ok('Token révoqué : rien n’est écrit, erreur affichée', empty3.signals.length === 1 && saved === before && /Unauthorized|en attente/.test(st3.lastError ?? ''), st3.lastError ?? '');
+  revoked = false;
+  (st3 as any).loadFailedAt = Date.now() - 61_000;
+  const healed = await st3.get();
+  ok('Nouveau token : relecture sans redémarrage, ancien journal + signal de la panne fusionnés', healed.signals.length === 2 && healed.annotations['155532150']?.sl === 1.12532 && st3.lastError === null, JSON.stringify(healed.signals.map(s => s.id)));
+
   const mem = new JournalStore({}, fake as any, 0);
   ok('Sans Telegram : mémoire seule, pas d’erreur', !mem.persistent && (await mem.addSignal(sigTest)) && (await mem.get()).signals.length === 1);
 

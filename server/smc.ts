@@ -1161,7 +1161,9 @@ export function analyze(series: Record<Timeframe, Candle[]>, decimals: number, o
     {
       key: 'pd',
       label: isLong ? '3. Zone en discount de l’impulsion (< 50 %)' : '3. Zone en premium de l’impulsion (> 50 %)',
-      ok: fromTrigger && trigPremium,
+      // jugé sur la zone de l'impulsion même si elle est rejetée pour une autre raison (stop trop large…) : sinon la
+      // checklist affiche « zone en premium » en rouge et le verdict la compte à tort comme manquante
+      ok: !!trigger && !!trigZone && trigPremium,
       detail: trigger && trigZone
         ? `Impulsion ${r(trigger.legLow)} → ${r(trigger.legHigh)}, milieu ${r((trigger.legHigh + trigger.legLow) / 2)} : zone ${trigPremium ? (isLong ? 'en discount' : 'en premium') : (isLong ? 'au-dessus du milieu (premium)' : 'sous le milieu (discount)')}.`
         : 'Pas d’impulsion de référence.',
