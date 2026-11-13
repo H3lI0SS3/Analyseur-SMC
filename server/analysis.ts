@@ -7,6 +7,7 @@ import type { CandlePattern } from './candlePatterns';
 import { auditEngine } from './audit';
 import { getJournalStore } from './journalStore';
 import { marketClosed, maTime } from './time';
+import { getCTrader } from './ctrader';
 import { analyze, PD_OPTIONAL_PAIRS, RULES_VERSION, type EngineResult } from './smc';
 /** Délai maximal de la relecture IA (au-delà, le prix « en direct » vieillit et l'analyse paraît bloquée). */
 export const AI_TIMEOUT_MS = 35_000;
@@ -209,6 +210,10 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
       : 'Prix de l’or issu des futures (écart de 10 à 40 $ avec ton broker) : niveaux masqués. Ajoute la clé TWELVE_DATA_API_KEY pour le prix spot.');
   }
   if (incoherences.length) blockers.push(`Incohérence détectée dans l’analyse (${incoherences[0]}) : pas de signal par sécurité.`);
+  // compte FxPro : un signal calculé sur un autre flux que cTrader aurait des niveaux légèrement décalés
+  if (getCTrader() && results.some(r => !/cTrader/.test(r.source)) && !futuresProxy) {
+    blockers.push('cTrader (FxPro) ne répond pas à cet instant : l’analyse a utilisé un flux de secours, dont les prix diffèrent de ceux de ton broker. Pas de signal par sécurité : relance l’analyse dans une minute.');
+  }
   if (fromStaleCache) blockers.push('La source de données ne répond plus : données des dernières minutes seulement, pas de signal.');
   if (!marketIsClosed && now - lastT > 20 * 60_000) {
     blockers.push(`Données en retard : dernière bougie à ${maTime(lastT)} (heure du Maroc). Pas de signal tant qu’elles ne sont pas à jour.`);

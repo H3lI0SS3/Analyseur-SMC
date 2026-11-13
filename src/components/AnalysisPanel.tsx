@@ -249,7 +249,7 @@ function Result({ a, settings, stats, desk, dailyLossPct, dailyBlocked }: { a: A
         </summary>
         <div className="mt-3 space-y-3">
       {a.volumeProfile && <VolumeProfileCard vp={a.volumeProfile} dec={dec} shift={broker.offset} />}
-      {a.pipeline && <PipelineCard p={a.pipeline} dec={dec} />}
+      {a.pipeline && <PipelineCard p={a.pipeline} dec={dec} waiting={!go} />}
 
       {/* Verdict */}
       <section
@@ -982,9 +982,11 @@ function ExecutionCard({ x, dec, shift }: { x: M5Execution; dec: number; shift: 
   );
 }
 
-function PipelineCard({ p, dec }: { p: PipelineReport; dec: number }) {
+function PipelineCard({ p, dec, waiting }: { p: PipelineReport; dec: number; waiting: boolean }) {
   const g = p.gemini;
-  const tone = p.status === 'VALIDÉ' ? 'bg-up/15 text-up' : p.status === 'REJETÉ' ? 'bg-down/15 text-down' : 'bg-warn/15 text-warn';
+  // Gemini valide le plan M15 ; si l'exécution M5 n'a pas encore donné d'entrée, ce n'est PAS un signal
+  const pending = waiting && p.status === 'VALIDÉ';
+  const tone = pending ? 'bg-warn/15 text-warn' : p.status === 'VALIDÉ' ? 'bg-up/15 text-up' : p.status === 'REJETÉ' ? 'bg-down/15 text-down' : 'bg-warn/15 text-warn';
   const disagree = g && g.statut === 'VALIDÉ' && p.status === 'REJETÉ';
   return (
     <section className="card p-4">
@@ -992,9 +994,10 @@ function PipelineCard({ p, dec }: { p: PipelineReport; dec: number }) {
         <div className="label flex items-center gap-1.5">
           <Sparkles className="h-3.5 w-3.5 text-gold" /> Pipeline SMC Gemini (double validation)
         </div>
-        <span className={cx('rounded px-1.5 py-0.5 text-xs font-bold', tone)}>{p.status}</span>
+        <span className={cx('rounded px-1.5 py-0.5 text-xs font-bold', tone)}>{pending ? 'PLAN CONFIRMÉ · PAS D’ENTRÉE' : p.status}</span>
       </div>
       <p className="text-xs leading-snug text-ink/90">{p.message}</p>
+      {pending && <p className="mt-1 text-xs text-warn">Gemini confirme le plan du setup M15, mais le moteur attend (exécution M5 ou prix hors zone) : aucun ordre à placer, niveaux indicatifs.</p>}
       {disagree && <p className="mt-1 text-xs text-warn">Gemini avait validé, le contrôle serveur sur les vraies bougies a refusé : on ne trade pas.</p>}
       {g && (
         <ul className="mt-3 space-y-1.5 text-xs">
@@ -1009,7 +1012,8 @@ function PipelineCard({ p, dec }: { p: PipelineReport; dec: number }) {
         </ul>
       )}
       {g?.statut === 'VALIDÉ' && g.direction && g.entree !== null && (
-        <div className="mt-3 grid grid-cols-4 gap-2 rounded-lg bg-card2 px-3 py-2 text-xs">
+        <div className={cx('mt-3 grid grid-cols-4 gap-2 rounded-lg bg-card2 px-3 py-2 text-xs', pending && 'opacity-60')}>
+          {pending && <div className="col-span-4 text-mute">Niveaux indicatifs, pas un ordre</div>}
           <div><div className="text-mute">Sens</div><div className="num font-semibold">{g.direction === 'BUY' ? 'Achat' : 'Vente'}</div></div>
           <div><div className="text-mute">Entrée</div><div className="num">{fmt(g.entree, dec)}</div></div>
           <div><div className="text-mute">Stop</div><div className="num">{fmt(g.stop_loss, dec)}</div></div>
