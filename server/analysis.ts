@@ -211,7 +211,8 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   }
   if (incoherences.length) blockers.push(`Incohérence détectée dans l’analyse (${incoherences[0]}) : pas de signal par sécurité.`);
   // compte FxPro : un signal calculé sur un autre flux que cTrader aurait des niveaux légèrement décalés
-  if (getCTrader() && results.some(r => !/cTrader/.test(r.source)) && !futuresProxy) {
+  const mixedSource = !!getCTrader() && results.some(r => !/cTrader/.test(r.source)) && !futuresProxy;
+  if (mixedSource) {
     blockers.push('cTrader (FxPro) ne répond pas à cet instant : l’analyse a utilisé un flux de secours, dont les prix diffèrent de ceux de ton broker. Pas de signal par sécurité : relance l’analyse dans une minute.');
   }
   if (fromStaleCache) blockers.push('La source de données ne répond plus : données des dernières minutes seulement, pas de signal.');
@@ -286,7 +287,7 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   if (blockers.length || marketIsClosed || futuresProxy) engine.training = null;
   if (blockers.length || marketIsClosed) {
     final.signal = 'attendre';
-    final.plan = futuresProxy ? null : final.plan;
+    final.plan = futuresProxy || mixedSource ? null : final.plan;
     final.notes.unshift(...blockers);
   }
 
@@ -296,8 +297,9 @@ export async function runAnalysis({ pair, provider, image, note, spread, commiss
   const { execution, paused } = applyExecution(pair, engine, final, m5raw, now, costs, info.decimals);
   if (paused) warnings.push(paused);
 
-  if (futuresProxy) {
-    // aucun niveau en prix futures ne doit sortir de l'app
+  if (mixedSource) pipeline = null;
+  if (futuresProxy || mixedSource) {
+    // aucun niveau en prix futures ou en flux de secours ne doit sortir de l'app
     engine.setup = null;
     engine.alternatives = [];
   }
