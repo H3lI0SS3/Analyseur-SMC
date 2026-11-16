@@ -3,6 +3,7 @@
 // Lecture seule : aucun outil ne passe d'ordre chez un broker.
 
 import { ctraderStatus, getCTrader } from './ctrader';
+import { botEnabled } from './autoTrader';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -91,6 +92,8 @@ function buildServer() {
         heure_serveur_utc: new Date().toISOString(),
         // aucun secret : configuré ou non, environnement, dernière erreur, lecture seule
         ctrader: ctraderStatus(),
+        // bot de test démo (aucun secret) : éteint, ou allumé avec l'état du garde-fou (compte démo + droit de trading)
+        bot_test_demo: botEnabled() ? { mode: 'demo', ...(getCTrader()?.tradingGate() ?? { ok: false, reason: 'cTrader non configuré' }) } : { mode: 'éteint (BOT_MODE absent)' },
         version_node: process.version,
       })
   );
