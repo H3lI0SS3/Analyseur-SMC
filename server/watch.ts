@@ -1,11 +1,13 @@
 // Surveillance automatique : appelée toutes les 5 minutes par une tâche programmée externe (cron-job.org),
 // car l'hébergement AI Studio (Cloud Run) se met en veille sans visiteur.
-// Moteur principal + exécution M5 (règles en direct). Aucun ordre n'est passé : on prévient, le trader décide.
+// Moteur principal + exécution M5 (règles en direct). Par défaut aucun ordre n'est passé : on prévient, le trader décide.
+// Exception : le bot de test (autoTrader.ts), éteint sauf BOT_MODE=demo, qui passe les ordres sur le compte DÉMO.
 import { PAIRS } from './marketData';
 import { PAUSED_PAIRS, killzoneStart } from './execution';
 import { getCTrader } from './ctrader';
 import { marketClosed, maTime } from './time';
 import { esc, sendTelegram } from './telegram';
+import type { BotOrder, BotResult } from './autoTrader';
 
 export type AnalyzeFn = (opts: { pair: string; provider?: any }) => Promise<any>;
 export type NotifyFn = (html: string) => Promise<{ ok: boolean; error?: string }>;
@@ -19,6 +21,10 @@ export interface WatchAlert {
   /** texte de l'alerte (identique au message Telegram, sans HTML) */
   text: string;
   telegram: { ok: boolean; error?: string };
+  /** ordre à passer par le bot de test (alertes « ordre » et « test » seulement) */
+  order?: BotOrder;
+  /** résultat du bot (ordre passé ou motif du refus) */
+  bot?: BotResult;
   /** analyse complète : permet « Ajouter au journal » dans l'app tant qu'elle a moins de 10 minutes */
   analysis: any;
 }
@@ -49,6 +55,10 @@ export class Watcher {
       dedup?: (key: string, now: number) => Promise<boolean>;
       /** taille conseillée pour l'ordre (solde réel × risque prévu) */
       sizing?: (pair: string, entry: number, sl: number, kind: 'ordre' | 'test') => Promise<{ lots: number; riskUsd: number; riskPct: number } | null>;
+      /** bot de test (démo) : passe l'ordre d'une alerte ; renvoie null si le bot est éteint */
+      trade?: (o: BotOrder) => Promise<BotResult | null>;
+      /** bot de test (démo) : gestion des positions ouvertes (stop au point d'entrée après TP1) ; messages à envoyer */
+      manage?: () => Promise<string[]>;
     } = {}
   ) {}
 
@@ -59,6 +69,11 @@ export class Watcher {
 
   async tick(now = Date.now()): Promise<TickResult> {
     const result: TickResult = { at: now, skipped: null, checked: [] };
+    // gestion des positions du bot (stop au point d'entrée après TP1) : à chaque passage, même hors kill zone
+    if (this.extras.manage) {
+      const msgs = await this.extras.manage().catch(() => [] as string[]);
+      for (const m of msgs) await this.notify(esc(m)).catch(() => undefined);
+    }
     if (marketClosed(now)) result.skipped = 'Marché fermé.';
     else if (killzoneStart(now) === null && !this.offKillzone())
       result.skipped = 'Hors kill zone (Londres 02–05 h, New York 07–10 h, heure de New York) : aucune entrée possible.';
@@ -74,6 +89,13 @@ export class Watcher {
         const alert = await this.alertFor(a, now);
         if (alert) {
           alert.telegram = await this.notify(toHtml(alert));
+          if (alert.order && this.extras.trade) {
+            const r = await this.extras.trade(alert.order).catch((e: any) => ({ placed: false, message: `🤖 Bot démo : erreur — ${String(e?.message || e).slice(0, 200)}` }));
+            if (r) {
+              alert.bot = r;
+              await this.notify(esc(r.message)).catch(() => undefined);
+            }
+          }
           this.alerts = [alert, ...this.alerts].slice(0, MAX_ALERTS);
         }
         result.checked.push({ pair, verdict: a?.final?.signal ?? '?', stage: a?.execution?.stage ?? null, alert: alert?.kind ?? null });
@@ -112,6 +134,7 @@ export class Watcher {
       : '';
     const howTo = (dir: string, limit: boolean) =>
       limit ? `Sur cTrader : Nouvel ordre → Ordre en attente → Limit → ${dir}. PAS au marché.` : `Sur cTrader : ordre au marché ${dir}.`;
+    const botOn = (process.env.BOT_MODE || '').trim().toLowerCase() === 'demo' && !!this.extras.trade;
     const dec = PAIRS[a.pair]?.decimals ?? 2;
     const f = (v: number | null | undefined) => (v === null || v === undefined ? '—' : Number(v).toFixed(dec));
     const dir = (plan ?? a.engine?.training?.setup)?.direction === 'acheter' ? 'ACHAT' : 'VENTE';
@@ -128,7 +151,7 @@ export class Watcher {
         until ? `Valable jusqu'à ${maTime(until)} (heure du Maroc)` : '',
         x?.message ? `\n${x.message}` : '',
         `\n${howTo(plan.direction === 'acheter' ? 'Buy' : 'Sell', plan.entryType === 'limite')}`,
-        `Stop et TP dans le ticket d'ordre. Rien n'est passé automatiquement.`,
+        `Stop et TP dans le ticket d'ordre. ${botOn ? 'Bot de test démo actif : le résultat arrive dans le message suivant.' : 'Rien n\'est passé automatiquement.'}`,
       ];
     } else if (kind === 'test') {
       const t = a.engine.training;
@@ -143,14 +166,17 @@ export class Watcher {
         p.validUntil ? `Valable jusqu'à ${maTime(p.validUntil)} (heure du Maroc)` : '',
         `\nPas un signal du protocole. Il manque : ${t.missing.join(', ') || '—'}.`,
         `${howTo(p.direction === 'acheter' ? 'Buy' : 'Sell', p.entryType === 'limite')}`,
-        size ? `Rien n'est passé automatiquement.` : `Risque conseillé : 0,25 %. Rien n'est passé automatiquement.`,
+        botOn ? 'Bot de test démo actif : le résultat arrive dans le message suivant.' : size ? `Rien n'est passé automatiquement.` : `Risque conseillé : 0,25 %. Rien n'est passé automatiquement.`,
       ];
     } else {
       title = `🟡 ORA Trader — setup ${dir.toLowerCase()} ${a.pair} en préparation`;
       lines = [x.message, `Je t'envoie l'ordre dès que le CHoCH M5 est confirmé.`];
     }
     const text = [title, ...lines.filter(Boolean)].join('\n');
-    return { id: `${kind}_${now}_${Math.random().toString(36).slice(2, 7)}`, kind, pair: a.pair, at: now, title, text, telegram: { ok: false }, analysis: a };
+    const bo = order && (kind === 'ordre' || kind === 'test')
+      ? { pair: a.pair, kind, direction: order.direction, entryType: order.entryType, entry: order.entry, sl: order.sl, tp1: order.tp1, tp2: order.tp2 ?? null, validUntil: (kind === 'ordre' ? a.engine?.setup?.validUntil : order.validUntil) ?? null, lots: size?.lots ?? null, price: Number(a.engine?.price ?? a.price) }
+      : undefined;
+    return { id: `${kind}_${now}_${Math.random().toString(36).slice(2, 7)}`, kind, pair: a.pair, at: now, title, text, telegram: { ok: false }, order: bo as any, analysis: a };
   }
 }
 

@@ -1,6 +1,7 @@
-// Client cTrader Open API (FxPro) en LECTURE SEULE : bougies M5 / M15 / H1 au prix du broker.
+// Client cTrader Open API (FxPro) : bougies M5 / M15 / H1 au prix du broker, historique, solde.
 // Protocole JSON sur WebSocket (port 5036), messages { clientMsgId, payloadType, payload } — help.ctrader.com/open-api.
-// Aucun message de trading n'est implémenté : l'app ne peut pas passer d'ordre.
+// Trading : uniquement via les méthodes du « bot de test » (placeLimit, cancelOrder, amendPositionSl), qui refusent de
+// partir si le compte n'est pas une DÉMO ou si le jeton n'a pas le droit de trading (voir tradingGate).
 //
 // Variables d'environnement (panneau Secrets d'AI Studio, ou .env en local) :
 //   CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET   application créée sur openapi.ctrader.com
@@ -35,6 +36,16 @@ export const PT = {
   REFRESH_TOKEN_RES: 2174,
   ORDER_LIST_REQ: 2175,
   ORDER_LIST_RES: 2176,
+  // trading (bot de test, démo uniquement)
+  NEW_ORDER_REQ: 2106,
+  CANCEL_ORDER_REQ: 2108,
+  AMEND_POSITION_SLTP_REQ: 2110,
+  RECONCILE_REQ: 2124,
+  RECONCILE_RES: 2125,
+  EXECUTION_EVENT: 2126,
+  ORDER_ERROR_EVENT: 2132,
+  SYMBOL_BY_ID_REQ: 2116,
+  SYMBOL_BY_ID_RES: 2117,
 } as const;
 
 /** Historique : l'API limite une requête de deals / d'ordres à une semaine. */
@@ -210,6 +221,90 @@ export class CTraderClient {
     return null;
   }
 
+
+  // ---------- Trading : bot de test, DÉMO uniquement ----------
+
+  /** Le bot peut-il passer des ordres ? Compte démo (variable ET compte réellement démo) + jeton avec droit de trading. */
+  tradingGate(): { ok: boolean; reason: string } {
+    if (this.cfg.env !== 'demo') return { ok: false, reason: 'CTRADER_ENV n’est pas « demo » : le bot refuse de trader.' };
+    if (this.scope === null) return { ok: false, reason: 'cTrader pas encore connecté : la vérification se fait à la première analyse.' };
+    if (this.scope !== 'SCOPE_TRADE') return { ok: false, reason: 'Le jeton cTrader n’a que le droit de lecture : autorise le trading sur ton compte démo pour activer le bot.' };
+    const acc = this.availableAccounts.find(a => a.login !== null && a.login === this.accountInfo?.login);
+    if (!acc) return { ok: false, reason: 'Compte cTrader non identifié : le bot refuse de trader.' };
+    if (acc.live) return { ok: false, reason: 'Le compte utilisé est un compte RÉEL : le bot ne trade que sur un compte démo.' };
+    return { ok: true, reason: '' };
+  }
+
+  private assertDemo() {
+    const g = this.tradingGate();
+    if (!g.ok) throw new CTraderError('TRADING_REFUSED', g.reason);
+  }
+
+  /** Volume (en 1/100 d'unité), pas et minimum du symbole chez le broker. */
+  async symbolSpec(pair: string): Promise<{ symbolId: number; digits: number; lotSize: number; minVolume: number; stepVolume: number; maxVolume: number }> {
+    await this.connect();
+    const symbolId = this.symbolIds.get(pair);
+    if (!symbolId) throw new CTraderError('NO_SYMBOL', `Symbole ${pair} introuvable chez le broker.`);
+    const r = await this.request(PT.SYMBOL_BY_ID_REQ, { ctidTraderAccountId: this.accountId, symbolId: [symbolId] }, PT.SYMBOL_BY_ID_RES);
+    const sym = (r?.symbol ?? [])[0];
+    const lotSize = Number(sym?.lotSize);
+    const step = Number(sym?.stepVolume);
+    if (!Number.isFinite(lotSize) || lotSize <= 0 || !Number.isFinite(step) || step <= 0) throw new CTraderError('NO_SPEC', `Caractéristiques de ${pair} illisibles (lot, pas).`);
+    return {
+      symbolId,
+      digits: Number(sym?.digits ?? 5),
+      lotSize,
+      minVolume: Number(sym?.minVolume ?? step),
+      stepVolume: step,
+      maxVolume: Number(sym?.maxVolume ?? Number.MAX_SAFE_INTEGER),
+    };
+  }
+
+  /** Positions et ordres en attente du compte. */
+  async reconcile(): Promise<{ positions: any[]; orders: any[] }> {
+    await this.connect();
+    const r = await this.request(PT.RECONCILE_REQ, { ctidTraderAccountId: this.accountId }, PT.RECONCILE_RES);
+    return { positions: r?.position ?? [], orders: r?.order ?? [] };
+  }
+
+  /** Ordre LIMIT avec stop et objectif, valable jusqu'à expiresAt. Refusé si le compte n'est pas une démo. */
+  async placeLimit(o: { pair: string; side: 'BUY' | 'SELL'; volume: number; limit: number; sl: number; tp: number | null; expiresAt: number; label: string; comment: string }): Promise<void> {
+    this.assertDemo();
+    await this.connect();
+    const symbolId = this.symbolIds.get(o.pair);
+    if (!symbolId) throw new CTraderError('NO_SYMBOL', `Symbole ${o.pair} introuvable chez le broker.`);
+    const payload: any = {
+      ctidTraderAccountId: this.accountId,
+      symbolId,
+      orderType: 2, // LIMIT
+      tradeSide: o.side === 'BUY' ? 1 : 2,
+      volume: o.volume,
+      limitPrice: o.limit,
+      stopLoss: o.sl,
+      timeInForce: 1, // GOOD_TILL_DATE
+      expirationTimestamp: Math.round(o.expiresAt),
+      label: o.label.slice(0, 100),
+      comment: o.comment.slice(0, 512),
+    };
+    if (o.tp !== null) payload.takeProfit = o.tp;
+    await this.request(PT.NEW_ORDER_REQ, payload, PT.EXECUTION_EVENT);
+  }
+
+  async cancelOrder(orderId: number): Promise<void> {
+    this.assertDemo();
+    await this.connect();
+    await this.request(PT.CANCEL_ORDER_REQ, { ctidTraderAccountId: this.accountId, orderId }, PT.EXECUTION_EVENT);
+  }
+
+  /** Déplace le stop (et conserve l'objectif) d'une position ouverte. */
+  async amendPositionSl(positionId: number, sl: number, tp: number | null): Promise<void> {
+    this.assertDemo();
+    await this.connect();
+    const payload: any = { ctidTraderAccountId: this.accountId, positionId, stopLoss: sl };
+    if (tp !== null) payload.takeProfit = tp;
+    await this.request(PT.AMEND_POSITION_SLTP_REQ, payload, PT.EXECUTION_EVENT);
+  }
+
   /** Solde du compte (lecture seule, ProtoOATraderReq). Cache 60 s. */
   async balance(): Promise<{ balance: number; at: number }> {
     if (this.balanceCache && Date.now() - this.balanceCache.at < 60_000) return this.balanceCache;
@@ -285,7 +380,7 @@ export class CTraderClient {
     // énumération en texte ou en nombre selon l'encodage JSON (SCOPE_VIEW = 0, SCOPE_TRADE = 1) ; absente = valeur par défaut 0
     const sc = res?.permissionScope;
     this.scope = sc === 1 || sc === '1' || sc === 'SCOPE_TRADE' ? 'SCOPE_TRADE' : 'SCOPE_VIEW';
-    if (this.scope === 'SCOPE_TRADE') console.warn('[cTrader] Jeton avec droit de trading : l’app ne l’utilise qu’en lecture, mais un jeton « accounts » (lecture seule) est plus sûr.');
+    if (this.scope === 'SCOPE_TRADE' && process.env.BOT_MODE !== 'demo') console.warn('[cTrader] Jeton avec droit de trading alors que le bot de test est éteint (BOT_MODE) : un jeton « accounts » (lecture seule) est plus sûr.');
     const accounts: any[] = res?.ctidTraderAccount ?? [];
     const login = (a: any) => (a?.traderLogin !== undefined && a?.traderLogin !== null ? Number(a.traderLogin) : null);
     this.availableAccounts = accounts.map(a => ({ login: login(a), live: !!a.isLive, broker: a.brokerTitleShort ?? null }));
@@ -392,7 +487,7 @@ export class CTraderClient {
     if (!p) return;
     this.pending.delete(msg.clientMsgId);
     clearTimeout(p.timer);
-    if (type === PT.ERROR_RES || type === PT.COMMON_ERROR) {
+    if (type === PT.ERROR_RES || type === PT.COMMON_ERROR || type === PT.ORDER_ERROR_EVENT) {
       const code = String(msg.payload?.errorCode ?? 'ERROR');
       const desc = String(msg.payload?.description ?? '');
       const ra = Number(msg.payload?.retryAfter);

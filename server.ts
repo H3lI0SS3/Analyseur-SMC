@@ -10,6 +10,7 @@ import { mountMcp } from './server/mcp';
 import { RULES_VERSION } from './server/smc';
 import { advanceAll, getJob, startBacktest, advanceJobAsync } from './server/backtestJobs';
 import { getWatcher } from './server/watch';
+import { AutoTrader, botEnabled } from './server/autoTrader';
 import { sendTelegram, telegramChats, telegramConfig } from './server/telegram';
 import { ctraderStatus, getCTrader } from './server/ctrader';
 import { getJournalStore } from './server/journalStore';
@@ -57,6 +58,7 @@ app.get('/api/status', (_req, res) => {
     ctrader: ctraderStatus(),
     telegram: !!telegramConfig(),
     watchConfigured: (process.env.WATCH_SECRET || '').trim().length >= 16,
+    bot: botEnabled() ? { mode: 'demo', ...(getCTrader()?.tradingGate() ?? { ok: false, reason: 'cTrader non configuré' }) } : { mode: 'éteint' },
     pairs: Object.values(PAIRS).map(p => ({ id: p.id, label: p.label, decimals: p.decimals, pipSize: p.pipSize, contract: p.contract, defaultSpread: p.defaultSpread })),
   });
 });
@@ -81,6 +83,13 @@ app.get('/api/candles', async (req, res) => {
 // ---------- Surveillance automatique (tâche programmée toutes les 5 min) + alertes Telegram ----------
 /** Commission aller-retour par lot sur FxPro cTrader (même hypothèse que le backtest). */
 const COMMISSION_PER_LOT = 7;
+let botInstance: AutoTrader | null = null;
+/** Le bot de test (une seule instance : elle garde le compteur d'ordres du jour) ; null s'il est éteint. */
+function theBot(): AutoTrader | null {
+  const ct = botEnabled() ? getCTrader() : null;
+  if (!ct) return null;
+  return (botInstance ??= new AutoTrader(ct));
+}
 const watcher = getWatcher(opts => runAnalysis(opts), {
   // déduplication persistante : la même alerte ne repart pas après un redémarrage ou sur une autre instance
   dedup: (key, now) => (getJournalStore().persistent ? getJournalStore().markRiskAlert(`alert|${key}`, now) : Promise.resolve(true)),
@@ -96,6 +105,15 @@ const watcher = getWatcher(opts => runAnalysis(opts), {
     const lots = Math.floor(((j.balance * pct) / 100 / lossPerLot) * 100) / 100;
     if (lots <= 0) return null;
     return { lots, riskUsd: lots * lossPerLot, riskPct: pct };
+  },
+  // bot de test : éteint sauf BOT_MODE=demo ; refuse tout compte réel ou jeton sans droit de trading (voir autoTrader.ts)
+  trade: async o => {
+    const bot = theBot();
+    return bot ? bot.place(o) : null;
+  },
+  manage: async () => {
+    const bot = theBot();
+    return bot ? bot.manage() : [];
   },
 });
 /** Vérifie WATCH_SECRET (paramètre ?key= ou en-tête X-Watch-Key), en temps constant. */
