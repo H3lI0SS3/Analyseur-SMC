@@ -17,6 +17,23 @@ export interface SignalRec {
   zone: string | null;
 }
 export type TradeKind = 'protocole' | 'test' | 'hors';
+/** Ce que fait le bot de test démo : un événement par ordre passé, refusé, stop remonté ou erreur. */
+export interface BotEvent {
+  id: string;
+  at: number;
+  type: 'ordre_passe' | 'refuse' | 'stop_remonte' | 'erreur';
+  pair?: string;
+  kind?: 'ordre' | 'test';
+  direction?: 'acheter' | 'vendre';
+  entry?: number;
+  sl?: number;
+  tp1?: number;
+  tp2?: number | null;
+  lots?: number;
+  /** identifiant du trade du bot (étiquette ORA|<botId>|A / B dans cTrader) */
+  botId?: string;
+  message: string;
+}
 export interface Annotation {
   kind?: TradeKind;
   note?: string;
@@ -29,11 +46,14 @@ export interface StoreData {
   annotations: Record<string, Annotation>;
   /** alertes de risque déjà envoyées (clé → heure), pour ne pas les répéter */
   riskAlerts?: Record<string, number>;
+  /** historique du bot de test démo (300 derniers événements) */
+  botLog?: BotEvent[];
 }
 
 const FILE_NAME = 'ora-journal.json';
 const CAPTION = 'Sauvegarde du journal ORA Trader (mise à jour automatique) — ne pas désépingler ni supprimer.';
 const MAX_SIGNALS = 1500;
+const MAX_BOT_EVENTS = 300;
 const empty = (): StoreData => ({ v: 1, signals: [], annotations: {} });
 
 export class JournalStore {
@@ -102,6 +122,16 @@ export class JournalStore {
     return true;
   }
 
+  /** Ajoute un événement du bot à l'historique (ignoré s'il existe déjà). */
+  async addBotEvent(e: BotEvent): Promise<void> {
+    const d = await this.get();
+    d.botLog ??= [];
+    if (d.botLog.some(x => x.id === e.id)) return;
+    d.botLog.push(e);
+    if (d.botLog.length > MAX_BOT_EVENTS) d.botLog.splice(0, d.botLog.length - MAX_BOT_EVENTS);
+    this.scheduleSave();
+  }
+
   async annotate(positionId: string, a: Annotation): Promise<Annotation> {
     const d = await this.get();
     const cur = { ...(d.annotations[positionId] ?? {}) };
@@ -168,7 +198,7 @@ export class JournalStore {
     const res = await this.fetchImpl(`https://api.telegram.org/file/bot${cfg.token}/${file.file_path}`, { signal: AbortSignal.timeout(10_000) });
     const json: any = await res.json();
     if (json?.v !== 1 || !Array.isArray(json.signals)) return empty();
-    return { v: 1, signals: json.signals, annotations: json.annotations ?? {}, riskAlerts: json.riskAlerts ?? {} };
+    return { v: 1, signals: json.signals, annotations: json.annotations ?? {}, riskAlerts: json.riskAlerts ?? {}, botLog: Array.isArray(json.botLog) ? json.botLog : [] };
   }
 
   /** Fusion avec le fichier relu (autre instance, autre appareil) : rien n'est perdu, nos annotations récentes priment. */
@@ -177,7 +207,9 @@ export class JournalStore {
     const signals = [...theirs.signals.filter(x => !ids.has(x.id)), ...mine.signals].sort((a, b) => a.at - b.at).slice(-MAX_SIGNALS);
     const annotations = { ...theirs.annotations };
     for (const [k, v] of Object.entries(mine.annotations)) annotations[k] = { ...(annotations[k] ?? {}), ...v };
-    return { v: 1, signals, annotations, riskAlerts: { ...(theirs.riskAlerts ?? {}), ...(mine.riskAlerts ?? {}) } };
+    const bids = new Set((mine.botLog ?? []).map(x => x.id));
+    const botLog = [...(theirs.botLog ?? []).filter(x => !bids.has(x.id)), ...(mine.botLog ?? [])].sort((a, b) => a.at - b.at).slice(-MAX_BOT_EVENTS);
+    return { v: 1, signals, annotations, riskAlerts: { ...(theirs.riskAlerts ?? {}), ...(mine.riskAlerts ?? {}) }, botLog };
   }
 
   private async save() {

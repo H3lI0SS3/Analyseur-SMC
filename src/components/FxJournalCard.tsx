@@ -41,6 +41,8 @@ interface FxTradeView {
   kind: 'protocole' | 'test' | 'hors';
   kindSource: 'signal' | 'saisi' | 'aucun';
   signal: { entry: number; sl: number; at: number } | null;
+  botId?: string | null;
+  botPart?: 'A' | 'B' | null;
   gaps: string[];
   note: string;
 }
@@ -55,7 +57,25 @@ export interface FxDeskView {
   maxTradesPerDay: number;
   maxLossesInARow: number;
 }
+export interface BotEventView {
+  id: string;
+  at: number;
+  type: 'ordre_passe' | 'refuse' | 'stop_remonte' | 'erreur';
+  pair?: string;
+  kind?: 'ordre' | 'test';
+  direction?: 'acheter' | 'vendre';
+  entry?: number;
+  sl?: number;
+  tp1?: number;
+  tp2?: number | null;
+  lots?: number;
+  botId?: string;
+  message: string;
+}
 export interface FxJournalView {
+  botStatus?: { mode: string; ok: boolean; reason: string };
+  botEvents?: BotEventView[];
+  botStats?: FxStatsView;
   balance: number | null;
   policy: { protocolRiskPct: number; testRiskPct: number; rampTrades: number; appTradesClosed: number };
   desk: FxDeskView;

@@ -1,6 +1,7 @@
 // Bot de test démo : npx tsx server/autoTrader.test.ts
 process.env.BOT_MODE = 'demo';
 import { AutoTrader, botEnabled, botKinds, splitVolume, volumeFor, type BotOrder, type Spec, type TradingPort } from './autoTrader';
+import { JournalStore } from './journalStore';
 import { CTraderClient, CTraderError, ctraderConfig } from './ctrader';
 
 let failed = 0;
@@ -133,6 +134,17 @@ const sell: BotOrder = { pair: 'EUR/USD', kind: 'ordre', direction: 'vendre', en
     refused = e instanceof CTraderError && e.code === 'TRADING_REFUSED';
   }
   ok('placeLimit lève TRADING_REFUSED sans autorisation (aucun message envoyé)', refused);
+
+  // Historique du bot : persistance en mémoire, dédoublonnage, plafond
+  const store = new JournalStore({}, (async () => ({ ok: false })) as any, 1_000_000);
+  const ev = (i: number) => ({ id: 'e' + i, at: i, type: 'ordre_passe' as const, pair: 'EUR/USD', kind: 'ordre' as const, botId: 'b' + i, message: 'm' });
+  await store.addBotEvent(ev(1));
+  await store.addBotEvent(ev(1));
+  await store.addBotEvent(ev(2));
+  const d: any = await store.get();
+  ok('Historique bot : dédoublonné par id', d.botLog.length === 2);
+  for (let i = 3; i < 400; i++) await store.addBotEvent(ev(i));
+  ok('Historique bot : plafonné à 300 événements', ((await store.get()) as any).botLog.length === 300);
 
   console.log(failed ? `\n${failed} échec(s)` : '\nTous les tests du bot démo passent.');
   process.exit(failed ? 1 : 0);

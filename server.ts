@@ -15,7 +15,7 @@ import { sendTelegram, telegramChats, telegramConfig } from './server/telegram';
 import { ctraderStatus, getCTrader } from './server/ctrader';
 import { getJournalStore } from './server/journalStore';
 import { checkRisk } from './server/riskWatch';
-import { CONTRACT, getFxJournal, invalidateFxJournal, validStop } from './server/fxJournal';
+import { CONTRACT, fxStats, getFxJournal, invalidateFxJournal, validStop } from './server/fxJournal';
 
 dotenv.config();
 
@@ -109,11 +109,40 @@ const watcher = getWatcher(opts => runAnalysis(opts), {
   // bot de test : éteint sauf BOT_MODE=demo ; refuse tout compte réel ou jeton sans droit de trading (voir autoTrader.ts)
   trade: async o => {
     const bot = theBot();
-    return bot ? bot.place(o) : null;
+    if (!bot) return null;
+    const r = await bot.place(o);
+    const d = r.detail;
+    await getJournalStore().addBotEvent({
+      id: `bot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      at: Date.now(),
+      type: r.placed ? 'ordre_passe' : 'refuse',
+      pair: o.pair,
+      kind: o.kind,
+      direction: o.direction,
+      entry: d?.entry ?? o.entry,
+      sl: d?.sl ?? o.sl,
+      tp1: d?.tp1 ?? o.tp1,
+      tp2: d ? d.tp2 : o.tp2,
+      ...(d ? { lots: d.lots, botId: d.botId } : {}),
+      message: r.message.replace(/^🤖 Bot démo : /, ''),
+    }).catch(() => undefined);
+    invalidateFxJournal();
+    return r;
   },
   manage: async () => {
     const bot = theBot();
-    return bot ? bot.manage() : [];
+    if (!bot) return [];
+    const msgs = await bot.manage();
+    for (const m of msgs) {
+      await getJournalStore().addBotEvent({
+        id: `bot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        at: Date.now(),
+        type: /erreur/i.test(m) ? 'erreur' : 'stop_remonte',
+        message: m.replace(/^🤖 Bot démo : /, ''),
+      }).catch(() => undefined);
+    }
+    if (msgs.length) invalidateFxJournal();
+    return msgs;
   },
 });
 /** Vérifie WATCH_SECRET (paramètre ?key= ou en-tête X-Watch-Key), en temps constant. */
@@ -171,7 +200,16 @@ app.get('/api/alerts', (_req, res) => {
 const decimalsByPair = Object.fromEntries(Object.entries(PAIRS).map(([id, p]) => [id, p.decimals]));
 app.get('/api/journal', async (req, res) => {
   if (req.query.refresh) invalidateFxJournal();
-  res.json(await getFxJournal(getCTrader(), getJournalStore(), decimalsByPair));
+  const j = await getFxJournal(getCTrader(), getJournalStore(), decimalsByPair);
+  const botTrades = j.trades.filter(t => t.botId);
+  const data = await getJournalStore().get();
+  res.json({
+    ...j,
+    // bot de test démo : état, historique de ses décisions et statistiques de ses trades
+    botStatus: botEnabled() ? { mode: 'demo', ...(getCTrader()?.tradingGate() ?? { ok: false, reason: 'cTrader non configuré' }) } : { mode: 'éteint', ok: false, reason: 'BOT_MODE absent des Secrets.' },
+    botEvents: (data.botLog ?? []).slice(-80).reverse(),
+    botStats: fxStats(botTrades),
+  });
 });
 app.post('/api/journal/annotate', async (req, res) => {
   const { positionId, kind, note, sl } = req.body ?? {};

@@ -4,6 +4,7 @@ import { CandleChart } from './components/CandleChart';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { JournalView } from './components/JournalView';
 import { FxJournalCard, useFxJournal } from './components/FxJournalCard';
+import { BotCard } from './components/BotCard';
 import { SettingsView } from './components/SettingsView';
 import { BacktestCard } from './components/BacktestCard';
 import { AlertsCard } from './components/AlertsCard';
@@ -325,6 +326,7 @@ export default function App() {
         )}
         {tab === 'journal' && (
           <>
+            <BotCard data={fx.data} />
             <FxJournalCard data={fx.data} reload={fx.reload} />
             {fx.error && !fx.data && <p className="card border-warn/50 px-4 py-3 text-sm text-warn">{fx.error}</p>}
             {journal.length > 0 && (

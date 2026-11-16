@@ -61,6 +61,9 @@ export interface FxTrade {
   kind: TradeKind;
   kindSource: 'signal' | 'saisi' | 'aucun';
   signal: SignalRec | null;
+  /** trade ouvert par le bot de test démo : identifiant (étiquette ORA|id|A/B) et moitié (A = vers TP1, B = vers TP2) */
+  botId: string | null;
+  botPart: 'A' | 'B' | null;
   /** écarts avec le plan proposé (entrée au marché au lieu de la limite, etc.) */
   gaps: string[];
   note: string;
@@ -218,7 +221,11 @@ export function buildTrades(deals: any[], orders: any[], pairOf: (symbolId: numb
     const stopRejected = stop === null ? (num(ann.sl) ?? rawOrderStop ?? null) : null;
     const riskUsd = stop !== null && units ? Math.abs(entry - stop) * units : null;
     const r = isClosed && net !== null && riskUsd ? Number((net / riskUsd).toFixed(2)) : null;
-    const kind: TradeKind = ann.kind ?? signal?.kind ?? 'hors';
+    // trade du bot : étiquette de l'ordre d'ouverture (ORA|<id>|A ou B) ; son type vient de l'historique du bot
+    const lbl = /^ORA\|([a-z0-9]+)\|([AB])$/.exec(String(openOrder?.tradeData?.label ?? openOrder?.label ?? ''));
+    const botId = lbl ? lbl[1] : null;
+    const botKind = botId ? store.botLog?.find(e => e.botId === botId && e.kind)?.kind : undefined;
+    const kind: TradeKind = ann.kind ?? signal?.kind ?? (botKind === 'ordre' ? 'protocole' : botKind === 'test' ? 'test' : 'hors');
     const gaps: string[] = [];
     if (signal) {
       const tol = 10 ** -dec * (pair === 'XAU/USD' ? 50 : 5);
@@ -246,8 +253,10 @@ export function buildTrades(deals: any[], orders: any[], pairOf: (symbolId: numb
       riskUsd: riskUsd === null ? null : Number(riskUsd.toFixed(2)),
       r,
       kind,
-      kindSource: ann.kind ? 'saisi' : signal ? 'signal' : 'aucun',
+      kindSource: ann.kind ? 'saisi' : signal || botKind ? 'signal' : 'aucun',
       signal,
+      botId,
+      botPart: lbl ? (lbl[2] as 'A' | 'B') : null,
       gaps,
       note: ann.note ?? '',
     });

@@ -46,6 +46,8 @@ export interface BotResult {
   placed: boolean;
   /** message prêt à afficher / envoyer sur Telegram */
   message: string;
+  /** détail d'un ordre passé (pour l'historique) */
+  detail?: { botId: string; lots: number; entry: number; sl: number; tp1: number; tp2: number | null };
 }
 
 export const BOT_LABEL = 'ORA';
@@ -136,6 +138,7 @@ export class AutoTrader {
       const lots = total / spec.lotSize;
       return {
         placed: true,
+        detail: { botId: id, lots: Number(lots.toFixed(2)), entry: common.limit, sl: common.sl, tp1: round(o.tp1, d), tp2: parts ? round(o.tp2!, d) : null },
         message: `🤖 Bot démo : ordre ${side} LIMIT ${o.pair} passé — ${lots.toFixed(2)} lot @ ${common.limit}, stop ${common.sl}, TP1 ${round(o.tp1, d)}${parts ? `, TP2 ${round(o.tp2!, d)} (moitié / moitié)` : ' (tout à TP1)'}. Valable jusqu'à ${new Date(expiresAt).toISOString().slice(11, 16)} UTC.`,
       };
     } catch (e: any) {
