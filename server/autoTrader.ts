@@ -179,6 +179,8 @@ export class AutoTrader {
         out.push(`🤖 Bot démo : TP1 touché sur ${t.id}, stop de la 2e moitié remonté au point d’entrée (${entry}).`);
       }
     } catch (e: any) {
+      // coupure de connexion passagère : la surveillance repasse au prochain passage, inutile d'alerter
+      if (['CLOSED', 'CONNECTION', 'TIMEOUT'].includes(e?.code)) return out;
       out.push(`🤖 Bot démo : gestion du stop en erreur — ${String(e?.message || e).slice(0, 200)}. Vérifie ta position dans cTrader.`);
     }
     return out;

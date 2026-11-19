@@ -262,8 +262,18 @@ export class CTraderClient {
 
   /** Positions et ordres en attente du compte. */
   async reconcile(): Promise<{ positions: any[]; orders: any[] }> {
-    await this.connect();
-    const r = await this.request(PT.RECONCILE_REQ, { ctidTraderAccountId: this.accountId }, PT.RECONCILE_RES);
+    let r: any;
+    // la connexion se ferme seule après 5 min d'inactivité (ou si une autre requête la réinitialise) : on la rouvre une fois
+    for (let essai = 0; ; essai++) {
+      try {
+        await this.connect();
+        r = await this.request(PT.RECONCILE_REQ, { ctidTraderAccountId: this.accountId }, PT.RECONCILE_RES);
+        break;
+      } catch (e: any) {
+        if (essai >= 1 || e?.code !== 'CLOSED') throw e;
+        await new Promise(res => setTimeout(res, 500));
+      }
+    }
     return { positions: r?.position ?? [], orders: r?.order ?? [] };
   }
 

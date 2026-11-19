@@ -135,6 +135,14 @@ const sell: BotOrder = { pair: 'EUR/USD', kind: 'ordre', direction: 'vendre', en
   }
   ok('placeLimit lève TRADING_REFUSED sans autorisation (aucun message envoyé)', refused);
 
+  // coupure passagère de la connexion : pas d'alerte parasite ; vraie erreur : alerte
+  const coupure = fake();
+  coupure.port.reconcile = async () => { throw new CTraderError('CLOSED', 'Connexion cTrader fermée.'); };
+  ok('manage : connexion fermée → aucune alerte parasite', (await new AutoTrader(coupure.port, 3, () => NOW).manage()).length === 0);
+  const vraie = fake();
+  vraie.port.reconcile = async () => { throw new Error('boum'); };
+  ok('manage : vraie erreur → alerte', (await new AutoTrader(vraie.port, 3, () => NOW).manage()).length === 1);
+
   // Historique du bot : persistance en mémoire, dédoublonnage, plafond
   const store = new JournalStore({}, (async () => ({ ok: false })) as any, 1_000_000);
   const ev = (i: number) => ({ id: 'e' + i, at: i, type: 'ordre_passe' as const, pair: 'EUR/USD', kind: 'ordre' as const, botId: 'b' + i, message: 'm' });
